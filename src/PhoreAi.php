@@ -8,7 +8,7 @@ use InvalidArgumentException;
 use JsonException;
 use Phore\AiHarness\Client\AiRequest;
 use Phore\AiHarness\Client\OpenAiClient;
-use Phore\AiHarness\Client\OpenAiPromptTypeConverter;
+use Phore\AiHarness\Client\OpenAI\OpenAiPromptTypeConverter;
 use Phore\AiHarness\Helper\DataUrl;
 use Phore\AiHarness\Helper\Toolkit;
 use Phore\AiHarness\Keystore\Keystore;

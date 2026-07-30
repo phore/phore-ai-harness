@@ -90,6 +90,10 @@ final readonly class DataUrl
             'png' => 'image/png',
             'gif' => 'image/gif',
             'webp' => 'image/webp',
+            'txt', 'md' => 'text/plain',
+            'pdf' => 'application/pdf',
+            'mp3' => 'audio/mpeg',
+            'wav' => 'audio/wav',
             default => null,
         };
     }

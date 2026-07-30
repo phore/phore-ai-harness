@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Phore\AiHarness\PromptType\AudioPrompt;
 use Phore\AiHarness\PromptType\FilePrompt;
 use Phore\AiHarness\PromptType\ImagePrompt;
 use Phore\AiHarness\PromptType\StructPrompt;
@@ -67,6 +68,7 @@ final class PromptTypeTest extends TestCase
             'type' => 'file',
             'fileName' => 'example.txt',
             'content' => 'File content',
+            'contentType' => 'application/octet-stream',
         ], $prompt->toArray());
     }
 
@@ -78,6 +80,32 @@ final class PromptTypeTest extends TestCase
 
         self::assertSame($fileName, $prompt->fileName);
         self::assertSame('File prompt content', $prompt->content);
+        self::assertNotSame('', $prompt->contentType);
+    }
+
+    public function testAudioPrompt(): void
+    {
+        $prompt = new AudioPrompt('base64-audio', 'mp3', 'audio.mp3');
+
+        self::assertSame('audio', $prompt->type());
+        self::assertSame([
+            'type' => 'audio',
+            'data' => 'base64-audio',
+            'format' => 'mp3',
+            'fileName' => 'audio.mp3',
+        ], $prompt->toArray());
+    }
+
+    public function testAudioPromptFromFile(): void
+    {
+        $fileName = sys_get_temp_dir() . '/phore-ai-audio-' . bin2hex(random_bytes(4)) . '.mp3';
+        file_put_contents($fileName, 'audio-binary');
+
+        $prompt = AudioPrompt::fromFile($fileName);
+
+        self::assertSame($fileName, $prompt->fileName);
+        self::assertSame('mp3', $prompt->format);
+        self::assertSame(base64_encode('audio-binary'), $prompt->data);
     }
 
     public function testImagePrompt(): void

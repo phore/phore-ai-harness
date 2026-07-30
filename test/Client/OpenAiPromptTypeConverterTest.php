@@ -3,7 +3,9 @@
 declare(strict_types=1);
 
 use Phore\AiHarness\Client\AiRequest;
-use Phore\AiHarness\Client\OpenAiPromptTypeConverter;
+use Phore\AiHarness\Client\OpenAI\OpenAiPromptToContentConverter;
+use Phore\AiHarness\Client\OpenAI\OpenAiPromptTypeConverter;
+use Phore\AiHarness\PromptType\AudioPrompt;
 use Phore\AiHarness\PromptType\FilePrompt;
 use Phore\AiHarness\PromptType\ImagePrompt;
 use Phore\AiHarness\PromptType\StructPrompt;
@@ -22,11 +24,19 @@ final readonly class OpenAiPromptTypeConverterTestAddress
 
 final class OpenAiPromptTypeConverterTest extends TestCase
 {
-    public function testConvertsSingleTextPromptToStringInput(): void
+    public function testConvertsSingleTextPromptToInputTextContentSection(): void
     {
         $payload = (new OpenAiPromptTypeConverter())->convert(new TextPrompt('Hello'));
 
-        self::assertSame(['input' => 'Hello'], $payload);
+        self::assertSame([
+            'input' => [[
+                'role' => 'user',
+                'content' => [[
+                    'type' => 'input_text',
+                    'text' => 'Hello',
+                ]],
+            ]],
+        ], $payload);
     }
 
     public function testConvertsSystemPromptToInstructions(): void
@@ -36,37 +46,59 @@ final class OpenAiPromptTypeConverterTest extends TestCase
             new TextPrompt('Hello'),
         ]);
 
-        self::assertSame('Hello', $payload['input']);
+        self::assertSame([[// user message
+            'role' => 'user',
+            'content' => [[
+                'type' => 'input_text',
+                'text' => 'Hello',
+            ]],
+        ]], $payload['input']);
         self::assertSame('Answer in German.', $payload['instructions']);
     }
 
-    public function testConvertsMultipleUserPromptsToMessages(): void
+    public function testConvertsMultipleUserPromptsToContentSections(): void
     {
         $payload = (new OpenAiPromptTypeConverter())->convert([
-            new TextPrompt('Summarize this file.'),
-            new FilePrompt('example.txt', 'File content'),
+            new TextPrompt('Analysiere die folgenden Dateien.'),
+            new FilePrompt('styleguide.md', 'File content', 'text/markdown'),
+            new ImagePrompt('data:image/png;base64,abc', 'image.png', 'image/png'),
+            new AudioPrompt('base64-audio', 'mp3'),
         ]);
 
-        self::assertSame('Summarize this file.', $payload['input'][0]['content']);
-        self::assertStringContainsString('File: example.txt', $payload['input'][1]['content']);
-        self::assertStringContainsString('File content', $payload['input'][1]['content']);
-    }
-
-    public function testConvertsImagePromptToOpenAiImageContent(): void
-    {
-        $payload = (new OpenAiPromptTypeConverter())->convert(new ImagePrompt('data:image/png;base64,abc', 'image.png', 'image/png'));
-
+        self::assertSame('user', $payload['input'][0]['role']);
         self::assertSame([
             [
-                'role' => 'user',
-                'content' => [
-                    [
-                        'type' => 'input_image',
-                        'image_url' => 'data:image/png;base64,abc',
-                    ],
-                ],
+                'type' => 'input_text',
+                'text' => 'Analysiere die folgenden Dateien.',
             ],
-        ], $payload['input']);
+            [
+                'type' => 'input_file',
+                'filename' => 'styleguide.md',
+                'file_data' => 'data:text/markdown;base64,' . base64_encode('File content'),
+            ],
+            [
+                'type' => 'input_image',
+                'image_url' => 'data:image/png;base64,abc',
+            ],
+            [
+                'type' => 'input_audio',
+                'format' => 'mp3',
+                'data' => 'base64-audio',
+            ],
+        ], $payload['input'][0]['content']);
+    }
+
+    public function testContentConverterBuildsSingleContentSections(): void
+    {
+        $sections = (new OpenAiPromptToContentConverter())->convert([
+            new TextPrompt('Hello'),
+            new ImagePrompt('data:image/png;base64,abc'),
+        ]);
+
+        self::assertSame([
+            ['type' => 'input_text', 'text' => 'Hello'],
+            ['type' => 'input_image', 'image_url' => 'data:image/png;base64,abc'],
+        ], $sections);
     }
 
     public function testConvertsStructPromptWithObjectToJsonSchemaAndDataText(): void
@@ -101,7 +133,13 @@ final class OpenAiPromptTypeConverterTest extends TestCase
         self::assertInstanceOf(AiRequest::class, $request);
         self::assertSame([
             'model' => 'gpt-5-mini',
-            'input' => 'Hello',
+            'input' => [[
+                'role' => 'user',
+                'content' => [[
+                    'type' => 'input_text',
+                    'text' => 'Hello',
+                ]],
+            ]],
             'instructions' => 'Be short.',
         ], $request->toArray());
     }
