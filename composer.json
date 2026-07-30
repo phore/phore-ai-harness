@@ -11,7 +11,7 @@
   ],
   "autoload": {
     "psr-4": {
-      "Phore\\FileSystem\\": "src/"
+      "Phore\\AiHarness\\": "src/"
     },
     "files": [
       "src/functions.php"
@@ -19,6 +19,7 @@
   },
   "require": {
     "php" : ">=8.3",
+    "ext-curl": "*",
     "ext-yaml": "*",
     "ext-json": "*"
   },
