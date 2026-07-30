@@ -4,13 +4,34 @@ on: [push]
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
-    
+    container:
+      image: php:8.4-cli
+
     steps:
-    - uses: actions/checkout@v1
-    - name: Download kickstart
-      run: curl -o ./kickstart.sh 'https://raw.githubusercontent.com/nfra-project/nfra-kickstart/master/dist/kickstart.sh' && chmod +x ./kickstart.sh
-    - name: UnitTests
-      run: ./kickstart.sh :test
-  
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            git \
+            unzip \
+            libyaml-dev \
+            $PHPIZE_DEPS
+          pecl install yaml
+          docker-php-ext-enable yaml
+
+      - name: Install Composer
+        run: |
+          php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
+          php composer-setup.php --install-dir=/usr/local/bin --filename=composer
+          php -r "unlink('composer-setup.php');"
+          composer --version
+
+      - name: Install dependencies
+        run: composer install --no-interaction --prefer-dist --no-progress
+
+      - name: UnitTests
+        run: vendor/bin/phpunit -c phpunit.xml.dist

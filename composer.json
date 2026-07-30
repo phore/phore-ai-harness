@@ -18,7 +18,8 @@
     ]
   },
   "require": {
-    "php" : ">=8.3",
+    "php" : ">=8.5",
+    "phore/schema": "dev-main",
     "ext-curl": "*",
     "ext-yaml": "*",
     "ext-json": "*"

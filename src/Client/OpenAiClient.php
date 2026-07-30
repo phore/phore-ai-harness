@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace Phore\AiHarness\Client;
 
 use CurlHandle;
+use Phore\AiHarness\Helper\DataUrl;
+use Phore\AiHarness\Helper\Toolkit;
+use Phore\AiHarness\Keystore\Keystore;
+use Phore\AiHarness\Result\ImageResultType;
 use RuntimeException;
 
 /**
@@ -12,11 +16,13 @@ use RuntimeException;
  */
 final class OpenAiClient
 {
+    private readonly string $apiKey;
+
     /**
      * @param array<string, string> $defaultHeaders
      */
     public function __construct(
-        private readonly string $apiKey,
+        ?string $apiKey = null,
         private readonly ?string $organization = null,
         private readonly ?string $project = null,
         private readonly string $baseUrl = 'https://api.openai.com/v1',
@@ -27,23 +33,10 @@ final class OpenAiClient
         if (!extension_loaded('curl')) {
             throw new RuntimeException('The PHP curl extension is required.');
         }
-    }
 
-    public static function fromEnvironment(): self
-    {
-        $apiKey = getenv('OPENAI_API_KEY');
-        if (!is_string($apiKey) || $apiKey === '') {
-            throw new RuntimeException('Environment variable OPENAI_API_KEY is not set.');
-        }
-
-        $organization = getenv('OPENAI_ORGANIZATION');
-        $project = getenv('OPENAI_PROJECT');
-
-        return new self(
-            apiKey: $apiKey,
-            organization: is_string($organization) && $organization !== '' ? $organization : null,
-            project: is_string($project) && $project !== '' ? $project : null,
-        );
+        $this->apiKey = $apiKey !== null && trim($apiKey) !== ''
+            ? $apiKey
+            : Keystore::instance()->getKey('open_ai');
     }
 
     /**
@@ -67,6 +60,16 @@ final class OpenAiClient
         } finally {
             unset($curl);
         }
+    }
+
+    public function buildImageResponse(AiResponse $response, string $defaultContentType = 'image/png'): ImageResultType
+    {
+        $image = $this->findImageData($response->body, $defaultContentType);
+        if ($image === null) {
+            throw new RuntimeException('OpenAI response does not contain image output.');
+        }
+
+        return new ImageResultType($image['data'], $image['contentType']);
     }
 
     /**
@@ -123,7 +126,7 @@ final class OpenAiClient
         $options = [
             CURLOPT_POST => true,
             CURLOPT_HTTPHEADER => $headers,
-            CURLOPT_POSTFIELDS => json_encode($request->toArray($stream), JSON_THROW_ON_ERROR),
+            CURLOPT_POSTFIELDS => Toolkit::jsonEncode($request->toArray($stream)),
             CURLOPT_TIMEOUT => $this->timeout,
             CURLOPT_CONNECTTIMEOUT => $this->connectTimeout,
             CURLOPT_HEADERFUNCTION => function (CurlHandle $curl, string $line) use (&$responseHeaders): int {
@@ -346,6 +349,136 @@ final class OpenAiClient
         if (($event['type'] ?? null) === 'response.completed' && isset($event['response']) && is_array($event['response'])) {
             $context->completedBody = $event['response'];
         }
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     * @return array{data: string, contentType: string}|null
+     */
+    private function findImageData(array $body, string $defaultContentType): ?array
+    {
+        $output = $body['output'] ?? null;
+        if (!is_array($output)) {
+            return $this->decodeImageValue($body, $defaultContentType);
+        }
+
+        foreach ($output as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+
+            $contentType = $this->contentTypeFromArray($item, $defaultContentType);
+            $decoded = $this->decodeImageValue($item, $contentType);
+            if ($decoded !== null) {
+                return $decoded;
+            }
+
+            $content = $item['content'] ?? null;
+            if (!is_array($content)) {
+                continue;
+            }
+
+            foreach ($content as $contentItem) {
+                if (!is_array($contentItem)) {
+                    continue;
+                }
+
+                $decoded = $this->decodeImageValue($contentItem, $this->contentTypeFromArray($contentItem, $contentType));
+                if ($decoded !== null) {
+                    return $decoded;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @return array{data: string, contentType: string}|null
+     */
+    private function decodeImageValue(array $data, string $defaultContentType): ?array
+    {
+        foreach (['result', 'b64_json', 'image', 'data'] as $key) {
+            if (!isset($data[$key]) || !is_string($data[$key]) || $data[$key] === '') {
+                continue;
+            }
+
+            $decoded = $this->decodeImageString($data[$key], $this->contentTypeFromArray($data, $defaultContentType));
+            if ($decoded !== null) {
+                return $decoded;
+            }
+        }
+
+        $imageUrl = $data['image_url'] ?? $data['url'] ?? null;
+        if (is_string($imageUrl) && str_starts_with($imageUrl, 'data:')) {
+            $dataUrl = DataUrl::tryLoadString($imageUrl, $defaultContentType);
+            if ($dataUrl !== null) {
+                return [
+                    'data' => $dataUrl->data,
+                    'contentType' => $dataUrl->contentType,
+                ];
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array{data: string, contentType: string}|null
+     */
+    private function decodeImageString(string $value, string $defaultContentType): ?array
+    {
+        if (str_starts_with($value, 'data:')) {
+            $dataUrl = DataUrl::tryLoadString($value, $defaultContentType);
+            if ($dataUrl === null) {
+                return null;
+            }
+
+            return [
+                'data' => $dataUrl->data,
+                'contentType' => $dataUrl->contentType,
+            ];
+        }
+
+        $binary = base64_decode($value, true);
+        if ($binary === false) {
+            return null;
+        }
+
+        return [
+            'data' => $binary,
+            'contentType' => $defaultContentType,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     */
+    private function contentTypeFromArray(array $data, string $defaultContentType): string
+    {
+        foreach (['content_type', 'contentType', 'mime_type', 'mimeType'] as $key) {
+            if (isset($data[$key]) && is_string($data[$key]) && $data[$key] !== '') {
+                return $data[$key];
+            }
+        }
+
+        if (isset($data['output_format']) && is_string($data['output_format'])) {
+            return $this->contentTypeFromFormat($data['output_format'], $defaultContentType);
+        }
+
+        return $defaultContentType;
+    }
+
+    private function contentTypeFromFormat(string $format, string $defaultContentType): string
+    {
+        return match (strtolower($format)) {
+            'png' => 'image/png',
+            'jpg', 'jpeg' => 'image/jpeg',
+            'webp' => 'image/webp',
+            'gif' => 'image/gif',
+            default => $defaultContentType,
+        };
     }
 
     /**

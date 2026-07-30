@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Phore\AiHarness\Client;
 
+use InvalidArgumentException;
+use Phore\AiHarness\ToolType\ToolType;
+
 /**
  * Value object for an OpenAI Responses API request.
  *
@@ -54,7 +57,6 @@ final readonly class AiRequest
 
         $this->addIfNotNull($body, 'instructions', $this->instructions);
         $this->addIfNotNull($body, 'max_output_tokens', $this->maxOutputTokens);
-        $this->addIfNotNull($body, 'temperature', $this->temperature);
         $this->addIfNotNull($body, 'text', $this->text);
         $this->addIfNotNull($body, 'metadata', $this->metadata);
         $this->addIfNotNull($body, 'previous_response_id', $this->previousResponseId);
@@ -73,40 +75,50 @@ final readonly class AiRequest
 
     public function withInstructions(string $instructions): self
     {
-        return new self(
-            model: $this->model,
-            input: $this->input,
-            instructions: $instructions,
-            maxOutputTokens: $this->maxOutputTokens,
-            temperature: $this->temperature,
-            text: $this->text,
-            metadata: $this->metadata,
-            previousResponseId: $this->previousResponseId,
-            tools: $this->tools,
-            toolChoice: $this->toolChoice,
-            parallelToolCalls: $this->parallelToolCalls,
-            stream: $this->stream,
-            extraBody: $this->extraBody,
-        );
+        return clone($this, [
+            'instructions' => $instructions,
+        ]);
+    }
+
+    /**
+     * Configures OpenAI structured output for this request.
+     *
+     * @param array<string, mixed> $jsonSchema
+     */
+    public function withOutputSchema(string $name, array $jsonSchema, ?string $description = null, bool $strict = true): self
+    {
+        if ($name === '') {
+            throw new InvalidArgumentException('Output schema name must not be empty.');
+        }
+
+        $format = [
+            'type' => 'json_schema',
+            'name' => $name,
+            'schema' => $jsonSchema,
+            'strict' => $strict,
+        ];
+
+        if ($description !== null) {
+            $format['description'] = $description;
+        }
+
+        return clone($this, [
+            'text' => array_replace_recursive($this->text ?? [], ['format' => $format]),
+        ]);
     }
 
     public function withExtraBody(array $extraBody): self
     {
-        return new self(
-            model: $this->model,
-            input: $this->input,
-            instructions: $this->instructions,
-            maxOutputTokens: $this->maxOutputTokens,
-            temperature: $this->temperature,
-            text: $this->text,
-            metadata: $this->metadata,
-            previousResponseId: $this->previousResponseId,
-            tools: $this->tools,
-            toolChoice: $this->toolChoice,
-            parallelToolCalls: $this->parallelToolCalls,
-            stream: $this->stream,
-            extraBody: array_replace_recursive($this->extraBody, $extraBody),
-        );
+        return clone($this, [
+            'extraBody' => array_replace_recursive($this->extraBody, $extraBody),
+        ]);
+    }
+
+    public function withTools(ToolType ...$tools): self
+    {
+        return clone($this, [
+            'tools' => array_map(static fn (ToolType $tool): array => $tool->toArray('open_ai'), $tools),
+        ]);
     }
 
     /**
