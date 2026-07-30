@@ -115,6 +115,8 @@ final class OpenAiClient
         array &$responseHeaders,
         ?callable $writeFunction = null,
     ): CurlHandle {
+        AiRequest::$last = $request;
+
         $curl = curl_init($this->baseUrl . '/responses');
         if ($curl === false) {
             throw new RuntimeException('Could not initialize curl.');
@@ -182,7 +184,10 @@ final class OpenAiClient
      */
     public function buildJsonResponse(CurlHandle $curl, array $headers, string $rawBody): AiResponse
     {
-        return AiResponse::fromJson((int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE), $headers, $rawBody);
+        $response = AiResponse::fromJson((int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE), $headers, $rawBody);
+        AiResponse::$last = $response;
+
+        return $response;
     }
 
     /**
@@ -197,7 +202,10 @@ final class OpenAiClient
             $body = ['output_text' => $context->outputText, 'status' => 'completed'];
         }
 
-        return new AiResponse($statusCode, $context->headers, $body, $context->rawBody, $context->events);
+        $response = new AiResponse($statusCode, $context->headers, $body, $context->rawBody, $context->events);
+        AiResponse::$last = $response;
+
+        return $response;
     }
 
     /**

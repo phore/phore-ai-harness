@@ -123,6 +123,42 @@ final class OpenAiPromptTypeConverterTest extends TestCase
         self::assertStringNotContainsString('Data:', $text);
     }
 
+    public function testConvertsStructPromptWithArrayToDataOnlyText(): void
+    {
+        $text = (new OpenAiPromptTypeConverter())->convertPromptToText(
+            new StructPrompt(['city' => 'Berlin', 'zip' => 10115]),
+        );
+
+        self::assertStringContainsString('Structured data', $text);
+        self::assertStringNotContainsString('Structured PHP type:', $text);
+        self::assertStringNotContainsString('JSON Schema:', $text);
+        self::assertStringContainsString('Data:', $text);
+        self::assertStringContainsString('"city": "Berlin"', $text);
+    }
+
+    public function testConvertsStructPromptAliasToReferenceText(): void
+    {
+        $text = (new OpenAiPromptTypeConverter())->convertPromptToText(
+            new StructPrompt(OpenAiPromptTypeConverterTestAddress::class, alias: 'billingAddress'),
+        );
+
+        self::assertStringContainsString('Reference alias: billingAddress', $text);
+        self::assertStringContainsString('Other prompts may refer to this struct as `billingAddress`.', $text);
+    }
+
+    public function testConvertsStructPromptInstructionsToText(): void
+    {
+        $text = (new OpenAiPromptTypeConverter())->convertPromptToText(
+            new StructPrompt(
+                OpenAiPromptTypeConverterTestAddress::class,
+                instructions: 'Use this as the normalized billing address.',
+            ),
+        );
+
+        self::assertStringContainsString('Struct instructions:', $text);
+        self::assertStringContainsString('Use this as the normalized billing address.', $text);
+    }
+
     public function testCreatesAiRequest(): void
     {
         $request = (new OpenAiPromptTypeConverter())->toAiRequest('gpt-5-mini', [

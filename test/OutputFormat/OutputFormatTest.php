@@ -6,6 +6,8 @@ use Phore\AiHarness\OutputFormat\FileOutput;
 use Phore\AiHarness\OutputFormat\ImageOutput;
 use Phore\AiHarness\OutputFormat\StructOutput;
 use Phore\AiHarness\OutputFormat\TextOutput;
+use Phore\Schema\Generator\JsonSchema\JsonSchemaCompatibility;
+use Phore\Schema\Generator\JsonSchema\JsonSchemaGeneratorOptions;
 use PHPUnit\Framework\TestCase;
 
 final readonly class OutputFormatTestAddress
@@ -13,6 +15,19 @@ final readonly class OutputFormatTestAddress
     public function __construct(
         public string $city,
         public int $zip,
+    ) {
+    }
+}
+
+final readonly class OutputFormatTestAddressBook
+{
+    /**
+     * @var OutputFormatTestAddress[]
+     */
+    public array $addresses;
+
+    public function __construct(
+        public string $source,
     ) {
     }
 }
@@ -42,6 +57,24 @@ final class OutputFormatTest extends TestCase
         self::assertSame('object', $array['jsonSchema']['type']);
         self::assertSame('string', $array['jsonSchema']['properties']['city']['type']);
         self::assertSame('integer', $array['jsonSchema']['properties']['zip']['type']);
+    }
+
+    public function testStructOutputInlinesNestedClassArrayItems(): void
+    {
+        $output = new StructOutput(
+            OutputFormatTestAddressBook::class,
+            jsonSchemaOptions: new JsonSchemaGeneratorOptions(JsonSchemaCompatibility::OpenAiStructuredOutput),
+        );
+
+        $schema = $output->jsonSchema();
+        $itemsSchema = $schema['properties']['addresses']['items'];
+
+        self::assertSame('object', $itemsSchema['type']);
+        self::assertArrayNotHasKey('phpClass', $itemsSchema);
+        self::assertSame(false, $itemsSchema['additionalProperties']);
+        self::assertSame('string', $itemsSchema['properties']['city']['type']);
+        self::assertSame('integer', $itemsSchema['properties']['zip']['type']);
+        self::assertSame(['city', 'zip'], $itemsSchema['required']);
     }
 
     public function testImageOutput(): void

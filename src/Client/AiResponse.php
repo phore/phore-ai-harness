@@ -4,22 +4,26 @@ declare(strict_types=1);
 
 namespace Phore\AiHarness\Client;
 
+use Phore\AiHarness\Result\UsageInfoType;
+
 /**
  * Value object for a response returned by the OpenAI Responses API.
  */
-final readonly class AiResponse
+final class AiResponse
 {
+    public static ?self $last = null;
+
     /**
      * @param array<string, list<string>> $headers
      * @param array<string, mixed> $body
      * @param array<int, array<string, mixed>> $streamEvents
      */
     public function __construct(
-        public int $statusCode,
-        public array $headers,
-        public array $body,
-        public string $rawBody,
-        public array $streamEvents = [],
+        public readonly int $statusCode,
+        public readonly array $headers,
+        public readonly array $body,
+        public readonly string $rawBody,
+        public readonly array $streamEvents = [],
     ) {
     }
 
@@ -58,6 +62,11 @@ final readonly class AiResponse
     {
         $key = strtolower($name);
         return isset($this->headers[$key]) ? implode(', ', $this->headers[$key]) : null;
+    }
+
+    public function getUsage(): UsageInfoType
+    {
+        return UsageInfoType::fromResponseBody($this->body);
     }
 
     public function getOutputText(): string

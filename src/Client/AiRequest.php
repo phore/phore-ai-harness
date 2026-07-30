@@ -13,8 +13,10 @@ use Phore\AiHarness\ToolType\ToolType;
  * The endpoint is intentionally not configurable; OpenAiClient always sends
  * this payload to POST /v1/responses.
  */
-final readonly class AiRequest
+final class AiRequest
 {
+    public static ?self $last = null;
+
     /**
      * @param string|array<mixed> $input
      * @param array<string, mixed>|null $text
@@ -24,19 +26,19 @@ final readonly class AiRequest
      * @param array<string, mixed> $extraBody Additional Responses API fields.
      */
     public function __construct(
-        public string $model,
-        public string|array $input,
-        public ?string $instructions = null,
-        public ?int $maxOutputTokens = null,
-        public ?float $temperature = null,
-        public ?array $text = null,
-        public ?array $metadata = null,
-        public ?string $previousResponseId = null,
-        public ?array $tools = null,
-        public string|array|null $toolChoice = null,
-        public ?bool $parallelToolCalls = null,
-        public ?bool $stream = null,
-        public array $extraBody = [],
+        public readonly string $model,
+        public readonly string|array $input,
+        public readonly ?string $instructions = null,
+        public readonly ?int $maxOutputTokens = null,
+        public readonly ?float $temperature = null,
+        public readonly ?array $text = null,
+        public readonly ?array $metadata = null,
+        public readonly ?string $previousResponseId = null,
+        public readonly ?array $tools = null,
+        public readonly string|array|null $toolChoice = null,
+        public readonly ?bool $parallelToolCalls = null,
+        public readonly ?bool $stream = null,
+        public readonly array $extraBody = [],
     ) {
     }
 

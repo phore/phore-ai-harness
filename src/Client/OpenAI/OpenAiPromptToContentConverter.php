@@ -91,10 +91,24 @@ final readonly class OpenAiPromptToContentConverter
      */
     private function convertStructPrompt(StructPrompt $prompt): string
     {
-        $text = "Structured PHP type: {$prompt->className()}\n"
-            . "JSON Schema:\n```json\n"
-            . Toolkit::jsonEncode($prompt->jsonSchema(), true)
-            . "\n```";
+        $text = $prompt->className() !== null
+            ? "Structured PHP type: {$prompt->className()}\n"
+            : "Structured data\n";
+
+        if ($prompt->alias() !== null) {
+            $text .= "Reference alias: {$prompt->alias()}\n"
+                . "Other prompts may refer to this struct as `{$prompt->alias()}`.\n";
+        }
+
+        if ($prompt->instructions() !== null) {
+            $text .= "Struct instructions:\n{$prompt->instructions()}\n";
+        }
+
+        if ($prompt->jsonSchema() !== null) {
+            $text .= "JSON Schema:\n```json\n"
+                . Toolkit::jsonEncode($prompt->jsonSchema(), true)
+                . "\n```";
+        }
 
         if ($prompt->hasData()) {
             $text .= "\nData:\n```json\n" . Toolkit::jsonEncode($prompt->data(), true) . "\n```";

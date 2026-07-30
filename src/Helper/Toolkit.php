@@ -4,7 +4,13 @@ declare(strict_types=1);
 
 namespace Phore\AiHarness\Helper;
 
+use InvalidArgumentException;
 use JsonException;
+use Phore\AiHarness\Client\OpenAiClient;
+use Phore\AiHarness\PhoreAi;
+use Phore\AiHarness\PromptType\PromptType;
+use Phore\AiHarness\PromptType\TextPrompt;
+use Phore\AiHarness\ToolType\ToolType;
 use ReflectionClass;
 use RuntimeException;
 
@@ -74,5 +80,78 @@ final class Toolkit
         $name = preg_replace('/[^a-zA-Z0-9_-]/', '_', $shortName) ?: 'response';
 
         return substr($name, 0, 64);
+    }
+
+    /**
+     * Creates a configured `PhoreAi` facade from common function options.
+     *
+     * @param array{client?: OpenAiClient|string|null, model?: string} $options
+     */
+    public static function createAi(array $options = []): PhoreAi
+    {
+        $ai = new PhoreAi($options['client'] ?? null);
+
+        if (isset($options['model'])) {
+            $ai = $ai->withModel($options['model']);
+        }
+
+        return $ai;
+    }
+
+    /**
+     * Normalizes strings, prompt instances and tool instances to values accepted by `PhoreAi::with()`.
+     *
+     * @param string|PromptType|ToolType|array<int, string|PromptType|ToolType> $prompts
+     * @return list<PromptType|ToolType>
+     */
+    public static function normalizePromptItems(string|PromptType|ToolType|array $prompts): array
+    {
+        $items = is_array($prompts) ? $prompts : [$prompts];
+        $normalized = [];
+
+        foreach ($items as $item) {
+            if (is_string($item)) {
+                $normalized[] = new TextPrompt($item);
+                continue;
+            }
+
+            if ($item instanceof PromptType || $item instanceof ToolType) {
+                $normalized[] = $item;
+                continue;
+            }
+
+            throw new InvalidArgumentException('Expected string, PromptType or ToolType.');
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Checks whether a normalized item list already contains a tool of the requested class.
+     *
+     * @param list<PromptType|ToolType> $items
+     * @param class-string<ToolType> $className
+     */
+    public static function hasTool(array $items, string $className): bool
+    {
+        foreach ($items as $item) {
+            if ($item instanceof $className) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Maps an OpenAI image output format option to a content type.
+     */
+    public static function contentTypeFromImageOutputFormat(string $outputFormat): string
+    {
+        return match ($outputFormat) {
+            'jpeg' => 'image/jpeg',
+            'webp' => 'image/webp',
+            default => 'image/png',
+        };
     }
 }

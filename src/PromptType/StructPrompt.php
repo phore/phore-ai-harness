@@ -12,31 +12,48 @@ use ReflectionClass;
 
 final readonly class StructPrompt implements PromptType
 {
-    private string $className;
+    private ?string $className;
 
     /**
-     * @var array<string, mixed>
+     * @var array<string, mixed>|null
      */
-    private array $jsonSchema;
+    private ?array $jsonSchema;
 
     private bool $hasData;
 
     private mixed $data;
 
+    private ?string $alias;
+
+    private ?string $instructions;
+
     /**
-     * @param class-string|object $classOrObject
+     * @param class-string|object|array<string|int, mixed> $classOrObject
      */
     public function __construct(
-        public string|object $classOrObject,
+        public string|object|array $classOrObject,
+        ?string $alias = null,
+        ?string $instructions = null,
         ?JsonSchemaGeneratorOptions $jsonSchemaOptions = null,
     ) {
+        $this->alias = $this->validateAlias($alias);
+        $this->instructions = $this->validateInstructions($instructions);
+
+        if (is_array($classOrObject)) {
+            $this->className = null;
+            $this->jsonSchema = null;
+            $this->hasData = true;
+            $this->data = $this->normalizeData($classOrObject);
+            return;
+        }
+
         $this->className = $this->resolveClassName($classOrObject);
         $this->jsonSchema = (new SchemaParser())
             ->parseClass($classOrObject)
             ->toJsonSchema($jsonSchemaOptions)
             ->toArray();
         $this->hasData = is_object($classOrObject);
-        $this->data = $this->hasData ? $this->normalizeObject($classOrObject) : null;
+        $this->data = $this->hasData ? $this->normalizeData($classOrObject) : null;
     }
 
     public function type(): string
@@ -44,15 +61,15 @@ final readonly class StructPrompt implements PromptType
         return 'struct';
     }
 
-    public function className(): string
+    public function className(): ?string
     {
         return $this->className;
     }
 
     /**
-     * @return array<string, mixed>
+     * @return array<string, mixed>|null
      */
-    public function jsonSchema(): array
+    public function jsonSchema(): ?array
     {
         return $this->jsonSchema;
     }
@@ -67,22 +84,72 @@ final readonly class StructPrompt implements PromptType
         return $this->data;
     }
 
+    public function alias(): ?string
+    {
+        return $this->alias;
+    }
+
+    public function instructions(): ?string
+    {
+        return $this->instructions;
+    }
+
     /**
-     * @return array{type: string, className: string, jsonSchema: array<string, mixed>, data?: mixed}
+     * @return array{type: string, className?: string, jsonSchema?: array<string, mixed>, alias?: string, instructions?: string, data?: mixed}
      */
     public function toArray(): array
     {
         $array = [
             'type' => $this->type(),
-            'className' => $this->className,
-            'jsonSchema' => $this->jsonSchema,
         ];
+
+        if ($this->className !== null) {
+            $array['className'] = $this->className;
+        }
+
+        if ($this->jsonSchema !== null) {
+            $array['jsonSchema'] = $this->jsonSchema;
+        }
+
+        if ($this->alias !== null) {
+            $array['alias'] = $this->alias;
+        }
+
+        if ($this->instructions !== null) {
+            $array['instructions'] = $this->instructions;
+        }
 
         if ($this->hasData) {
             $array['data'] = $this->data;
         }
 
         return $array;
+    }
+
+    private function validateAlias(?string $alias): ?string
+    {
+        if ($alias === null) {
+            return null;
+        }
+
+        if (trim($alias) === '') {
+            throw new InvalidArgumentException('StructPrompt alias must not be empty.');
+        }
+
+        return $alias;
+    }
+
+    private function validateInstructions(?string $instructions): ?string
+    {
+        if ($instructions === null) {
+            return null;
+        }
+
+        if (trim($instructions) === '') {
+            throw new InvalidArgumentException('StructPrompt instructions must not be empty.');
+        }
+
+        return $instructions;
     }
 
     /**
@@ -102,8 +169,8 @@ final readonly class StructPrompt implements PromptType
         return (new ReflectionClass($classOrObject))->getName();
     }
 
-    private function normalizeObject(object $object): mixed
+    private function normalizeData(object|array $data): mixed
     {
-        return json_decode(Toolkit::jsonEncode($object, true), true, 512, JSON_THROW_ON_ERROR);
+        return json_decode(Toolkit::jsonEncode($data, true), true, 512, JSON_THROW_ON_ERROR);
     }
 }

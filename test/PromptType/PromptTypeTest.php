@@ -158,6 +158,57 @@ final class PromptTypeTest extends TestCase
         self::assertArrayNotHasKey('data', $array);
     }
 
+    public function testStructPromptWithArrayAddsOnlyData(): void
+    {
+        $prompt = new StructPrompt(['city' => 'Berlin', 'zip' => 10115]);
+        $array = $prompt->toArray();
+
+        self::assertTrue($prompt->hasData());
+        self::assertNull($prompt->className());
+        self::assertNull($prompt->jsonSchema());
+        self::assertSame(['city' => 'Berlin', 'zip' => 10115], $prompt->data());
+        self::assertSame(['city' => 'Berlin', 'zip' => 10115], $array['data']);
+        self::assertArrayNotHasKey('className', $array);
+        self::assertArrayNotHasKey('jsonSchema', $array);
+    }
+
+    public function testStructPromptAcceptsAlias(): void
+    {
+        $prompt = new StructPrompt(PromptTypeTestAddress::class, alias: 'billingAddress');
+        $array = $prompt->toArray();
+
+        self::assertSame('billingAddress', $prompt->alias());
+        self::assertSame('billingAddress', $array['alias']);
+    }
+
+    public function testStructPromptRejectsEmptyAlias(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('StructPrompt alias must not be empty');
+
+        new StructPrompt(PromptTypeTestAddress::class, alias: '');
+    }
+
+    public function testStructPromptAcceptsInstructions(): void
+    {
+        $prompt = new StructPrompt(
+            PromptTypeTestAddress::class,
+            instructions: 'Use this struct as the billing address input.',
+        );
+        $array = $prompt->toArray();
+
+        self::assertSame('Use this struct as the billing address input.', $prompt->instructions());
+        self::assertSame('Use this struct as the billing address input.', $array['instructions']);
+    }
+
+    public function testStructPromptRejectsEmptyInstructions(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('StructPrompt instructions must not be empty');
+
+        new StructPrompt(PromptTypeTestAddress::class, instructions: '');
+    }
+
     private function createTempFile(string $content): string
     {
         $fileName = tempnam(sys_get_temp_dir(), 'phore-ai-prompt-');
