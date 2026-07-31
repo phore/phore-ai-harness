@@ -8,11 +8,23 @@ use Phore\AiHarness\Helper\DataUrl;
 
 final readonly class ImagePrompt implements PromptType
 {
+    public ?string $alias;
+
+    public ?string $instructions;
+
+    public ?string $type;
+
     public function __construct(
         public string $imageUrl,
         public ?string $fileName = null,
         public ?string $mimeType = null,
+        ?string $alias = null,
+        ?string $instructions = null,
+        ?string $type = null,
     ) {
+        $this->alias = PromptMetadata::validateAlias($alias, 'ImagePrompt');
+        $this->instructions = PromptMetadata::validateInstructions($instructions, 'ImagePrompt');
+        $this->type = PromptMetadata::validateContentType($type, 'ImagePrompt');
     }
 
     public static function fromFile(string $fileName): self
@@ -28,7 +40,7 @@ final readonly class ImagePrompt implements PromptType
     }
 
     /**
-     * @return array{type: string, imageUrl: string, fileName?: string, mimeType?: string}
+     * @return array{type: string, imageUrl: string, fileName?: string, mimeType?: string, alias?: string, instructions?: string, contentFormat?: string}
      */
     public function toArray(): array
     {
@@ -43,6 +55,8 @@ final readonly class ImagePrompt implements PromptType
         if ($this->mimeType !== null) {
             $array['mimeType'] = $this->mimeType;
         }
+
+        PromptMetadata::addToArray($array, $this->alias, $this->instructions, $this->type);
 
         return $array;
     }

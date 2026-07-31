@@ -8,9 +8,21 @@ use RuntimeException;
 
 final readonly class TextPrompt implements PromptType
 {
+    public ?string $alias;
+
+    public ?string $instructions;
+
+    public ?string $type;
+
     public function __construct(
         public string $text,
+        ?string $alias = null,
+        ?string $instructions = null,
+        ?string $type = null,
     ) {
+        $this->alias = PromptMetadata::validateAlias($alias, 'TextPrompt');
+        $this->instructions = PromptMetadata::validateInstructions($instructions, 'TextPrompt');
+        $this->type = PromptMetadata::validateContentType($type, 'TextPrompt');
     }
 
     public static function fromFile(string $fileName): self
@@ -29,14 +41,18 @@ final readonly class TextPrompt implements PromptType
     }
 
     /**
-     * @return array{type: string, text: string}
+     * @return array{type: string, text: string, alias?: string, instructions?: string, contentFormat?: string}
      */
     public function toArray(): array
     {
-        return [
+        $array = [
             'type' => $this->type(),
             'text' => $this->text,
         ];
+
+        PromptMetadata::addToArray($array, $this->alias, $this->instructions, $this->type);
+
+        return $array;
     }
 
 }

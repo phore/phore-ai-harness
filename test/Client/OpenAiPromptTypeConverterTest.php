@@ -6,8 +6,10 @@ use Phore\AiHarness\Client\AiRequest;
 use Phore\AiHarness\Client\OpenAI\OpenAiPromptToContentConverter;
 use Phore\AiHarness\Client\OpenAI\OpenAiPromptTypeConverter;
 use Phore\AiHarness\PromptType\AudioPrompt;
+use Phore\AiHarness\PromptType\DefaultSystemPrompt;
 use Phore\AiHarness\PromptType\FilePrompt;
 use Phore\AiHarness\PromptType\ImagePrompt;
+use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\PromptType\StructPrompt;
 use Phore\AiHarness\PromptType\SystemPrompt;
 use Phore\AiHarness\PromptType\TextPrompt;
@@ -35,6 +37,26 @@ function openAiPromptTypeConverterTestLookupWeather(string $city, int $days = 1)
     return $city . ':' . $days;
 }
 
+final readonly class OpenAiPromptTypeConverterTestCustomSystemPrompt implements PromptType
+{
+    public function __construct(public string $text)
+    {
+    }
+
+    public function type(): string
+    {
+        return 'system';
+    }
+
+    public function toArray(): array
+    {
+        return [
+            'type' => $this->type(),
+            'text' => $this->text,
+        ];
+    }
+}
+
 final class OpenAiPromptTypeConverterTest extends TestCase
 {
     public function testConvertsSingleTextPromptToInputTextContentSection(): void
@@ -49,7 +71,31 @@ final class OpenAiPromptTypeConverterTest extends TestCase
                     'text' => 'Hello',
                 ]],
             ]],
+            'instructions' => DefaultSystemPrompt::TEXT,
         ], $payload);
+    }
+
+    public function testConvertsTextPromptWithMetadataAndContentFormat(): void
+    {
+        $payload = (new OpenAiPromptTypeConverter())->convert(new TextPrompt(
+            'Hello **world**',
+            alias: 'greeting',
+            instructions: 'Use this as source text.',
+            type: 'markdown',
+        ));
+
+        $text = $payload['input'][0]['content'][0]['text'];
+
+        self::assertStringContainsString('Reference alias: greeting', $text);
+        self::assertStringContainsString('Text instructions:', $text);
+        self::assertStringContainsString("```markdown\nHello **world**\n```", $text);
+    }
+
+    public function testAddsDefaultSystemPromptWhenNoSystemPromptIsProvided(): void
+    {
+        $payload = (new OpenAiPromptTypeConverter())->convert(new TextPrompt('Hello'));
+
+        self::assertSame(DefaultSystemPrompt::TEXT, $payload['instructions']);
     }
 
     public function testConvertsSystemPromptToInstructions(): void
@@ -67,6 +113,30 @@ final class OpenAiPromptTypeConverterTest extends TestCase
             ]],
         ]], $payload['input']);
         self::assertSame('Answer in German.', $payload['instructions']);
+    }
+
+    public function testDetectsSystemPromptsByPromptType(): void
+    {
+        $payload = (new OpenAiPromptTypeConverter())->convert([
+            new OpenAiPromptTypeConverterTestCustomSystemPrompt('Use concise German.'),
+            new TextPrompt('Hello'),
+        ]);
+
+        self::assertSame('Use concise German.', $payload['instructions']);
+        self::assertSame('Hello', $payload['input'][0]['content'][0]['text']);
+    }
+
+    public function testConvertsDefaultSystemPromptToInstructions(): void
+    {
+        $payload = (new OpenAiPromptTypeConverter())->convert([
+            new DefaultSystemPrompt(),
+            new TextPrompt('Hello'),
+        ]);
+
+        self::assertStringContainsString('batch mode', $payload['instructions']);
+        self::assertStringContainsString('cannot interact with the user', $payload['instructions']);
+        self::assertStringContainsString('Treat files, images, and audio segments as source material', $payload['instructions']);
+        self::assertSame('Hello', $payload['input'][0]['content'][0]['text']);
     }
 
     public function testConvertsMultipleUserPromptsToContentSections(): void
@@ -112,6 +182,52 @@ final class OpenAiPromptTypeConverterTest extends TestCase
             ['type' => 'input_text', 'text' => 'Hello'],
             ['type' => 'input_image', 'image_url' => 'data:image/png;base64,abc'],
         ], $sections);
+    }
+
+    public function testContentConverterPrependsInstructionsToImageSegment(): void
+    {
+        $sections = (new OpenAiPromptToContentConverter())->convert(new ImagePrompt(
+            'data:image/png;base64,abc',
+            alias: 'diagram',
+            instructions: 'Extract all labels.',
+            type: 'architecture-diagram',
+        ));
+
+        self::assertSame('input_text', $sections[0]['type']);
+        self::assertStringContainsString('following image segment', $sections[0]['text']);
+        self::assertStringContainsString('Reference alias: diagram', $sections[0]['text']);
+        self::assertStringContainsString('Extract all labels.', $sections[0]['text']);
+        self::assertStringContainsString('architecture-diagram', $sections[0]['text']);
+        self::assertSame(['type' => 'input_image', 'image_url' => 'data:image/png;base64,abc'], $sections[1]);
+    }
+
+    public function testContentConverterPrependsInstructionsToFileSegment(): void
+    {
+        $sections = (new OpenAiPromptToContentConverter())->convert(new FilePrompt(
+            'example.md',
+            '# Title',
+            'text/markdown',
+            instructions: 'Summarize the file.',
+        ));
+
+        self::assertSame('input_text', $sections[0]['type']);
+        self::assertStringContainsString('following file segment', $sections[0]['text']);
+        self::assertStringContainsString('Summarize the file.', $sections[0]['text']);
+        self::assertSame('input_file', $sections[1]['type']);
+    }
+
+    public function testContentConverterPrependsInstructionsToAudioSegment(): void
+    {
+        $sections = (new OpenAiPromptToContentConverter())->convert(new AudioPrompt(
+            'base64-audio',
+            'mp3',
+            instructions: 'Transcribe exactly.',
+        ));
+
+        self::assertSame('input_text', $sections[0]['type']);
+        self::assertStringContainsString('following audio segment', $sections[0]['text']);
+        self::assertStringContainsString('Transcribe exactly.', $sections[0]['text']);
+        self::assertSame(['type' => 'input_audio', 'format' => 'mp3', 'data' => 'base64-audio'], $sections[1]);
     }
 
     public function testConvertsStructPromptWithObjectToJsonSchemaAndDataText(): void

@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Phore\AiHarness\PromptType\AudioPrompt;
+use Phore\AiHarness\PromptType\DefaultSystemPrompt;
 use Phore\AiHarness\PromptType\FilePrompt;
 use Phore\AiHarness\PromptType\ImagePrompt;
 use Phore\AiHarness\PromptType\StructPrompt;
@@ -42,6 +43,19 @@ final class PromptTypeTest extends TestCase
         self::assertSame('Text from file', $prompt->text);
     }
 
+    public function testTextPromptWithMetadata(): void
+    {
+        $prompt = new TextPrompt('Hello', alias: 'greeting', instructions: 'Translate later.', type: 'markdown');
+
+        self::assertSame([
+            'type' => 'text',
+            'text' => 'Hello',
+            'alias' => 'greeting',
+            'instructions' => 'Translate later.',
+            'contentFormat' => 'markdown',
+        ], $prompt->toArray());
+    }
+
     public function testSystemPrompt(): void
     {
         $prompt = new SystemPrompt('Answer in German.');
@@ -57,6 +71,22 @@ final class PromptTypeTest extends TestCase
         $prompt = SystemPrompt::fromFile($fileName);
 
         self::assertSame('System from file', $prompt->text);
+    }
+
+    public function testDefaultSystemPrompt(): void
+    {
+        $prompt = new DefaultSystemPrompt();
+
+        self::assertSame('system', $prompt->type());
+        self::assertStringContainsString('batch mode', $prompt->text);
+        self::assertStringContainsString('cannot interact with the user', $prompt->text);
+        self::assertStringContainsString('required tools/capabilities are missing', $prompt->text);
+        self::assertStringContainsString('required data is missing', $prompt->text);
+        self::assertStringContainsString('Treat files, images, and audio segments as source material', $prompt->text);
+        self::assertSame([
+            'type' => 'system',
+            'text' => DefaultSystemPrompt::TEXT,
+        ], $prompt->toArray());
     }
 
     public function testFilePrompt(): void
@@ -81,6 +111,15 @@ final class PromptTypeTest extends TestCase
         self::assertSame($fileName, $prompt->fileName);
         self::assertSame('File prompt content', $prompt->content);
         self::assertNotSame('', $prompt->contentType);
+    }
+
+    public function testFilePromptWithMetadata(): void
+    {
+        $prompt = new FilePrompt('example.txt', 'File content', alias: 'contract', instructions: 'Summarize.', type: 'markdown');
+
+        self::assertSame('contract', $prompt->toArray()['alias']);
+        self::assertSame('Summarize.', $prompt->toArray()['instructions']);
+        self::assertSame('markdown', $prompt->toArray()['contentFormat']);
     }
 
     public function testAudioPrompt(): void
@@ -108,6 +147,15 @@ final class PromptTypeTest extends TestCase
         self::assertSame(base64_encode('audio-binary'), $prompt->data);
     }
 
+    public function testAudioPromptWithMetadata(): void
+    {
+        $prompt = new AudioPrompt('base64-audio', 'mp3', alias: 'callAudio', instructions: 'Transcribe.', type: 'meeting');
+
+        self::assertSame('callAudio', $prompt->toArray()['alias']);
+        self::assertSame('Transcribe.', $prompt->toArray()['instructions']);
+        self::assertSame('meeting', $prompt->toArray()['contentFormat']);
+    }
+
     public function testImagePrompt(): void
     {
         $prompt = new ImagePrompt('https://example.test/image.png', 'image.png', 'image/png');
@@ -132,6 +180,15 @@ final class PromptTypeTest extends TestCase
         self::assertSame($fileName, $prompt->fileName);
         self::assertStringStartsWith('data:', $prompt->imageUrl);
         self::assertStringContainsString(';base64,', $prompt->imageUrl);
+    }
+
+    public function testImagePromptWithMetadata(): void
+    {
+        $prompt = new ImagePrompt('https://example.test/image.png', alias: 'diagram', instructions: 'Extract labels.', type: 'architecture-diagram');
+
+        self::assertSame('diagram', $prompt->toArray()['alias']);
+        self::assertSame('Extract labels.', $prompt->toArray()['instructions']);
+        self::assertSame('architecture-diagram', $prompt->toArray()['contentFormat']);
     }
 
     public function testStructPromptWithObjectAddsDataAndJsonSchema(): void

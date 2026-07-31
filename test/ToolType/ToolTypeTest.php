@@ -8,6 +8,8 @@ use Phore\AiHarness\ToolType\FileSearchTool;
 use Phore\AiHarness\ToolType\ImageGenerationTool;
 use Phore\AiHarness\ToolType\LocalShellTool;
 use Phore\AiHarness\ToolType\McpTool;
+use Phore\AiHarness\ToolType\TaskErrorException;
+use Phore\AiHarness\ToolType\TaskErrorTool;
 use Phore\AiHarness\ToolType\WebAccessTool;
 use PHPUnit\Framework\TestCase;
 
@@ -174,6 +176,41 @@ final class ToolTypeTest extends TestCase
     public function testLocalShellTool(): void
     {
         self::assertSame(['type' => 'local_shell'], (new LocalShellTool())->toArray());
+    }
+
+    public function testTaskErrorTool(): void
+    {
+        $tool = new TaskErrorTool();
+        $array = $tool->toArray();
+
+        self::assertSame('function', $array['type']);
+        self::assertSame('task_error', $array['name']);
+        self::assertStringContainsString('job is not fulfillable', $array['description']);
+        self::assertStringContainsString('required data is missing', $array['description']);
+        self::assertStringContainsString('required tools/capabilities are not available', $array['description']);
+        self::assertSame([
+            'errorType',
+            'contradictoryOrAmbiguousStatements',
+            'missingInformation',
+            'requestedAt',
+            'reason',
+        ], $array['parameters']['required']);
+        self::assertSame('string', $array['parameters']['properties']['missingInformation']['type']);
+    }
+
+    public function testTaskErrorToolThrowsTaskErrorException(): void
+    {
+        $this->expectException(TaskErrorException::class);
+        $this->expectExceptionMessage('Missing information:');
+        $this->expectExceptionMessage('target deployment environment');
+
+        (new TaskErrorTool())->callback()(
+            'missing_information',
+            'n/a',
+            'target deployment environment',
+            'ask the user before running deployment steps',
+            'The deployment target changes the commands that must be executed.',
+        );
     }
 
     public function testRejectsUnsupportedProvider(): void

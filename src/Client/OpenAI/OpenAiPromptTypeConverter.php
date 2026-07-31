@@ -8,6 +8,7 @@ use InvalidArgumentException;
 use JsonException;
 use Phore\AiHarness\Client\AiRequest;
 use Phore\AiHarness\Helper\Toolkit;
+use Phore\AiHarness\PromptType\DefaultSystemPrompt;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\PromptType\SystemPrompt;
 use Phore\AiHarness\ToolType\CallbackTool;
@@ -46,12 +47,27 @@ final readonly class OpenAiPromptTypeConverter
         $contentPrompts = [];
 
         foreach ($this->normalizePrompts($prompts) as $prompt) {
-            if ($prompt instanceof SystemPrompt) {
-                $instructions[] = $prompt->text;
+            if ($prompt->type() === 'system') {
+                if ($prompt instanceof SystemPrompt) {
+                    $instructions[] = $prompt->text;
+                    continue;
+                }
+
+                $array = $prompt->toArray();
+                if (isset($array['text']) && is_string($array['text'])) {
+                    $instructions[] = $array['text'];
+                    continue;
+                }
+
+                $instructions[] = $this->contentConverter->convertPromptToText($prompt);
                 continue;
             }
 
             $contentPrompts[] = $prompt;
+        }
+
+        if ($instructions === []) {
+            $instructions[] = DefaultSystemPrompt::TEXT;
         }
 
         $content = $this->contentConverter->convert($contentPrompts);

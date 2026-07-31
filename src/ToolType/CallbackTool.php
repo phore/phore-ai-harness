@@ -7,7 +7,7 @@ namespace Phore\AiHarness\ToolType;
 use InvalidArgumentException;
 use Phore\AiHarness\Client\OpenAI\OpenAiPromptTypeConverter;
 
-final readonly class CallbackTool implements ToolType
+readonly class CallbackTool implements ToolType
 {
     private mixed $callback;
 

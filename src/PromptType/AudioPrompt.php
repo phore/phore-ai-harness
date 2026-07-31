@@ -8,11 +8,23 @@ use Phore\AiHarness\Helper\DataUrl;
 
 final readonly class AudioPrompt implements PromptType
 {
+    public ?string $alias;
+
+    public ?string $instructions;
+
+    public ?string $type;
+
     public function __construct(
         public string $data,
         public string $format,
         public ?string $fileName = null,
+        ?string $alias = null,
+        ?string $instructions = null,
+        ?string $type = null,
     ) {
+        $this->alias = PromptMetadata::validateAlias($alias, 'AudioPrompt');
+        $this->instructions = PromptMetadata::validateInstructions($instructions, 'AudioPrompt');
+        $this->type = PromptMetadata::validateContentType($type, 'AudioPrompt');
     }
 
     public static function fromFile(string $fileName): self
@@ -31,7 +43,7 @@ final readonly class AudioPrompt implements PromptType
     }
 
     /**
-     * @return array{type: string, data: string, format: string, fileName?: string}
+     * @return array{type: string, data: string, format: string, fileName?: string, alias?: string, instructions?: string, contentFormat?: string}
      */
     public function toArray(): array
     {
@@ -44,6 +56,8 @@ final readonly class AudioPrompt implements PromptType
         if ($this->fileName !== null) {
             $array['fileName'] = $this->fileName;
         }
+
+        PromptMetadata::addToArray($array, $this->alias, $this->instructions, $this->type);
 
         return $array;
     }

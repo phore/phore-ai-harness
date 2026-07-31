@@ -7,6 +7,8 @@ use Phore\AiHarness\PromptType\SystemPrompt;
 use Phore\AiHarness\PromptType\TextPrompt;
 use Phore\AiHarness\ToolType\CallbackTool;
 use Phore\AiHarness\ToolType\McpTool;
+use Phore\AiHarness\ToolType\TaskErrorException;
+use Phore\AiHarness\ToolType\TaskErrorTool;
 use PHPUnit\Framework\TestCase;
 
 final readonly class PhoreAiOpenAiE2eAnswer
@@ -115,6 +117,24 @@ final class PhoreAiOpenAiE2eTest extends TestCase
             'percent' => 17,
         ]], $calls);
         self::assertStringContainsString('callback-tool-e2e:C-4242:17', $answer);
+    }
+
+    public function testPhoreAiTextWithTaskErrorToolAgainstRealApi(): void
+    {
+        try {
+            phore_ai_text([
+                new TextPrompt(
+                    'Search the web for "dentists in cologne"',
+                ),
+                new TaskErrorTool(),
+            ], ['model' => self::MODEL]);
+        } catch (TaskErrorException $exception) {
+            self::assertStringContainsString('contradict', strtolower($exception->getMessage()));
+            self::assertNotSame('', trim($exception->requestedAt));
+            return;
+        }
+
+        self::fail('Expected TaskErrorException because the task contains contradictory instructions.');
     }
 
     public function testPhoreAiImageAgainstRealApi(): void

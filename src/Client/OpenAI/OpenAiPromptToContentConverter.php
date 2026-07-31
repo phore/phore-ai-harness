@@ -27,7 +27,7 @@ final readonly class OpenAiPromptToContentConverter
     {
         $sections = [];
         foreach ($this->normalizePrompts($prompts) as $prompt) {
-            $sections[] = $this->convertPrompt($prompt);
+            array_push($sections, ...$this->convertPromptToSections($prompt));
         }
 
         return $sections;
@@ -39,33 +39,51 @@ final readonly class OpenAiPromptToContentConverter
      */
     public function convertPrompt(PromptType $prompt): array
     {
+        return $this->convertPromptToSections($prompt)[0];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     * @throws JsonException
+     */
+    private function convertPromptToSections(PromptType $prompt): array
+    {
         return match (true) {
-            $prompt instanceof TextPrompt => [
+            $prompt instanceof TextPrompt => [[
+                'type' => 'input_text',
+                'text' => $this->convertTextPrompt($prompt),
+            ]],
+            $prompt instanceof SystemPrompt => [[
                 'type' => 'input_text',
                 'text' => $prompt->text,
-            ],
-            $prompt instanceof SystemPrompt => [
-                'type' => 'input_text',
-                'text' => $prompt->text,
-            ],
+            ]],
             $prompt instanceof FilePrompt => [
-                'type' => 'input_file',
-                'filename' => $prompt->fileName,
-                'file_data' => (new DataUrl($prompt->content, $prompt->contentType))->toString(),
+                ...$this->segmentInstructions($prompt, 'file'),
+                [
+                    'type' => 'input_file',
+                    'filename' => $prompt->fileName,
+                    'file_data' => (new DataUrl($prompt->content, $prompt->contentType))->toString(),
+                ],
             ],
             $prompt instanceof ImagePrompt => [
-                'type' => 'input_image',
-                'image_url' => $prompt->imageUrl,
+                ...$this->segmentInstructions($prompt, 'image'),
+                [
+                    'type' => 'input_image',
+                    'image_url' => $prompt->imageUrl,
+                ],
             ],
             $prompt instanceof AudioPrompt => [
-                'type' => 'input_audio',
-                'format' => $prompt->format,
-                'data' => $prompt->data,
+                ...$this->segmentInstructions($prompt, 'audio'),
+                [
+                    'type' => 'input_audio',
+                    'format' => $prompt->format,
+                    'data' => $prompt->data,
+                ],
             ],
-            $prompt instanceof StructPrompt => [
+            $prompt instanceof StructPrompt => [[
                 'type' => 'input_text',
                 'text' => $this->convertStructPrompt($prompt),
-            ],
+            ]],
             default => throw new InvalidArgumentException('Unsupported PromptType: ' . $prompt::class),
         };
     }
@@ -76,14 +94,73 @@ final readonly class OpenAiPromptToContentConverter
     public function convertPromptToText(PromptType $prompt): string
     {
         return match (true) {
-            $prompt instanceof TextPrompt => $prompt->text,
-            $prompt instanceof FilePrompt => "File: {$prompt->fileName}\n```\n{$prompt->content}\n```",
-            $prompt instanceof ImagePrompt => ($prompt->fileName !== null ? 'Image: ' . $prompt->fileName : 'Image') . "\n" . $prompt->imageUrl,
-            $prompt instanceof AudioPrompt => ($prompt->fileName !== null ? 'Audio: ' . $prompt->fileName : 'Audio') . "\n" . $prompt->format,
+            $prompt instanceof TextPrompt => $this->convertTextPrompt($prompt),
+            $prompt instanceof FilePrompt => $this->segmentMetadataText($prompt, 'file')
+                . "File: {$prompt->fileName}\n```\n{$prompt->content}\n```",
+            $prompt instanceof ImagePrompt => $this->segmentMetadataText($prompt, 'image')
+                . ($prompt->fileName !== null ? 'Image: ' . $prompt->fileName : 'Image') . "\n" . $prompt->imageUrl,
+            $prompt instanceof AudioPrompt => $this->segmentMetadataText($prompt, 'audio')
+                . ($prompt->fileName !== null ? 'Audio: ' . $prompt->fileName : 'Audio') . "\n" . $prompt->format,
             $prompt instanceof StructPrompt => $this->convertStructPrompt($prompt),
             $prompt instanceof SystemPrompt => $prompt->text,
             default => throw new InvalidArgumentException('Unsupported PromptType: ' . $prompt::class),
         };
+    }
+
+    private function convertTextPrompt(TextPrompt $prompt): string
+    {
+        $text = '';
+
+        if ($prompt->alias !== null) {
+            $text .= "Reference alias: {$prompt->alias}\n"
+                . "Other prompts may refer to this text as `{$prompt->alias}`.\n";
+        }
+
+        if ($prompt->instructions !== null) {
+            $text .= "Text instructions:\n{$prompt->instructions}\n";
+        }
+
+        if ($prompt->type !== null) {
+            $text .= "```{$prompt->type}\n{$prompt->text}\n```";
+            return $text;
+        }
+
+        return $text . $prompt->text;
+    }
+
+    /**
+     * @return list<array{type: string, text: string}>
+     */
+    private function segmentInstructions(FilePrompt|ImagePrompt|AudioPrompt $prompt, string $segmentType): array
+    {
+        $text = $this->segmentMetadataText($prompt, $segmentType);
+        if ($text === '') {
+            return [];
+        }
+
+        return [[
+            'type' => 'input_text',
+            'text' => rtrim($text),
+        ]];
+    }
+
+    private function segmentMetadataText(FilePrompt|ImagePrompt|AudioPrompt $prompt, string $segmentType): string
+    {
+        $parts = [];
+
+        if ($prompt->alias !== null) {
+            $parts[] = "Reference alias: {$prompt->alias}\nOther prompts may refer to the following {$segmentType} segment as `{$prompt->alias}`.";
+        }
+
+        if ($prompt->instructions !== null) {
+            $parts[] = "Instructions for the following {$segmentType} segment:\n{$prompt->instructions}";
+        }
+
+        if ($prompt->type !== null) {
+            $parts[] = "Content type hint for the following {$segmentType} segment: {$prompt->type}.";
+        }
+
+        return $parts === [] ? '' : implode("\n", $parts) . "\n";
     }
 
     /**
