@@ -20,9 +20,11 @@ use Phore\AiHarness\ToolType\ToolType;
  * Options:
  * - `client`: optional `OpenAiClient`, DSN string such as `openai:<key>`, or `null` for Keystore/default client
  * - `model`: optional OpenAI model name, defaults to `gpt-5-mini`
+ * - `timeout`: optional request timeout in seconds, defaults to `OpenAiClient::DEFAULT_TIMEOUT`
+ * - `connect_timeout`: optional connect timeout in seconds, defaults to `OpenAiClient::DEFAULT_CONNECT_TIMEOUT`
  *
  * @param string|PromptType|ToolType|array<int, string|PromptType|ToolType> $prompts
- * @param array{client?: OpenAiClient|string|null, model?: string} $options
+ * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int} $options
  */
 function phore_ai_text(string|PromptType|ToolType|array $prompts, array $options = []): string
 {
@@ -41,6 +43,8 @@ function phore_ai_text(string|PromptType|ToolType|array $prompts, array $options
  * Options:
  * - `client`: optional `OpenAiClient`, DSN string such as `openai:<key>`, or `null` for Keystore/default client
  * - `model`: optional OpenAI model name, defaults to `gpt-5-mini`
+ * - `timeout`: optional request timeout in seconds, defaults to `OpenAiClient::DEFAULT_TIMEOUT`
+ * - `connect_timeout`: optional connect timeout in seconds, defaults to `OpenAiClient::DEFAULT_CONNECT_TIMEOUT`
  * - `size`: `auto`, `1024x1024`, `1536x1024` or `1024x1536`
  * - `output_format`: `png`, `jpeg` or `webp`
  * - `quality`: `auto`, `low`, `medium` or `high`
@@ -50,6 +54,8 @@ function phore_ai_text(string|PromptType|ToolType|array $prompts, array $options
  * @param array{
  *     client?: OpenAiClient|string|null,
  *     model?: string,
+ *     timeout?: int,
+ *     connect_timeout?: int,
  *     size?: 'auto'|'1024x1024'|'1536x1024'|'1024x1536',
  *     output_format?: 'png'|'jpeg'|'webp',
  *     quality?: 'auto'|'low'|'medium'|'high',
@@ -82,11 +88,13 @@ function phore_ai_image(string|PromptType|ToolType|array $prompts, array $option
  * Options:
  * - `client`: optional `OpenAiClient`, DSN string such as `openai:<key>`, or `null` for Keystore/default client
  * - `model`: optional OpenAI model name, defaults to `gpt-5-mini`
+ * - `timeout`: optional request timeout in seconds, defaults to `OpenAiClient::DEFAULT_TIMEOUT`
+ * - `connect_timeout`: optional connect timeout in seconds, defaults to `OpenAiClient::DEFAULT_CONNECT_TIMEOUT`
  *
  * @template T of object
  * @param string|PromptType|ToolType|array<int, string|PromptType|ToolType> $prompts
  * @param class-string<T> $className
- * @param array{client?: OpenAiClient|string|null, model?: string} $options
+ * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int} $options
  * @return T
  */
 function phore_ai_struct(string|PromptType|ToolType|array $prompts, string $className, array $options = []): object

@@ -85,17 +85,45 @@ final class Toolkit
     /**
      * Creates a configured `PhoreAi` facade from common function options.
      *
-     * @param array{client?: OpenAiClient|string|null, model?: string} $options
+     * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int} $options
      */
     public static function createAi(array $options = []): PhoreAi
     {
-        $ai = new PhoreAi($options['client'] ?? null);
+        $client = $options['client'] ?? null;
+
+        if (!$client instanceof OpenAiClient && (isset($options['timeout']) || isset($options['connect_timeout']))) {
+            $client = self::createOpenAiClientWithTimeouts(
+                is_string($client) ? $client : null,
+                $options['timeout'] ?? OpenAiClient::DEFAULT_TIMEOUT,
+                $options['connect_timeout'] ?? OpenAiClient::DEFAULT_CONNECT_TIMEOUT,
+            );
+        }
+
+        $ai = new PhoreAi($client);
 
         if (isset($options['model'])) {
             $ai = $ai->withModel($options['model']);
         }
 
         return $ai;
+    }
+
+    private static function createOpenAiClientWithTimeouts(?string $dsn, int $timeout, int $connectTimeout): OpenAiClient
+    {
+        if ($dsn === null) {
+            return new OpenAiClient(timeout: $timeout, connectTimeout: $connectTimeout);
+        }
+
+        $prefix = 'openai:';
+        if (!str_starts_with($dsn, $prefix)) {
+            throw new InvalidArgumentException('Unsupported AI client DSN. Expected "openai:<apikey>".');
+        }
+
+        return new OpenAiClient(
+            apiKey: substr($dsn, strlen($prefix)),
+            timeout: $timeout,
+            connectTimeout: $connectTimeout,
+        );
     }
 
     /**

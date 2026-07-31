@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Phore\AiHarness\Client;
 
 use CurlHandle;
+use InvalidArgumentException;
 use Phore\AiHarness\Helper\DataUrl;
 use Phore\AiHarness\Helper\Toolkit;
 use Phore\AiHarness\Keystore\Keystore;
@@ -16,6 +17,9 @@ use RuntimeException;
  */
 final class OpenAiClient
 {
+    public const DEFAULT_TIMEOUT = 600;
+    public const DEFAULT_CONNECT_TIMEOUT = 10;
+
     private readonly string $apiKey;
 
     /**
@@ -26,12 +30,20 @@ final class OpenAiClient
         private readonly ?string $organization = null,
         private readonly ?string $project = null,
         private readonly string $baseUrl = 'https://api.openai.com/v1',
-        private readonly int $timeout = 120,
-        private readonly int $connectTimeout = 10,
+        private readonly int $timeout = self::DEFAULT_TIMEOUT,
+        private readonly int $connectTimeout = self::DEFAULT_CONNECT_TIMEOUT,
         private readonly array $defaultHeaders = [],
     ) {
         if (!extension_loaded('curl')) {
             throw new RuntimeException('The PHP curl extension is required.');
+        }
+
+        if ($this->timeout < 1) {
+            throw new InvalidArgumentException('OpenAI request timeout must be at least 1 second.');
+        }
+
+        if ($this->connectTimeout < 1) {
+            throw new InvalidArgumentException('OpenAI connect timeout must be at least 1 second.');
         }
 
         $this->apiKey = $apiKey !== null && trim($apiKey) !== ''

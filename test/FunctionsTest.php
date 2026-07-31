@@ -63,6 +63,36 @@ final class FunctionsTest extends TestCase
         self::assertSame($client, $ai->getOpenAiClient());
     }
 
+    public function testCreateConfiguresTimeoutOptions(): void
+    {
+        $ai = Toolkit::createAi([
+            'client' => 'openai:test-key',
+            'timeout' => 900,
+            'connect_timeout' => 20,
+        ]);
+
+        $client = $ai->getOpenAiClient();
+
+        self::assertSame(900, $this->readProperty($client, 'timeout'));
+        self::assertSame(20, $this->readProperty($client, 'connectTimeout'));
+    }
+
+    public function testOpenAiClientDefaultTimeoutIsRaised(): void
+    {
+        $client = new OpenAiClient('test-key');
+
+        self::assertSame(600, $this->readProperty($client, 'timeout'));
+        self::assertSame(10, $this->readProperty($client, 'connectTimeout'));
+    }
+
+    public function testOpenAiClientRejectsInvalidTimeout(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('OpenAI request timeout must be at least 1 second');
+
+        new OpenAiClient('test-key', timeout: 0);
+    }
+
     public function testGetLastAiRequestReturnsLastCreatedRequest(): void
     {
         $request = AiRequest::text('gpt-5-mini', 'Hello');
@@ -94,5 +124,10 @@ final class FunctionsTest extends TestCase
         $this->expectExceptionMessage('Expected string, PromptType or ToolType');
 
         Toolkit::normalizePromptItems([new stdClass()]);
+    }
+
+    private function readProperty(object $object, string $property): mixed
+    {
+        return (new ReflectionProperty($object, $property))->getValue($object);
     }
 }
