@@ -37,6 +37,24 @@ final class Toolkit
     }
 
     /**
+     * Decodes any JSON value from raw model output.
+     *
+     * Markdown fenced JSON blocks are accepted and stripped before decoding.
+     *
+     * @throws JsonException
+     */
+    public static function decodeJsonOutputValue(string $output): mixed
+    {
+        $json = trim($output);
+
+        if (preg_match('/^```(?:json)?\s*(.*?)\s*```$/is', $json, $matches) === 1) {
+            $json = trim($matches[1]);
+        }
+
+        return json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+    }
+
+    /**
      * Decodes a JSON object from raw model output.
      *
      * Markdown fenced JSON blocks are accepted and stripped before decoding.
@@ -46,13 +64,7 @@ final class Toolkit
      */
     public static function decodeJsonOutput(string $output): array
     {
-        $json = trim($output);
-
-        if (preg_match('/^```(?:json)?\s*(.*?)\s*```$/is', $json, $matches) === 1) {
-            $json = trim($matches[1]);
-        }
-
-        $decoded = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+        $decoded = self::decodeJsonOutputValue($output);
         if (!is_array($decoded) || array_is_list($decoded)) {
             throw new RuntimeException('Expected JSON object output for casting.');
         }

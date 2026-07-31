@@ -107,6 +107,40 @@ function phore_ai_struct(string|PromptType|ToolType|array $prompts, string $clas
     return $result;
 }
 
+
+/**
+ * Runs a prompt with OpenAI structured output and hydrates the response into a list of PHP objects.
+ *
+ * The model is instructed via structured output to return an object with an `items` array.
+ * Each entry in `items` is hydrated into `$className`.
+ *
+ * Strings are converted to `TextPrompt` instances. Arrays may contain strings,
+ * `PromptType` instances and `ToolType` instances.
+ *
+ * Options:
+ * - `client`: optional `OpenAiClient`, DSN string such as `openai:<key>`, or `null` for Keystore/default client
+ * - `model`: optional OpenAI model name, defaults to `gpt-5-mini`
+ * - `timeout`: optional request timeout in seconds, defaults to `OpenAiClient::DEFAULT_TIMEOUT`
+ * - `connect_timeout`: optional connect timeout in seconds, defaults to `OpenAiClient::DEFAULT_CONNECT_TIMEOUT`
+ *
+ * @template T of object
+ * @param string|PromptType|ToolType|array<int, string|PromptType|ToolType> $prompts
+ * @param class-string<T> $className
+ * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int} $options
+ * @return list<T>
+ */
+function phore_ai_struct_array(string|PromptType|ToolType|array $prompts, string $className, array $options = []): array
+{
+    /** @var list<T> $result */
+    $result = Toolkit::createAi($options)
+        ->with(...Toolkit::normalizePromptItems($prompts))
+        ->runCastedArray($className);
+
+    return $result;
+}
+
+
+
 /**
  * Returns the last OpenAI Responses API request created by this process.
  */

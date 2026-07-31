@@ -51,6 +51,11 @@ final class FunctionsTest extends TestCase
         self::assertSame('image/webp', Toolkit::contentTypeFromImageOutputFormat('webp'));
     }
 
+    public function testStructArrayFunctionExists(): void
+    {
+        self::assertTrue(function_exists('phore_ai_struct_array'));
+    }
+
     public function testCreateUsesClientAndModelOptions(): void
     {
         $client = new OpenAiClient('test-key');

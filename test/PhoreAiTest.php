@@ -76,6 +76,14 @@ final class PhoreAiTest extends TestCase
         (new PhoreAi('openai:test-key'))->runCasted('MissingOutputClass');
     }
 
+    public function testRunCastedArrayRejectsUnknownOutputClass(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Output class does not exist');
+
+        (new PhoreAi('openai:test-key'))->runCastedArray('MissingOutputClass');
+    }
+
     public function testCanConfigureToolsThroughWith(): void
     {
         $phoreAi = (new PhoreAi('openai:test-key'))->with(

@@ -26,6 +26,11 @@ final class ToolkitTest extends TestCase
         self::assertSame(['answer' => 'yes'], Toolkit::decodeJsonOutput("```json\n{\"answer\":\"yes\"}\n```"));
     }
 
+    public function testDecodeJsonOutputValueAcceptsEmptyRootArray(): void
+    {
+        self::assertSame([], Toolkit::decodeJsonOutputValue("```json\n[]\n```"));
+    }
+
     public function testAppendInstructions(): void
     {
         self::assertSame('new', Toolkit::appendInstructions(null, 'new'));

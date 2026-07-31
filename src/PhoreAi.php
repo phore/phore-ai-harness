@@ -183,6 +183,73 @@ final class PhoreAi
         return $object;
     }
 
+    /**
+     * Runs the prompt with OpenAI structured output and hydrates a list of objects into the requested class.
+     *
+     * OpenAI structured output requires an object as root schema, so the model returns
+     * `{ "items": [...] }` and this method hydrates each item in that list.
+     *
+     * @template T of object
+     * @param class-string<T> $outputClass
+     * @return list<T>
+     * @throws JsonException
+     */
+    public function runCastedArray(string $outputClass): array
+    {
+        if (!class_exists($outputClass)) {
+            throw new InvalidArgumentException('Output class does not exist: ' . $outputClass);
+        }
+
+        $schemaParser = new SchemaParser();
+        $classSchema = $schemaParser->parseClass($outputClass);
+        $itemSchema = $classSchema
+            ->toJsonSchema(new JsonSchemaGeneratorOptions(JsonSchemaCompatibility::OpenAiStructuredOutput))
+            ->toArray();
+
+        $request = (new OpenAiPromptTypeConverter())->toAiRequest($this->model, $this->prompts);
+        if ($this->tools !== []) {
+            $request = $request->withTools(...$this->tools);
+        }
+
+        $request = $request->withOutputSchema(
+            substr(Toolkit::schemaName($outputClass) . 'List', 0, 64),
+            [
+                'type' => 'object',
+                'properties' => [
+                    'items' => [
+                        'type' => 'array',
+                        'items' => $itemSchema,
+                    ],
+                ],
+                'required' => ['items'],
+                'additionalProperties' => false,
+            ],
+            'Return the result as an object with an items array. Each item must match the requested PHP class schema.',
+        );
+
+        $response = $this->openAiClient->createResponse($request);
+        $response = $this->resolveCallbackToolCalls($request, $response);
+        $data = Toolkit::decodeJsonOutputValue($response->getOutputText());
+        $items = is_array($data) && array_is_list($data) ? $data : (is_array($data) ? ($data['items'] ?? null) : null);
+
+        if (!is_array($items) || !array_is_list($items)) {
+            throw new InvalidArgumentException('Expected structured array output as a list or as an object with list property "items".');
+        }
+
+        $result = [];
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                throw new InvalidArgumentException('Expected every structured array item to be an object.');
+            }
+
+            /** @var T $object */
+            $object = $classSchema->hydrate($item);
+            $result[] = $object;
+        }
+
+        return $result;
+    }
+
     private function resolveCallbackToolCalls(AiRequest $request, AiResponse $response): AiResponse
     {
         $callbackTools = $this->callbackToolsByName();
