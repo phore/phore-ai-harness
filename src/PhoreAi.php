@@ -7,6 +7,7 @@ namespace Phore\AiHarness;
 use InvalidArgumentException;
 use JsonException;
 use Phore\AiHarness\Client\AiRequest;
+use Phore\AiHarness\Client\AiResponse;
 use Phore\AiHarness\Client\OpenAiClient;
 use Phore\AiHarness\Client\OpenAI\OpenAiPromptTypeConverter;
 use Phore\AiHarness\Helper\DataUrl;
@@ -19,6 +20,7 @@ use Phore\AiHarness\OutputFormat\StructOutput;
 use Phore\AiHarness\OutputFormat\TextOutput;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\Result\ImageResultType;
+use Phore\AiHarness\ToolType\CallbackTool;
 use Phore\AiHarness\ToolType\ImageGenerationTool;
 use Phore\AiHarness\ToolType\ToolType;
 use Phore\Schema\Generator\JsonSchema\JsonSchemaCompatibility;
@@ -125,7 +127,10 @@ final class PhoreAi
         }
         $request = $this->applyOutputFormat($request, $this->outputFormat);
 
-        return $this->openAiClient->createResponse($request)->getOutputText();
+        $response = $this->openAiClient->createResponse($request);
+        $response = $this->resolveCallbackToolCalls($request, $response);
+
+        return $response->getOutputText();
     }
 
     public function runImage(string $contentType = 'image/png'): ImageResultType
@@ -176,6 +181,100 @@ final class PhoreAi
         /** @var T $object */
         $object = (new SchemaParser())->parseClass($outputClass)->hydrate($data);
         return $object;
+    }
+
+    private function resolveCallbackToolCalls(AiRequest $request, AiResponse $response): AiResponse
+    {
+        $callbackTools = $this->callbackToolsByName();
+        if ($callbackTools === []) {
+            return $response;
+        }
+
+        for ($iteration = 0; $iteration < 5; $iteration++) {
+            $outputs = $this->callbackToolCallOutputs($response, $callbackTools);
+            if ($outputs === []) {
+                return $response;
+            }
+
+            $responseId = $response->getId();
+            if ($responseId === null) {
+                return $response;
+            }
+
+            $nextRequest = new AiRequest(
+                model: $this->model,
+                input: $outputs,
+                previousResponseId: $responseId,
+                tools: $request->tools,
+            );
+            $response = $this->openAiClient->createResponse($nextRequest);
+        }
+
+        return $response;
+    }
+
+    /**
+     * @return array<string, CallbackTool>
+     */
+    private function callbackToolsByName(): array
+    {
+        $callbackTools = [];
+        foreach ($this->tools as $tool) {
+            if ($tool instanceof CallbackTool) {
+                $callbackTools[$tool->name()] = $tool;
+            }
+        }
+
+        return $callbackTools;
+    }
+
+    /**
+     * @param array<string, CallbackTool> $callbackTools
+     * @return list<array{type: string, call_id: string, output: string}>
+     * @throws JsonException
+     */
+    private function callbackToolCallOutputs(AiResponse $response, array $callbackTools): array
+    {
+        $output = $response->body['output'] ?? null;
+        if (!is_array($output)) {
+            return [];
+        }
+
+        $toolOutputs = [];
+        foreach ($output as $item) {
+            if (!is_array($item) || ($item['type'] ?? null) !== 'function_call') {
+                continue;
+            }
+            if (!isset($item['name'], $item['call_id'], $item['arguments']) || !is_string($item['name']) || !is_string($item['call_id']) || !is_string($item['arguments'])) {
+                continue;
+            }
+            if (!isset($callbackTools[$item['name']])) {
+                continue;
+            }
+
+            $toolOutputs[] = [
+                'type' => 'function_call_output',
+                'call_id' => $item['call_id'],
+                'output' => $this->invokeCallbackTool($callbackTools[$item['name']], $item['arguments']),
+            ];
+        }
+
+        return $toolOutputs;
+    }
+
+    /**
+     * @throws JsonException
+     */
+    private function invokeCallbackTool(CallbackTool $tool, string $argumentsJson): string
+    {
+        $arguments = json_decode($argumentsJson, true, 512, JSON_THROW_ON_ERROR);
+        if (!is_array($arguments) || array_is_list($arguments)) {
+            throw new InvalidArgumentException('Callback tool arguments must decode to a JSON object.');
+        }
+
+        $result = call_user_func_array($tool->callback(), $arguments);
+
+        return is_string($result) ? $result : Toolkit::jsonEncode($result);
     }
 
     /**

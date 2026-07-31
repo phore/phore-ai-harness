@@ -3,9 +3,15 @@
 declare(strict_types=1);
 
 use Phore\AiHarness\Client\AiRequest;
+use Phore\AiHarness\ToolType\CallbackTool;
 use Phore\AiHarness\ToolType\CodeInterpreterTool;
 use Phore\AiHarness\ToolType\WebAccessTool;
 use PHPUnit\Framework\TestCase;
+
+function aiRequestTestCallbackTool(string $query): string
+{
+    return $query;
+}
 
 final class AiRequestTest extends TestCase
 {
@@ -104,5 +110,16 @@ final class AiRequestTest extends TestCase
             ['type' => 'web_search_preview'],
             ['type' => 'code_interpreter', 'container' => ['type' => 'auto']],
         ], $request->toArray()['tools']);
+    }
+
+    public function testCanSetCallbackToolFromToolTypes(): void
+    {
+        $request = AiRequest::text('gpt-5-mini', 'Search')->withTools(
+            new CallbackTool('aiRequestTestCallbackTool', name: 'search_local'),
+        );
+
+        self::assertSame('function', $request->toArray()['tools'][0]['type']);
+        self::assertSame('search_local', $request->toArray()['tools'][0]['name']);
+        self::assertSame('string', $request->toArray()['tools'][0]['parameters']['properties']['query']['type']);
     }
 }

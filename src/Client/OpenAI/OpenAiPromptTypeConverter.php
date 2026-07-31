@@ -7,8 +7,18 @@ namespace Phore\AiHarness\Client\OpenAI;
 use InvalidArgumentException;
 use JsonException;
 use Phore\AiHarness\Client\AiRequest;
+use Phore\AiHarness\Helper\Toolkit;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\PromptType\SystemPrompt;
+use Phore\AiHarness\ToolType\CallbackTool;
+use Phore\AiHarness\ToolType\ToolType;
+use Phore\Schema\Generator\JsonSchema\JsonClassSchemaGenerator;
+use Phore\Schema\Generator\JsonSchema\JsonSchemaCompatibility;
+use Phore\Schema\Generator\JsonSchema\JsonSchemaGeneratorOptions;
+use Phore\Schema\Parser\SchemaParser;
+use Phore\Schema\Schema\FunctionParameterSchema;
+use Phore\Schema\Schema\FunctionReturnSchema;
+use Phore\Schema\Schema\Type\SchemaType;
 
 /**
  * Converts generic PromptType value objects into OpenAI Responses API fields.
@@ -84,6 +94,114 @@ final readonly class OpenAiPromptTypeConverter
     public function convertPromptToText(PromptType $prompt): string
     {
         return $this->contentConverter->convertPromptToText($prompt);
+    }
+
+    /**
+     * Converts ToolType instances to OpenAI Responses API tool definitions.
+     *
+     * @return array<string, mixed>
+     */
+    public function convertTool(ToolType $tool): array
+    {
+        if ($tool instanceof CallbackTool) {
+            return $this->convertCallbackTool($tool);
+        }
+
+        return $tool->toArray('open_ai');
+    }
+
+    /**
+     * Converts a PHP callback into an OpenAI user function tool definition.
+     *
+     * phore/schema parses the callable signature and PHPDoc. Parameter schemas become the
+     * OpenAI function `parameters` JSON Schema. The parsed return schema is added to the
+     * function description because OpenAI function tools do not have a dedicated return
+     * schema field.
+     *
+     * @return array<string, mixed>
+     */
+    public function convertCallbackTool(CallbackTool $tool): array
+    {
+        $functionSchema = (new SchemaParser())->parseCallable($tool->callback());
+        $description = $tool->description ?? $functionSchema->description;
+        $description = trim($description);
+        if ($description === '') {
+            $description = 'PHP callback function.';
+        }
+
+        $returnDescription = $this->formatReturnDescription($functionSchema->return);
+        if ($returnDescription !== '') {
+            $description .= "\n\n" . $returnDescription;
+        }
+
+        return [
+            'type' => 'function',
+            'name' => $tool->name(),
+            'description' => $description,
+            'parameters' => $this->functionParametersToJsonSchema($functionSchema->parameters, $tool->strict),
+            'strict' => $tool->strict,
+        ];
+    }
+
+    /**
+     * @param list<FunctionParameterSchema> $parameters
+     * @return array<string, mixed>
+     */
+    private function functionParametersToJsonSchema(array $parameters, bool $strict): array
+    {
+        $properties = [];
+        $required = [];
+
+        foreach ($parameters as $parameter) {
+            $property = $this->schemaTypeToJsonSchema($parameter->type);
+            if ($parameter->description !== '') {
+                $property['description'] = $parameter->description;
+            }
+
+            $properties[$parameter->name] = $property;
+
+            if ($strict || (!$parameter->hasDefaultValue && !$parameter->allowsNull)) {
+                $required[] = $parameter->name;
+            }
+        }
+
+        $schema = [
+            'type' => 'object',
+            'properties' => $properties,
+            'additionalProperties' => false,
+        ];
+
+        if ($required !== []) {
+            $schema['required'] = $required;
+        }
+
+        return $schema;
+    }
+
+    private function formatReturnDescription(FunctionReturnSchema $return): string
+    {
+        if ($return->isVoid) {
+            return 'Returns: void.';
+        }
+
+        $jsonSchema = $this->schemaTypeToJsonSchema($return->type);
+        $description = 'Returns JSON matching this schema: ' . Toolkit::jsonEncode($jsonSchema);
+
+        if ($return->description !== '') {
+            $description .= ' ' . $return->description;
+        }
+
+        return $description;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function schemaTypeToJsonSchema(SchemaType $type): array
+    {
+        return (new JsonClassSchemaGenerator())
+            ->generate($type, new JsonSchemaGeneratorOptions(JsonSchemaCompatibility::OpenAiStructuredOutput))
+            ->toArray();
     }
 
     /**

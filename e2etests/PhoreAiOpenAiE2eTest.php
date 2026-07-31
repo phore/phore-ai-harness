@@ -2,12 +2,11 @@
 
 declare(strict_types=1);
 
-use Phore\AiHarness\Client\AiRequest;
-use Phore\AiHarness\Client\OpenAiClient;
 use Phore\AiHarness\Keystore\Keystore;
-use Phore\AiHarness\PhoreAi;
 use Phore\AiHarness\PromptType\SystemPrompt;
 use Phore\AiHarness\PromptType\TextPrompt;
+use Phore\AiHarness\ToolType\CallbackTool;
+use Phore\AiHarness\ToolType\McpTool;
 use PHPUnit\Framework\TestCase;
 
 final readonly class PhoreAiOpenAiE2eAnswer
@@ -38,55 +37,92 @@ final class PhoreAiOpenAiE2eTest extends TestCase
         }
     }
 
-    public function testOpenAiClientCreateResponseAgainstRealApi(): void
+    public function testPhoreAiTextAgainstRealApi(): void
     {
-        $client = new OpenAiClient();
-        $response = $client->createResponse(new AiRequest(
-            model: self::MODEL,
-            input: 'Reply with exactly this token and no extra text: phore-ai-e2e-ok',
-            maxOutputTokens: 256,
-            extraBody: ['reasoning' => ['effort' => 'minimal']],
-        ));
+        $output = phore_ai_text(
+            'Reply with exactly this token and no extra text: phore-ai-e2e-ok',
+            ['model' => self::MODEL],
+        );
 
-        self::assertSame(200, $response->statusCode);
-        self::assertTrue($response->isCompleted());
-        self::assertStringContainsString('phore-ai-e2e-ok', strtolower($response->getOutputText()));
+        self::assertStringContainsString('phore-ai-e2e-ok', strtolower($output));
     }
 
-    public function testPhoreAiRunAgainstRealApi(): void
+    public function testPhoreAiTextWithPromptsAgainstRealApi(): void
     {
-        $output = (new PhoreAi())
-            ->withModel(self::MODEL)
-            ->with(
-                new SystemPrompt('Be deterministic. Return only the requested token.'),
-                new TextPrompt('Reply with exactly this token and no extra text: phore-ai-run-ok'),
-            )
-            ->run();
+        $output = phore_ai_text([
+            new SystemPrompt('Be deterministic. Return only the requested token.'),
+            new TextPrompt('Reply with exactly this token and no extra text: phore-ai-run-ok'),
+        ], ['model' => self::MODEL]);
 
         self::assertStringContainsString('phore-ai-run-ok', strtolower($output));
     }
 
-    public function testPhoreAiRunCastedAgainstRealApi(): void
+    public function testPhoreAiStructAgainstRealApi(): void
     {
-        $answer = (new PhoreAi())
-            ->withModel(self::MODEL)
-            ->with(new TextPrompt(
-                'Create the structured response. Set answer exactly to "structured-ok" and number exactly to 7.',
-            ))
-            ->runCasted(PhoreAiOpenAiE2eAnswer::class);
+        $answer = phore_ai_struct(
+            'Create the structured response. Set answer exactly to "structured-ok" and number exactly to 7.',
+            PhoreAiOpenAiE2eAnswer::class,
+            ['model' => self::MODEL],
+        );
 
         self::assertSame('structured-ok', $answer->answer);
         self::assertSame(7, $answer->number);
     }
 
-    public function testPhoreAiRunImageAgainstRealApi(): void
+    public function testPhoreAiTextWithMockMcpToolAgainstRealApi(): void
     {
-        $image = (new PhoreAi())
-            ->withModel(self::MODEL)
-            ->with(new TextPrompt(
-                'Generate a tiny simple PNG icon: a red circle centered on a plain white background. No text.',
-            ))
-            ->runImage('image/png');
+        try {
+            $answer = phore_ai_text([
+                'Ask the MCP server labelled mock which tools are available. Answer in one short line starting with: mock tools:',
+                new McpTool(
+                    server_label: 'mock',
+                    server_url: 'https://mock.iterate.com/no-auth',
+                ),
+            ], ['model' => self::MODEL]);
+        } catch (Throwable $exception) {
+            if (str_contains($exception->getMessage(), 'Error retrieving tool list from MCP server')) {
+                self::markTestSkipped('Mock MCP server is currently not reachable by OpenAI: ' . $exception->getMessage());
+            }
+
+            throw $exception;
+        }
+
+        self::assertNotFalse(strpos(strtolower($answer), 'mock tools:'), $answer);
+    }
+
+    public function testPhoreAiTextWithCallbackToolAgainstRealApi(): void
+    {
+        $calls = [];
+
+        $answer = phore_ai_text([
+            'Call the function tool create_invoice_marker exactly once with customerId exactly "C-4242" and percent exactly 17. Then answer with the exact tool result and no extra text.',
+            new CallbackTool(
+                function (string $customerId, int $percent) use (&$calls): string {
+                    $calls[] = [
+                        'customerId' => $customerId,
+                        'percent' => $percent,
+                    ];
+
+                    return 'callback-tool-e2e:' . $customerId . ':' . $percent;
+                },
+                name: 'create_invoice_marker',
+                description: 'Creates a deterministic E2E invoice marker from customerId and percent.',
+            ),
+        ], ['model' => self::MODEL]);
+
+        self::assertSame([[
+            'customerId' => 'C-4242',
+            'percent' => 17,
+        ]], $calls);
+        self::assertStringContainsString('callback-tool-e2e:C-4242:17', $answer);
+    }
+
+    public function testPhoreAiImageAgainstRealApi(): void
+    {
+        $image = phore_ai_image(
+            'Generate a tiny simple PNG icon: a red circle centered on a plain white background. No text.',
+            ['model' => self::MODEL, 'output_format' => 'png'],
+        );
 
         self::assertSame('image/png', $image->contentType);
         self::assertSame('png', $image->fileExtension);

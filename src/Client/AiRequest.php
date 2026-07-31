@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Phore\AiHarness\Client;
 
 use InvalidArgumentException;
+use Phore\AiHarness\Client\OpenAI\OpenAiPromptTypeConverter;
 use Phore\AiHarness\ToolType\ToolType;
 
 /**
@@ -118,8 +119,10 @@ final class AiRequest
 
     public function withTools(ToolType ...$tools): self
     {
+        $converter = new OpenAiPromptTypeConverter();
+
         return clone($this, [
-            'tools' => array_map(static fn (ToolType $tool): array => $tool->toArray('open_ai'), $tools),
+            'tools' => array_map(static fn (ToolType $tool): array => $converter->convertTool($tool), $tools),
         ]);
     }
 

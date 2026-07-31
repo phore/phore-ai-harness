@@ -115,6 +115,62 @@ final class ToolTypeTest extends TestCase
         ]))->toArray());
     }
 
+    public function testMcpToolWithTypedRemoteServerOptions(): void
+    {
+        self::assertSame([
+            'type' => 'mcp',
+            'server_label' => 'docs',
+            'server_url' => 'https://example.test/mcp',
+            'authorization' => 'Bearer secret',
+            'headers' => ['X-Tenant' => 'main'],
+            'allowed_tools' => ['search', 'fetch'],
+            'allowed_callers' => ['direct', 'programmatic'],
+            'require_approval' => 'never',
+            'defer_loading' => true,
+        ], (new McpTool(
+            server_label: 'docs',
+            server_url: 'https://example.test/mcp',
+            authorization: 'Bearer secret',
+            headers: ['X-Tenant' => 'main'],
+            allowed_tools: ['search', 'fetch'],
+            allowed_callers: ['direct', 'programmatic'],
+            require_approval: 'never',
+            defer_loading: true,
+        ))->toArray());
+    }
+
+    public function testMcpToolWithConnectorId(): void
+    {
+        self::assertSame([
+            'type' => 'mcp',
+            'server_label' => 'drive',
+            'connector_id' => 'connector_google_drive',
+        ], (new McpTool(
+            server_label: 'drive',
+            connector_id: 'connector_google_drive',
+        ))->toArray());
+    }
+
+    public function testMcpToolRequiresServerUrlOrConnectorId(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('requires exactly one of');
+
+        new McpTool(server_label: 'docs');
+    }
+
+    public function testMcpToolRejectsInvalidAllowedCaller(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Invalid MCP tool allowed caller');
+
+        new McpTool(
+            server_label: 'docs',
+            server_url: 'https://example.test/mcp',
+            allowed_callers: ['batch'],
+        );
+    }
+
     public function testLocalShellTool(): void
     {
         self::assertSame(['type' => 'local_shell'], (new LocalShellTool())->toArray());

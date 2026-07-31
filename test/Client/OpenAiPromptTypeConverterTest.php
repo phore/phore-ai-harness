@@ -11,6 +11,7 @@ use Phore\AiHarness\PromptType\ImagePrompt;
 use Phore\AiHarness\PromptType\StructPrompt;
 use Phore\AiHarness\PromptType\SystemPrompt;
 use Phore\AiHarness\PromptType\TextPrompt;
+use Phore\AiHarness\ToolType\CallbackTool;
 use PHPUnit\Framework\TestCase;
 
 final readonly class OpenAiPromptTypeConverterTestAddress
@@ -20,6 +21,18 @@ final readonly class OpenAiPromptTypeConverterTestAddress
         public int $zip,
     ) {
     }
+}
+
+/**
+ * Looks up a weather forecast.
+ *
+ * @param string $city City name to look up.
+ * @param int $days Number of forecast days.
+ * @return string Short weather summary.
+ */
+function openAiPromptTypeConverterTestLookupWeather(string $city, int $days = 1): string
+{
+    return $city . ':' . $days;
 }
 
 final class OpenAiPromptTypeConverterTest extends TestCase
@@ -178,5 +191,34 @@ final class OpenAiPromptTypeConverterTest extends TestCase
             ]],
             'instructions' => 'Be short.',
         ], $request->toArray());
+    }
+
+    public function testConvertsCallbackToolToOpenAiFunctionTool(): void
+    {
+        $tool = (new OpenAiPromptTypeConverter())->convertCallbackTool(new CallbackTool(
+            'openAiPromptTypeConverterTestLookupWeather',
+            name: 'lookup_weather',
+        ));
+
+        self::assertSame('function', $tool['type']);
+        self::assertSame('lookup_weather', $tool['name']);
+        self::assertStringContainsString('Looks up a weather forecast.', $tool['description']);
+        self::assertStringContainsString('Returns JSON matching this schema:', $tool['description']);
+        self::assertTrue($tool['strict']);
+        self::assertSame([
+            'type' => 'object',
+            'properties' => [
+                'city' => [
+                    'type' => 'string',
+                    'description' => 'City name to look up.',
+                ],
+                'days' => [
+                    'type' => 'integer',
+                    'description' => 'Number of forecast days.',
+                ],
+            ],
+            'additionalProperties' => false,
+            'required' => ['city', 'days'],
+        ], $tool['parameters']);
     }
 }
