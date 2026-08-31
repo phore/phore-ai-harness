@@ -183,7 +183,7 @@ final readonly class OpenAiPromptTypeConverter
 
         $schema = [
             'type' => 'object',
-            'properties' => $properties,
+            'properties' => $properties === [] ? (object) [] : $properties,
             'additionalProperties' => false,
         ];
 

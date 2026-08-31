@@ -337,4 +337,18 @@ final class OpenAiPromptTypeConverterTest extends TestCase
             'required' => ['city', 'days'],
         ], $tool['parameters']);
     }
+
+    public function testConvertsParameterlessCallbackToolPropertiesToJsonObject(): void
+    {
+        $tool = (new OpenAiPromptTypeConverter())->convertCallbackTool(new CallbackTool(
+            static fn (): string => 'file content',
+            name: 'get_file_content',
+        ));
+
+        self::assertInstanceOf(stdClass::class, $tool['parameters']['properties']);
+        self::assertSame(
+            '{"type":"object","properties":{},"additionalProperties":false}',
+            json_encode($tool['parameters'], JSON_THROW_ON_ERROR),
+        );
+    }
 }
