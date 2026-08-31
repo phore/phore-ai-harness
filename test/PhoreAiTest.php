@@ -6,6 +6,7 @@ use Phore\AiHarness\Client\OpenAiClient;
 use Phore\AiHarness\Keystore\Keystore;
 use Phore\AiHarness\PhoreAi;
 use Phore\AiHarness\PromptType\TextPrompt;
+use Phore\AiHarness\ToolType\CallbackTool;
 use Phore\AiHarness\ToolType\CodeInterpreterTool;
 use Phore\AiHarness\ToolType\WebAccessTool;
 use PHPUnit\Framework\TestCase;
@@ -97,6 +98,33 @@ final class PhoreAiTest extends TestCase
             new WebAccessTool(),
             new CodeInterpreterTool(['container' => ['type' => 'auto']]),
         ], $this->readProperty($phoreAi, 'tools'));
+    }
+
+    public function testInvokesParameterlessCallbackToolWithEmptyJsonObjectArguments(): void
+    {
+        $phoreAi = new PhoreAi('openai:test-key');
+        $method = new ReflectionMethod($phoreAi, 'invokeCallbackTool');
+
+        $result = $method->invoke($phoreAi, new CallbackTool(
+            static fn (): string => 'file content',
+            name: 'get_file_content',
+        ), '{}');
+
+        self::assertSame('file content', $result);
+    }
+
+    public function testRejectsCallbackToolArgumentsThatAreJsonArray(): void
+    {
+        $phoreAi = new PhoreAi('openai:test-key');
+        $method = new ReflectionMethod($phoreAi, 'invokeCallbackTool');
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Callback tool arguments must decode to a JSON object.');
+
+        $method->invoke($phoreAi, new CallbackTool(
+            static fn (): string => 'file content',
+            name: 'get_file_content',
+        ), '[]');
     }
 
     private function readOpenAiClientApiKey(OpenAiClient $client): string

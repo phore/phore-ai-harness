@@ -334,8 +334,13 @@ final class PhoreAi
      */
     private function invokeCallbackTool(CallbackTool $tool, string $argumentsJson): string
     {
+        $decodedRoot = json_decode($argumentsJson, false, 512, JSON_THROW_ON_ERROR);
+        if (!$decodedRoot instanceof \stdClass) {
+            throw new InvalidArgumentException('Callback tool arguments must decode to a JSON object.');
+        }
+
         $arguments = json_decode($argumentsJson, true, 512, JSON_THROW_ON_ERROR);
-        if (!is_array($arguments) || array_is_list($arguments)) {
+        if (!is_array($arguments)) {
             throw new InvalidArgumentException('Callback tool arguments must decode to a JSON object.');
         }
 
