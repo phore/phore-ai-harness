@@ -56,6 +56,19 @@ final class FunctionsTest extends TestCase
         self::assertTrue(function_exists('phore_ai_struct_array'));
     }
 
+    public function testFileFunctionExists(): void
+    {
+        self::assertTrue(function_exists('phore_ai_file'));
+    }
+
+    public function testFileFunctionRequiresExistingFile(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Target file must exist');
+
+        phore_ai_file('Change the file.', __DIR__ . '/does-not-exist-' . bin2hex(random_bytes(4)) . '.txt');
+    }
+
     public function testCreateUsesClientAndModelOptions(): void
     {
         $client = new OpenAiClient('test-key');
