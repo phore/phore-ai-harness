@@ -113,6 +113,23 @@ final class PromptTypeTest extends TestCase
         self::assertNotSame('', $prompt->contentType);
     }
 
+    public function testFilePromptFromFileWithMetadata(): void
+    {
+        $fileName = $this->createTempFile('File prompt content');
+
+        $prompt = FilePrompt::fromFile(
+            $fileName,
+            alias: 'sourceFile',
+            instructions: 'Use as the canonical source.',
+            type: 'markdown',
+        );
+
+        self::assertSame($fileName, $prompt->fileName);
+        self::assertSame('sourceFile', $prompt->toArray()['alias']);
+        self::assertSame('Use as the canonical source.', $prompt->toArray()['instructions']);
+        self::assertSame('markdown', $prompt->toArray()['contentFormat']);
+    }
+
     public function testFilePromptWithMetadata(): void
     {
         $prompt = new FilePrompt('example.txt', 'File content', alias: 'contract', instructions: 'Summarize.', type: 'markdown');
