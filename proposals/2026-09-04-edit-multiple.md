@@ -3,6 +3,7 @@
 | Datum | Benutzername | Kurzbeschreibung |
 |---|---|---|
 | 2026-09-04 | dermatthes | §§ 1–10: Proposal angelegt |
+| 2026-09-04 | dermatthes | §§ 3, 6, 8.5, 9–10: Patch-Modus, Format, Prompt und Fallback ergänzt |
 
 ## § 1 Kurzfassung
 
@@ -27,6 +28,7 @@ Nicht Ziel der ersten Version sind freie Verzeichniszugriffe, Shell-Zugriff, unb
  * @param class-string<T>|null $className
  * @param array{
  *     context_mode?: 'auto'|'eager'|'lazy',
+ *     write_mode?: 'auto'|'replace'|'patch',
  *     max_context_bytes?: int,
  *     max_file_bytes?: int,
  *     client?: OpenAiClient|string|null,
@@ -82,7 +84,11 @@ Vorgeschlagenes logisches Tool-Schema:
 
 `ids` fordert vollständige Dateien an. `ranges` ist optional und erlaubt gezielte Ausschnitte; eine ID darf innerhalb eines Aufrufs nur einmal verwendet werden. Die konkrete PHP-Callback-Signatur muss Typen verwenden, die `phore/schema` sicher in ein striktes OpenAI-Tool-Schema übersetzen kann, beispielsweise parallele Listen oder dedizierte DTOs statt verschachtelter PHPDoc-Array-Shapes.
 
-## § 6 Write-Tool im Batch-Modus
+## § 6 Schreibwerkzeuge im Batch-Modus
+
+Der Harness bietet zwei kontrollierte Schreibmechanismen: vollständigen Ersatz über `write_files` und für lokale Änderungen an großen bestehenden Textdateien einen Patch-Modus. `write_mode` steuert die Auswahl: `replace` stellt nur `write_files` bereit, `patch` nur den Patch-Modus und `auto` beide Werkzeuge. Im Auto-Modus wählt das Modell pro Datei genau einen Mechanismus; beide Mechanismen dürfen für dieselbe Datei innerhalb eines Auftrags nicht gemischt werden.
+
+### § 6.1 Vollständiger Batch-Replace
 
 Das Tool `write_files` akzeptiert in genau einem Aufruf eine oder mehrere freigegebene Write-Datei-IDs und den jeweils vollständigen resultierenden Inhalt. Read-only-IDs und unbekannte IDs werden vor jedem Dateizugriff abgewiesen. Alle Argumente, Duplikate, Zielrollen und aktuellen Dateihashes werden vollständig validiert, bevor der erste Schreibvorgang beginnt.
 
@@ -96,6 +102,48 @@ Vorgeschlagenes logisches Tool-Schema:
 ```
 
 Die Listen müssen dieselbe Länge besitzen. Für jede bestehende Write-Datei wird vor dem Schreiben geprüft, ob ihr Hash noch dem Manifest entspricht; bei zwischenzeitlicher Änderung bricht der gesamte Batch vor dem ersten Write mit einem Konflikt ab. Danach werden Inhalte zunächst in temporäre Dateien im jeweiligen Zielverzeichnis geschrieben und erst nach erfolgreicher Vorbereitung ersetzt. Eine echte dateisystemübergreifende Transaktion ist nicht möglich und wird nicht zugesichert; Fehler und bereits erfolgte Ersetzungen müssen in der Exception nachvollziehbar sein.
+
+### § 6.2 Patch-Modus für große Dateien
+
+Ein Patch-Modus ist sinnvoll, wenn eine große bestehende Textdatei nur lokal geändert wird: Das Modell gibt dann nur entfernte und hinzugefügte Zeilen mit kleinem unverändertem Kontext aus, statt den vollständigen neuen Dateiinhalt erneut zu übertragen. Er ist dagegen ungeeignet für binäre Dateien, neue Dateien, fast vollständige Umschreibungen oder Änderungen, deren Ausgangskontext nicht exakt gelesen wurde. `write_files` bleibt deshalb der robuste Standard und der Fallback für kleine Dateien sowie breite Änderungen.
+
+Für OpenAI-Responses-Modelle wird vorrangig das native Tool `{"type":"apply_patch"}` empfohlen. Laut [OpenAI-Dokumentation](https://developers.openai.com/api/docs/guides/tools-apply-patch) erzeugt es `apply_patch_call`-Objekte mit genau einer Operation `create_file`, `update_file` oder `delete_file`; bei `update_file` enthält `operation.diff` einen hunk-basierten Diff ohne Dateiheader. Für diesen Helper werden nur `update_file` auf bestehenden freigegebenen Write-Zielen zugelassen; Erzeugen erfolgt über `write_files`, Löschen und Umbenennen bleiben außerhalb des Scopes.
+
+Beispiel einer erwarteten nativen Operation, wobei `path` die kurze Manifest-ID und keinen frei erzeugten Dateisystempfad enthält:
+
+```json
+{
+  "type": "apply_patch_call",
+  "operation": {
+    "type": "update_file",
+    "path": "w1",
+    "diff": "@@ function renderTitle()\n-    return oldTitle;\n+    return newTitle;"
+  }
+}
+```
+
+Der Harness löst `w1` erst nach erfolgreicher Rollen-, Hash- und Kontextprüfung auf den kanonischen Zielpfad auf, wendet den Patch ohne Shell-Ausführung auf eine temporäre Kopie an und ersetzt die Originaldatei erst nach vollständigem Erfolg. Ein Hunk ohne passenden Kontext, eine unbekannte oder Read-only-ID, ein Hash-Konflikt, Pfadwechsel, Erzeugen, Löschen, binäre Inhalte und Teilanwendung führen fail-closed zu einem fehlgeschlagenen Tool-Ergebnis; die Originaldatei bleibt unverändert.
+
+### § 6.3 Alternativformat und Modell-Prompt
+
+Wenn der verwendete Provider das native Responses-Tool nicht unterstützt, wird als Fallback ein Freeform-Tool `apply_patch` mit der von OpenAI Codex veröffentlichten [Lark-Grammatik](https://github.com/openai/codex/blob/main/codex-rs/core/assets/tools/apply_patch.lark) empfohlen. Codex beschreibt dieses Tool ausdrücklich als [für GPT-5-Modelle geeignet](https://github.com/openai/codex/blob/main/codex-rs/core/src/tools/handlers/apply_patch_spec.rs). Sein Format kapselt `*** Update File: w1` und einen oder mehrere `@@`-Hunks zwischen `*** Begin Patch` und `*** End Patch`; es wird als rohe Freeform-Eingabe und nicht als JSON-String übergeben. Das klassische Git-Unified-Diff ist als eigenes Modellformat weniger passend, weil Dateiheader und korrekte Zeilenzähler zusätzliche Fehlerquellen schaffen; seine Sicherheitssemantik bleibt jedoch Vorbild: [`git apply`](https://git-scm.com/docs/git-apply) erwartet Kontextzeilen, verwirft standardmäßig den gesamten Patch, wenn ein Hunk nicht passt, und weist Pfade außerhalb des Arbeitsbereichs ab.
+
+Vorgeschlagene zusätzliche System-Instruktion:
+
+```text
+Edit only write targets listed in the immutable manifest.
+For each changed file, use exactly one write mechanism:
+- use write_files for new, small, or broadly rewritten files;
+- use apply_patch for localized changes to large existing text files.
+Before patching, read the exact current lines around every edit.
+Use only the manifest ID as the patch path and include unchanged context in every hunk.
+Never create, delete, rename, or patch read-only or unknown targets.
+Do not mix write_files and apply_patch for the same file.
+If a patch fails, read the current range again and retry once with smaller hunks or more context.
+If it still fails and the full file fits the configured budget, fall back to write_files; otherwise return a clear error.
+```
+
+Native `apply_patch` und das Freeform-Fallback werden niemals gleichzeitig angeboten. Nach jedem Patch-Aufruf meldet der Harness Status, Datei-ID, angewendete Hunk-Zahl, neue Byte-Länge und SHA-256-Hash oder bei Fehlern einen knappen Grund sowie den ersten nicht passenden Kontext zurück, damit das Modell gezielt nachlesen und höchstens einmal korrigieren kann.
 
 ## § 7 Ergebnis und Meta-Informationen
 
@@ -137,21 +185,22 @@ Manifest und unveränderte Read-only-Inhalte sollten in stabiler Reihenfolge vor
 
 ### § 8.5 Ausgabevolumen
 
-Vollständige neue Inhalte erscheinen ausschließlich in den Argumenten des einmaligen `write_files`-Aufrufs und werden weder in dessen Antwort noch in der abschließenden Text- oder Struct-Ausgabe wiederholt. Für sehr große Änderungen kann ein späterer Patch-Modus Token sparen, sollte aber erst nach zuverlässiger Patch-Validierung, Konflikterkennung und Fallback auf vollständigen Inhalt eingeführt werden.
+Im Replace-Modus erscheinen vollständige neue Inhalte ausschließlich in den Argumenten des einmaligen `write_files`-Aufrufs und werden weder in dessen Antwort noch in der abschließenden Text- oder Struct-Ausgabe wiederholt. Im Patch-Modus werden für große bestehende Textdateien nur die betroffenen Hunks mit unverändertem Kontext übertragen. Die Auswahl richtet sich nicht allein nach der Dateigröße: Bei einer fast vollständigen Umschreibung ist ein Replace kleiner und robuster, während bei wenigen lokalen Änderungen ein Patch deutlich weniger Output-Tokens benötigt. Das technische Tool-Ergebnis bleibt in beiden Fällen kompakt.
 
 ## § 9 Ausführungsablauf und Fehlerfälle
 
-1. Parameter normalisieren, Pfade kanonisieren, Rollen und Optionen validieren.
+1. Parameter normalisieren, Pfade kanonisieren, Rollen, `context_mode` und `write_mode` validieren.
 2. Manifest mit Hashes erstellen und Kontextmodus pro Datei bestimmen.
-3. Initialen Request mit Arbeitsauftrag, Manifest, eingebetteten Dateien sowie `read_files` und `write_files` erzeugen.
+3. Initialen Request mit Arbeitsauftrag, Manifest, eingebetteten Dateien, `read_files` und den durch `write_mode` erlaubten Schreibwerkzeugen erzeugen.
 4. Null oder mehr Batch-Reads ausführen; Zahl der Tool-Runden und gelesene Gesamtbytes begrenzen.
-5. Genau einen Batch-Write für alle in diesem Auftrag geänderten Write-Dateien ausführen.
-6. Text oder Structured Output erzeugen und erst nach erfolgreichem Write zurückgeben.
+5. Im Replace-Modus genau einen Batch-Write ausführen; im Patch-Modus eine logisch zusammengehörige Patch-Phase mit höchstens einem erfolgreichen Patch pro Datei ausführen; im Auto-Modus den Mechanismus je Datei festlegen und nicht mischen.
+6. Jeden Replace oder Patch vollständig gegen Rollen, Manifest-Hash, erlaubte Operationen und aktuellen Dateistand prüfen, zunächst temporär anwenden und erst nach vollständigem Erfolg ersetzen.
+7. Text oder Structured Output erzeugen und erst nach erfolgreicher Änderung oder `complete_without_changes` zurückgeben.
 
-Nicht lesbare Read-only-Dateien, Rollenüberschneidungen, unbekannte IDs, ungültige Ranges, Budgetüberschreitungen im Eager-Modus, Hash-Konflikte und teilweise fehlgeschlagene Writes werden mit spezifischen Exceptions gemeldet. Wenn keine inhaltliche Änderung erforderlich ist, benötigt das Protokoll entweder einen expliziten leeren bestätigenden `write_files`-Aufruf oder ein separates `complete_without_changes`-Signal; empfohlen wird das separate Signal, damit „kein Write notwendig“ von „Modell hat das Write vergessen“ unterscheidbar bleibt.
+Nicht lesbare Read-only-Dateien, Rollenüberschneidungen, unbekannte IDs, ungültige Ranges, Budgetüberschreitungen im Eager-Modus, Hash-Konflikte, nicht passende Patch-Hunks, unerlaubte Patch-Operationen und teilweise fehlgeschlagene Writes werden mit spezifischen Exceptions beziehungsweise fehlgeschlagenen Tool-Ergebnissen gemeldet. Ein Patch-Fehler darf genau einen kontrollierten Read-und-Retry-Zyklus auslösen; anschließend ist nur ein budgetkonformer vollständiger Replace zulässig, andernfalls bricht der Auftrag klar ab. Wenn keine inhaltliche Änderung erforderlich ist, wird `complete_without_changes` verwendet, damit „kein Write notwendig“ von „Modell hat das Write vergessen“ unterscheidbar bleibt.
 
 ## § 10 Entscheidung und Umsetzungsschritte
 
-Empfohlen wird die Umsetzung als eigener Helper `phore_ai_edit_multiple()` mit gemeinsamem internem Executor für `phore_ai_edit_file()`. Der Standardmodus ist `auto`, Write-Dateien werden soweit budgetkonform vorab eingebettet, Read-only-Dateien zunächst nur als Manifest angeboten, und Lesen sowie Schreiben erfolgen batchfähig. Diese Aufteilung hält den einfachen Helper klein, ohne die leistungsfähigere API mit impliziten Sonderfällen zu belasten.
+Empfohlen wird die Umsetzung als eigener Helper `phore_ai_edit_multiple()` mit gemeinsamem internem Executor für `phore_ai_edit_file()`. Der Standardmodus ist `context_mode: auto` und `write_mode: auto`: Write-Dateien werden soweit budgetkonform vorab eingebettet, Read-only-Dateien zunächst nur als Manifest angeboten, vollständige Änderungen werden batchfähig geschrieben und lokale Änderungen an großen bestehenden Textdateien bevorzugt gepatcht. Wenn der aktuelle OpenAI-Transport das native Responses-`apply_patch` unterstützt, wird dieses Format verwendet; andernfalls kann dieselbe Semantik über genau ein grammatikgebundenes Codex-Freeform-Tool bereitgestellt werden.
 
-Die Umsetzung sollte in vier getrennt prüfbaren Schritten erfolgen: erstens Manifest, Rollenvalidierung und DTOs; zweitens Batch-Read mit Budgets und Ranges; drittens Batch-Write mit Hash-Konfliktschutz und vorbereiteten temporären Dateien; viertens Integration von Text-/Struct-Ergebnis, Dokumentation und End-to-End-Tests. Patch-Modus, lokale Suche, Token-Schätzung und Summary-Caching bleiben optionale Folgeausbaustufen.
+Die Umsetzung sollte in fünf getrennt prüfbaren Schritten erfolgen: erstens Manifest, Rollenvalidierung und DTOs; zweitens Batch-Read mit Budgets und Ranges; drittens Batch-Replace mit Hash-Konfliktschutz und vorbereiteten temporären Dateien; viertens Integration von Text-/Struct-Ergebnis und `complete_without_changes`; fünftens nativer Patch-Transport beziehungsweise Freeform-Fallback mit Parser, fail-closed Validierung, Retry-Grenze, Prompt, Unit- und End-to-End-Tests. Lokale Suche, Token-Schätzung und Summary-Caching bleiben optionale Folgeausbaustufen.
