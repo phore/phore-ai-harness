@@ -8,6 +8,9 @@ use Phore\AiHarness\PhoreAi;
 use Phore\AiHarness\PromptType\TextPrompt;
 use Phore\AiHarness\ToolType\CallbackTool;
 use Phore\AiHarness\ToolType\CodeInterpreterTool;
+use Phore\AiHarness\ToolType\RecoverableToolException;
+use Phore\AiHarness\ToolType\TaskErrorException;
+use Phore\AiHarness\ToolType\TaskErrorTool;
 use Phore\AiHarness\ToolType\WebAccessTool;
 use PHPUnit\Framework\TestCase;
 
@@ -125,6 +128,57 @@ final class PhoreAiTest extends TestCase
             static fn (): string => 'file content',
             name: 'get_file_content',
         ), '[]');
+    }
+
+    public function testReturnsRecoverableCallbackToolExceptionToModel(): void
+    {
+        $phoreAi = new PhoreAi('openai:test-key');
+        $method = new ReflectionMethod($phoreAi, 'invokeCallbackTool');
+
+        $result = $method->invoke($phoreAi, new CallbackTool(
+            static fn (): never => throw new RecoverableToolException('File not found. Check the path and retry.'),
+            name: 'read_file',
+        ), '{}');
+
+        self::assertSame([
+            'ok' => false,
+            'error' => [
+                'type' => 'recoverable_tool_error',
+                'message' => 'File not found. Check the path and retry.',
+                'retryable' => true,
+            ],
+            'instruction' => 'Correct the tool input or choose another approach, then continue.',
+        ], json_decode($result, true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    public function testPropagatesRegularCallbackToolException(): void
+    {
+        $phoreAi = new PhoreAi('openai:test-key');
+        $method = new ReflectionMethod($phoreAi, 'invokeCallbackTool');
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Database connection failed.');
+
+        $method->invoke($phoreAi, new CallbackTool(
+            static fn (): never => throw new RuntimeException('Database connection failed.'),
+            name: 'load_record',
+        ), '{}');
+    }
+
+    public function testPropagatesModelTriggeredTaskErrorException(): void
+    {
+        $phoreAi = new PhoreAi('openai:test-key');
+        $method = new ReflectionMethod($phoreAi, 'invokeCallbackTool');
+
+        $this->expectException(TaskErrorException::class);
+
+        $method->invoke($phoreAi, new TaskErrorTool(), json_encode([
+            'errorType' => 'missing_information',
+            'contradictoryOrAmbiguousStatements' => 'n/a',
+            'missingInformation' => 'deployment target',
+            'requestedAt' => 'ask the user',
+            'reason' => 'The target determines the deployment procedure.',
+        ], JSON_THROW_ON_ERROR));
     }
 
     private function readOpenAiClientApiKey(OpenAiClient $client): string
