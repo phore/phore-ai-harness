@@ -187,26 +187,31 @@ function phore_ai_edit_file(string|PromptType|ToolType|array $prompts, string|ar
 
     $writeFilesTool = new CallbackTool(
         /**
-         * @param list<array{filename: string, content: string}> $files Complete resulting content keyed by target filename.
+         * @param list<string> $filenames Exact supplied filenames to write.
+         * @param list<string> $contents Complete resulting contents in matching order.
          */
-        static function (array $files) use ($targetFiles, &$filesWereWritten): string {
-            if ($files === []) {
+        static function (array $filenames, array $contents) use ($targetFiles, &$filesWereWritten): string {
+            if ($filenames === []) {
                 throw new InvalidArgumentException('At least one file must be written.');
+            }
+            if (count($filenames) !== count($contents)) {
+                throw new InvalidArgumentException('Filenames and contents must contain the same number of items.');
             }
 
             $contentsByFilename = [];
-            foreach ($files as $file) {
-                if (!is_array($file) || !isset($file['filename'], $file['content']) || !is_string($file['filename']) || !is_string($file['content'])) {
-                    throw new InvalidArgumentException('Every file must contain string filename and content values.');
+            foreach ($filenames as $index => $targetFilename) {
+                $content = $contents[$index] ?? null;
+                if (!is_string($targetFilename) || !is_string($content)) {
+                    throw new InvalidArgumentException('Every filename and content must be a string.');
                 }
-                if (!isset($targetFiles[$file['filename']])) {
-                    throw new InvalidArgumentException('Cannot write file outside the supplied targets: ' . $file['filename']);
+                if (!isset($targetFiles[$targetFilename])) {
+                    throw new InvalidArgumentException('Cannot write file outside the supplied targets: ' . $targetFilename);
                 }
-                if (isset($contentsByFilename[$file['filename']])) {
-                    throw new InvalidArgumentException('Cannot write the same target file twice: ' . $file['filename']);
+                if (isset($contentsByFilename[$targetFilename])) {
+                    throw new InvalidArgumentException('Cannot write the same target file twice: ' . $targetFilename);
                 }
 
-                $contentsByFilename[$file['filename']] = $file['content'];
+                $contentsByFilename[$targetFilename] = $content;
             }
 
             $writtenFiles = [];
@@ -223,7 +228,7 @@ function phore_ai_edit_file(string|PromptType|ToolType|array $prompts, string|ar
             return Toolkit::jsonEncode(['files' => $writtenFiles]);
         },
         'write_files',
-        'Replaces one or more supplied target files in one call. Pass the exact supplied filename and the complete resulting content for every file to write.',
+        'Replaces one or more supplied target files in one call. Pass exact supplied filenames and their complete resulting contents at matching list positions.',
     );
 
     $items = Toolkit::normalizePromptItems($prompts);

@@ -87,6 +87,8 @@ final class FunctionsTest extends TestCase
             self::assertNotNull($request);
             self::assertCount(1, $request->tools ?? []);
             self::assertSame('write_files', $request->tools[0]['name'] ?? null);
+            self::assertSame('string', $request->tools[0]['parameters']['properties']['filenames']['items']['type'] ?? null);
+            self::assertSame('string', $request->tools[0]['parameters']['properties']['contents']['items']['type'] ?? null);
             self::assertSame($firstFile, $request->input[0]['content'][2]['filename'] ?? null);
             self::assertStringContainsString(base64_encode('First original'), $request->input[0]['content'][2]['file_data'] ?? '');
             self::assertSame($secondFile, $request->input[0]['content'][4]['filename'] ?? null);
