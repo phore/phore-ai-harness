@@ -51,13 +51,12 @@ final class FunctionsTest extends TestCase
         self::assertSame('image/webp', Toolkit::contentTypeFromImageOutputFormat('webp'));
     }
 
-    public function testStructArrayFunctionExists(): void
+    public function testAiFunctionsExist(): void
     {
+        self::assertTrue(function_exists('phore_ai_text'));
+        self::assertTrue(function_exists('phore_ai_image'));
+        self::assertTrue(function_exists('phore_ai_struct'));
         self::assertTrue(function_exists('phore_ai_struct_array'));
-    }
-
-    public function testFileFunctionExists(): void
-    {
         self::assertTrue(function_exists('phore_ai_file'));
     }
 
