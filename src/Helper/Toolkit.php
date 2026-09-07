@@ -27,7 +27,7 @@ final class Toolkit
      */
     public static function jsonEncode(mixed $data, bool $pretty = false): string
     {
-        $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR;
+        $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR;
 
         if ($pretty) {
             $flags |= JSON_PRETTY_PRINT;
