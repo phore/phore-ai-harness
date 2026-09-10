@@ -25,8 +25,8 @@ The generic engine, JSON Pointer, policies and stable-array codec are provided b
 `Phore\JsonPatch\` namespace. AI Harness retains typed hydration, schema validation,
 provider output parsing and the single-request helper. The former generic
 `Phore\AiHarness\Patch\` classes have moved; update their imports to the new namespace.
-The extraction depends on the new package being available before this change is merged.
-
+Composer installs the published [`phore/json-patch`](https://packagist.org/packages/phore/json-patch)
+package through the declared `dev-main` dependency.
 
 ```php
 use Phore\JsonPatch\{JsonPatch, JsonPatchApplier, PatchApplyOptions};
