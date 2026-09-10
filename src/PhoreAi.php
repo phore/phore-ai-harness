@@ -22,6 +22,7 @@ use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\Result\ImageResultType;
 use Phore\AiHarness\ToolType\CallbackTool;
 use Phore\AiHarness\ToolType\ImageGenerationTool;
+use Phore\AiHarness\ToolType\RecoverableToolException;
 use Phore\AiHarness\ToolType\ToolType;
 use Phore\Schema\Generator\JsonSchema\JsonSchemaCompatibility;
 use Phore\Schema\Generator\JsonSchema\JsonSchemaGeneratorOptions;
@@ -344,7 +345,19 @@ final class PhoreAi
             throw new InvalidArgumentException('Callback tool arguments must decode to a JSON object.');
         }
 
-        $result = call_user_func_array($tool->callback(), $arguments);
+        try {
+            $result = call_user_func_array($tool->callback(), $arguments);
+        } catch (RecoverableToolException $exception) {
+            return Toolkit::jsonEncode([
+                'ok' => false,
+                'error' => [
+                    'type' => 'recoverable_tool_error',
+                    'message' => $exception->getMessage(),
+                    'retryable' => true,
+                ],
+                'instruction' => 'Correct the tool input or choose another approach, then continue.',
+            ]);
+        }
 
         return is_string($result) ? $result : Toolkit::jsonEncode($result);
     }
