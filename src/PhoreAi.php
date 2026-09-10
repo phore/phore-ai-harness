@@ -313,7 +313,7 @@ final class PhoreAi
             );
             if ($context !== null) {
                 // Keep instructions and structured-output constraints on every debug follow-up.
-                $nextRequest = clone($request, ['input' => $outputs, 'previousResponseId' => $responseId]);
+                $nextRequest = $request->withFollowUp($outputs, $responseId);
                 if ($context->retryPending) {
                     $context->retries++;
                     $context->retryPending = false;

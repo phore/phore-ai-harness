@@ -76,6 +76,15 @@ final class AiRequest
         return array_replace_recursive($body, $this->extraBody);
     }
 
+    /** @param string|array<mixed> $input */
+    public function withFollowUp(string|array $input, string $previousResponseId): self
+    {
+        return clone($this, [
+            'input' => $input,
+            'previousResponseId' => $previousResponseId,
+        ]);
+    }
+
     public function withInstructions(string $instructions): self
     {
         return clone($this, [

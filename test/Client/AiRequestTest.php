@@ -15,6 +15,40 @@ function aiRequestTestCallbackTool(string $query): string
 
 final class AiRequestTest extends TestCase
 {
+    public function testFollowUpPreservesSettingsWithoutMutatingOriginal(): void
+    {
+        $request = new AiRequest(
+            model: 'gpt-5-mini',
+            input: 'Original prompt',
+            instructions: 'Keep the required format',
+            maxOutputTokens: 123,
+            temperature: 0.2,
+            text: ['format' => ['type' => 'json_object']],
+            metadata: ['tenant' => 'test'],
+            previousResponseId: 'response-original',
+            tools: [['type' => 'function', 'name' => 'sample']],
+            toolChoice: 'auto',
+            parallelToolCalls: false,
+            stream: true,
+            extraBody: ['reasoning' => ['effort' => 'low']],
+        );
+        $originalProperties = get_object_vars($request);
+        $originalPayload = $request->toArray();
+        $outputs = [['type' => 'function_call_output', 'call_id' => 'call-1', 'output' => '7']];
+
+        $followUp = $request->withFollowUp($outputs, 'response-next');
+
+        self::assertNotSame($request, $followUp);
+        self::assertSame($originalProperties, get_object_vars($request));
+        self::assertSame($originalPayload, $request->toArray());
+        self::assertSame(array_replace($originalProperties, [
+            'input' => $outputs, 'previousResponseId' => 'response-next',
+        ]), get_object_vars($followUp));
+        self::assertSame(array_replace($originalPayload, [
+            'input' => $outputs, 'previous_response_id' => 'response-next',
+        ]), $followUp->toArray());
+    }
+
     public function testSerializesResponsesApiPayload(): void
     {
         $request = new AiRequest(
