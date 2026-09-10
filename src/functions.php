@@ -116,6 +116,56 @@ function phore_ai_struct(string|PromptType|ToolType|array $prompts, string $clas
     return $result;
 }
 
+/**
+ * Edits an existing struct using one bounded model batch. The original is never mutated.
+ * See docs/struct-patch.md for policies, stable addressing and result metadata.
+ * ToolType inputs are rejected: patch generation must not invoke side-effecting tools.
+ *
+ * @template T of object
+ * @param T $target
+ * @return T|\Phore\AiHarness\Patch\PatchApplyResult
+ */
+function phore_ai_edit_struct(string|PromptType|ToolType|array $prompts, object $target, array $options = []): object
+{
+    if (($options['mode'] ?? 'patch') !== 'patch') {
+        throw new InvalidArgumentException('Only explicit patch mode is supported.');
+    }
+    $addressing = $options['addressing'] ?? 'pointer';
+    if (!in_array($addressing, ['pointer', 'stable'], true)) {
+        throw new InvalidArgumentException('addressing must be pointer or stable.');
+    }
+    $policy = \Phore\AiHarness\Patch\PatchApplyOptions::fromArray($options);
+    $items = Toolkit::normalizePromptItems($prompts);
+    foreach ($items as $item) {
+        if ($item instanceof ToolType) {
+            throw new InvalidArgumentException('Struct patch generation does not accept tools.');
+        }
+    }
+    $snapshot = \Phore\AiHarness\Patch\JsonValue::copy($target);
+    \Phore\AiHarness\Patch\JsonPatchApplier::checkDocument($snapshot, $policy);
+    $hash = \Phore\AiHarness\Patch\JsonValue::hash($snapshot);
+    if ($policy->expectedHash !== null && !hash_equals($policy->expectedHash, $hash)) {
+        throw new \Phore\AiHarness\Patch\PatchConflictException('hash_conflict');
+    }
+    $schema = \Phore\AiHarness\Patch\StructSchemaValidator::forClass($target::class);
+    (new \Phore\AiHarness\Patch\StructSchemaValidator())->assertValid($snapshot, $schema);
+    $view = $addressing === 'stable'
+        ? (new \Phore\AiHarness\Patch\StableArrayView($options['identity_pointers'] ?? []))->encode($snapshot)
+        : $snapshot;
+    \Phore\AiHarness\Patch\JsonPatchApplier::checkDocument($view, $policy);
+    $items[] = new SystemPrompt(\Phore\AiHarness\Patch\StructPatchPrompt::instructions($addressing, $policy, $view));
+    $items[] = new \Phore\AiHarness\PromptType\TextPrompt(\Phore\AiHarness\Patch\JsonValue::encode([
+        'target' => $view, 'target_schema' => $schema, 'expected_hash' => $hash,
+    ]));
+    $format = new \Phore\AiHarness\OutputFormat\StructPatchOutput($policy);
+    $output = Toolkit::createAi($options)->with(...$items)->withOutput($format)->run();
+    $patch = $format->parse($output);
+    // Detect changes during the model call even when no explicit expected_hash was supplied.
+    $options['expected_hash'] = $hash;
+    $result = (new \Phore\AiHarness\Patch\StructPatcher())->apply($target, $patch, $options);
+    return ($options['dry_run'] ?? false) || ($options['return_patch'] ?? false) ? $result : $result->value;
+}
+
 
 /**
  * Runs a prompt with OpenAI structured output and hydrates the response into a list of PHP objects.

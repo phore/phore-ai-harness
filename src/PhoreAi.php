@@ -20,6 +20,7 @@ use Phore\AiHarness\OutputFormat\FileOutput;
 use Phore\AiHarness\OutputFormat\ImageOutput;
 use Phore\AiHarness\OutputFormat\OutputFormat;
 use Phore\AiHarness\OutputFormat\StructOutput;
+use Phore\AiHarness\OutputFormat\StructPatchOutput;
 use Phore\AiHarness\OutputFormat\TextOutput;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\Result\ImageResultType;
@@ -532,6 +533,10 @@ final class PhoreAi
                 $request->instructions,
                 'Expected text output: ' . $outputFormat->description,
             ));
+        }
+
+        if ($outputFormat instanceof StructPatchOutput) {
+            return $request->withOutputSchema('StructPatch', $outputFormat->jsonSchema());
         }
 
         if ($outputFormat instanceof StructOutput) {

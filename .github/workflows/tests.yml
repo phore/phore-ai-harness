@@ -6,7 +6,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     container:
-      image: php:8.4-cli
+      image: php:8.5-cli
 
     steps:
       - uses: actions/checkout@v4
