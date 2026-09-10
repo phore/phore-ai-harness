@@ -7,6 +7,7 @@ use Phore\AiHarness\Client\AiResponse;
 use Phore\AiHarness\Client\OpenAiClient;
 use Phore\AiHarness\Helper\DataUrl;
 use Phore\AiHarness\Helper\Toolkit;
+use Phore\AiHarness\Logging\LoggerInterface;
 use Phore\AiHarness\PromptType\FilePrompt;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\PromptType\SystemPrompt;
@@ -22,13 +23,14 @@ use Phore\AiHarness\ToolType\ToolType;
  * `PromptType` instances and `ToolType` instances.
  *
  * Options:
+ * - `debug_log`: false (default), true for ConsoleLogger on STDERR, or a LoggerInterface
  * - `client`: optional `OpenAiClient`, DSN string such as `openai:<key>`, or `null` for Keystore/default client
  * - `model`: optional OpenAI model name, defaults to `gpt-5-mini`
  * - `timeout`: optional request timeout in seconds, defaults to `OpenAiClient::DEFAULT_TIMEOUT`
  * - `connect_timeout`: optional connect timeout in seconds, defaults to `OpenAiClient::DEFAULT_CONNECT_TIMEOUT`
  *
  * @param string|PromptType|ToolType|array<int, string|PromptType|ToolType> $prompts
- * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int} $options
+ * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int, debug_log?: bool|LoggerInterface} $options
  */
 function phore_ai_text(string|PromptType|ToolType|array $prompts, array $options = []): string
 {
@@ -45,6 +47,7 @@ function phore_ai_text(string|PromptType|ToolType|array $prompts, array $options
  * is provided in the prompt list, one is created from image-related options.
  *
  * Options:
+ * - `debug_log`: false (default), true for ConsoleLogger on STDERR, or a LoggerInterface
  * - `client`: optional `OpenAiClient`, DSN string such as `openai:<key>`, or `null` for Keystore/default client
  * - `model`: optional OpenAI model name, defaults to `gpt-5-mini`
  * - `timeout`: optional request timeout in seconds, defaults to `OpenAiClient::DEFAULT_TIMEOUT`
@@ -60,6 +63,7 @@ function phore_ai_text(string|PromptType|ToolType|array $prompts, array $options
  *     model?: string,
  *     timeout?: int,
  *     connect_timeout?: int,
+ *     debug_log?: bool|LoggerInterface,
  *     size?: 'auto'|'1024x1024'|'1536x1024'|'1024x1536',
  *     output_format?: 'png'|'jpeg'|'webp',
  *     quality?: 'auto'|'low'|'medium'|'high',
@@ -90,6 +94,7 @@ function phore_ai_image(string|PromptType|ToolType|array $prompts, array $option
  * `PromptType` instances and `ToolType` instances.
  *
  * Options:
+ * - `debug_log`: false (default), true for ConsoleLogger on STDERR, or a LoggerInterface
  * - `client`: optional `OpenAiClient`, DSN string such as `openai:<key>`, or `null` for Keystore/default client
  * - `model`: optional OpenAI model name, defaults to `gpt-5-mini`
  * - `timeout`: optional request timeout in seconds, defaults to `OpenAiClient::DEFAULT_TIMEOUT`
@@ -98,7 +103,7 @@ function phore_ai_image(string|PromptType|ToolType|array $prompts, array $option
  * @template T of object
  * @param string|PromptType|ToolType|array<int, string|PromptType|ToolType> $prompts
  * @param class-string<T> $className
- * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int} $options
+ * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int, debug_log?: bool|LoggerInterface} $options
  * @return T
  */
 function phore_ai_struct(string|PromptType|ToolType|array $prompts, string $className, array $options = []): object
@@ -122,6 +127,7 @@ function phore_ai_struct(string|PromptType|ToolType|array $prompts, string $clas
  * `PromptType` instances and `ToolType` instances.
  *
  * Options:
+ * - `debug_log`: false (default), true for ConsoleLogger on STDERR, or a LoggerInterface
  * - `client`: optional `OpenAiClient`, DSN string such as `openai:<key>`, or `null` for Keystore/default client
  * - `model`: optional OpenAI model name, defaults to `gpt-5-mini`
  * - `timeout`: optional request timeout in seconds, defaults to `OpenAiClient::DEFAULT_TIMEOUT`
@@ -130,7 +136,7 @@ function phore_ai_struct(string|PromptType|ToolType|array $prompts, string $clas
  * @template T of object
  * @param string|PromptType|ToolType|array<int, string|PromptType|ToolType> $prompts
  * @param class-string<T> $className
- * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int} $options
+ * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int, debug_log?: bool|LoggerInterface} $options
  * @return list<T>
  */
 function phore_ai_struct_array(string|PromptType|ToolType|array $prompts, string $className, array $options = []): array
@@ -151,6 +157,7 @@ function phore_ai_struct_array(string|PromptType|ToolType|array $prompts, string
  * tool that can replace multiple complete file contents in a single call.
  *
  * Options:
+ * - `debug_log`: false (default), true for ConsoleLogger on STDERR, or a LoggerInterface
  * - `client`: optional `OpenAiClient`, DSN string such as `openai:<key>`, or `null` for Keystore/default client
  * - `model`: optional OpenAI model name, defaults to `gpt-5-mini`
  * - `timeout`: optional request timeout in seconds, defaults to `OpenAiClient::DEFAULT_TIMEOUT`
@@ -160,7 +167,7 @@ function phore_ai_struct_array(string|PromptType|ToolType|array $prompts, string
  * @param string|PromptType|ToolType|array<int, string|PromptType|ToolType> $prompts
  * @param string|list<string> $filenames One filename or a list of filenames to edit.
  * @param class-string<T>|null $className
- * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int} $options
+ * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int, debug_log?: bool|LoggerInterface} $options
  * @return ($className is class-string<T> ? T : string)
  */
 function phore_ai_edit_file(string|PromptType|ToolType|array $prompts, string|array $filenames, ?string $className = null, array $options = []): object|string
