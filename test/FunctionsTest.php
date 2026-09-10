@@ -52,9 +52,18 @@ final class FunctionsTest extends TestCase
         self::assertSame('image/webp', Toolkit::contentTypeFromImageOutputFormat('webp'));
     }
 
-    public function testStructArrayFunctionExists(): void
+    public function testSharedLoaderLoadsEveryFunctionAndCanBeIncludedAgain(): void
     {
-        self::assertTrue(function_exists('phore_ai_struct_array'));
+        require dirname(__DIR__) . '/src/functions.php';
+        require dirname(__DIR__) . '/src/functions.php';
+
+        foreach ([
+            'phore_ai_text', 'phore_ai_image', 'phore_ai_struct',
+            'phore_ai_struct_array', 'phore_ai_edit_struct', 'phore_ai_edit_file',
+            'get_last_ai_request', 'get_last_ai_response',
+        ] as $function) {
+            self::assertTrue(is_callable($function), $function);
+        }
     }
 
     public function testEditFileFunctionExists(): void
