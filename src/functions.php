@@ -123,7 +123,7 @@ function phore_ai_struct(string|PromptType|ToolType|array $prompts, string $clas
  *
  * @template T of object
  * @param T $target
- * @return T|\Phore\AiHarness\Patch\PatchApplyResult
+ * @return T|\Phore\JsonPatch\PatchApplyResult
  */
 function phore_ai_edit_struct(string|PromptType|ToolType|array $prompts, object $target, array $options = []): object
 {
@@ -134,27 +134,27 @@ function phore_ai_edit_struct(string|PromptType|ToolType|array $prompts, object 
     if (!in_array($addressing, ['pointer', 'stable'], true)) {
         throw new InvalidArgumentException('addressing must be pointer or stable.');
     }
-    $policy = \Phore\AiHarness\Patch\PatchApplyOptions::fromArray($options);
+    $policy = \Phore\JsonPatch\PatchApplyOptions::fromArray($options);
     $items = Toolkit::normalizePromptItems($prompts);
     foreach ($items as $item) {
         if ($item instanceof ToolType) {
             throw new InvalidArgumentException('Struct patch generation does not accept tools.');
         }
     }
-    $snapshot = \Phore\AiHarness\Patch\JsonValue::copy($target);
-    \Phore\AiHarness\Patch\JsonPatchApplier::checkDocument($snapshot, $policy);
-    $hash = \Phore\AiHarness\Patch\JsonValue::hash($snapshot);
+    $snapshot = \Phore\JsonPatch\JsonValue::copy($target);
+    \Phore\JsonPatch\JsonPatchApplier::checkDocument($snapshot, $policy);
+    $hash = \Phore\JsonPatch\JsonValue::hash($snapshot);
     if ($policy->expectedHash !== null && !hash_equals($policy->expectedHash, $hash)) {
-        throw new \Phore\AiHarness\Patch\PatchConflictException('hash_conflict');
+        throw new \Phore\JsonPatch\PatchConflictException('hash_conflict');
     }
     $schema = \Phore\AiHarness\Patch\StructSchemaValidator::forClass($target::class);
     (new \Phore\AiHarness\Patch\StructSchemaValidator())->assertValid($snapshot, $schema);
     $view = $addressing === 'stable'
-        ? (new \Phore\AiHarness\Patch\StableArrayView($options['identity_pointers'] ?? []))->encode($snapshot)
+        ? (new \Phore\JsonPatch\StableArrayView($options['identity_pointers'] ?? []))->encode($snapshot)
         : $snapshot;
-    \Phore\AiHarness\Patch\JsonPatchApplier::checkDocument($view, $policy);
+    \Phore\JsonPatch\JsonPatchApplier::checkDocument($view, $policy);
     $items[] = new SystemPrompt(\Phore\AiHarness\Patch\StructPatchPrompt::instructions($addressing, $policy, $view));
-    $items[] = new \Phore\AiHarness\PromptType\TextPrompt(\Phore\AiHarness\Patch\JsonValue::encode([
+    $items[] = new \Phore\AiHarness\PromptType\TextPrompt(\Phore\JsonPatch\JsonValue::encode([
         'target' => $view, 'target_schema' => $schema, 'expected_hash' => $hash,
     ]));
     $format = new \Phore\AiHarness\OutputFormat\StructPatchOutput($policy);

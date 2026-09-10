@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 use Phore\AiHarness\Keystore\Keystore;
-use Phore\AiHarness\Patch\JsonValue;
+use Phore\JsonPatch\JsonValue;
 use PHPUnit\Framework\TestCase;
 
 final class StructPatchE2eItem

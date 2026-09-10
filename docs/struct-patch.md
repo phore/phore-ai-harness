@@ -20,8 +20,17 @@ optional fields use only defaults/nullability declared by the target schema.
 
 ## Deterministic API
 
+The generic engine, JSON Pointer, policies and stable-array codec are provided by
+[`phore/json-patch`](https://github.com/phore/phore-json-patch), under the
+`Phore\JsonPatch\` namespace. AI Harness retains typed hydration, schema validation,
+provider output parsing and the single-request helper. The former generic
+`Phore\AiHarness\Patch\` classes have moved; update their imports to the new namespace.
+Composer installs the published [`phore/json-patch`](https://packagist.org/packages/phore/json-patch)
+package through the declared `dev-main` dependency.
+
 ```php
-use Phore\AiHarness\Patch\{JsonPatch, JsonPatchApplier, PatchApplyOptions, StructPatcher};
+use Phore\JsonPatch\{JsonPatch, JsonPatchApplier, PatchApplyOptions};
+use Phore\AiHarness\Patch\StructPatcher;
 
 $patch = JsonPatch::fromArray([
     ['op' => 'test', 'path' => '/title', 'value' => 'Original'],
@@ -139,15 +148,16 @@ rather than allowing unvalidated hydration.
 ## Verification and evaluation
 
 ```sh
-vendor/bin/phpunit --filter 'JsonPatchTest|StableArrayViewTest|StructPatcherTest|StructPatchOutputTest'
+vendor/bin/phpunit --filter 'StructPatcherTest|StructPatchOutputTest'
 vendor/bin/phpunit -c e2etests/phpunit.xml.dist --filter StructPatchE2eTest
 php examples/struct-patch-eval.php > struct-patch-eval.jsonl
 ```
 
-Unit tests include RFC appendix examples, copy isolation, nulls, pointer escaping,
-root deletion/recreation, invalid indices, atomic failures, policy bypasses, schema
-failures, nested hydration, constructor failures, stable roundtrips and a single
-HTTP request through the real client with a local fixture response.
+Generic RFC, pointer, stable-array and policy unit tests live in `phore/json-patch`,
+including its upstream conformance corpus and additional edge-case regressions.
+Harness tests retain schema failures, nested hydration, constructor failures,
+provider parsing and a single HTTP request through the real client with a local
+fixture response.
 
 Live tests require a configured API key. The manual eval makes 27 paid requests
 across small/medium/large documents, field/list/no-op tasks and replacement/pointer/

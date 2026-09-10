@@ -2,7 +2,8 @@
 
 declare(strict_types=1);
 
-use Phore\AiHarness\Patch\{JsonPatch, JsonValue, PatchConflictException, PatchValidationException, StableArrayView, StructPatcher};
+use Phore\JsonPatch\{JsonPatch, JsonValue, PatchConflictException, PatchValidationException, StableArrayView};
+use Phore\AiHarness\Patch\{StructPatcher};
 use PHPUnit\Framework\TestCase;
 
 final class PatchTestItem

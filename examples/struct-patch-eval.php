@@ -4,7 +4,8 @@ declare(strict_types=1);
 
 require __DIR__ . '/../vendor/autoload.php';
 
-use Phore\AiHarness\Patch\{JsonValue, PatchValidationException, StructSchemaValidator};
+use Phore\JsonPatch\{JsonValue, PatchValidationException};
+use Phore\AiHarness\Patch\{StructSchemaValidator};
 
 final class StructPatchEvalItem
 {
@@ -85,7 +86,7 @@ function differentPaths(mixed $expected, mixed $actual, string $path = ''): arra
         $right = (array) $actual;
         $paths = [];
         foreach (array_unique([...array_keys($left), ...array_keys($right)]) as $key) {
-            $child = $path . '/' . \Phore\AiHarness\Patch\JsonPointer::escape((string) $key);
+            $child = $path . '/' . \Phore\JsonPatch\JsonPointer::escape((string) $key);
             $paths = [...$paths, ...(!array_key_exists($key, $left) || !array_key_exists($key, $right)
                 ? [$child] : differentPaths($left[$key], $right[$key], $child))];
         }
