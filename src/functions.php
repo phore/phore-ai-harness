@@ -5,8 +5,10 @@ declare(strict_types=1);
 use Phore\AiHarness\Client\AiRequest;
 use Phore\AiHarness\Client\AiResponse;
 use Phore\AiHarness\Client\OpenAiClient;
+use Phore\AiHarness\Helper\DataUrl;
 use Phore\AiHarness\Helper\Toolkit;
-use Phore\AiHarness\PromptType\DefaultSystemPrompt;
+use Phore\AiHarness\Logging\LoggerInterface;
+use Phore\AiHarness\PromptType\FilePrompt;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\PromptType\SystemPrompt;
 use Phore\AiHarness\Result\ImageResultType;
@@ -21,13 +23,14 @@ use Phore\AiHarness\ToolType\ToolType;
  * `PromptType` instances and `ToolType` instances.
  *
  * Options:
+ * - `debug_log`: false (default), true for ConsoleLogger on STDERR, or a LoggerInterface
  * - `client`: optional `OpenAiClient`, DSN string such as `openai:<key>`, or `null` for Keystore/default client
  * - `model`: optional OpenAI model name, defaults to `gpt-5-mini`
  * - `timeout`: optional request timeout in seconds, defaults to `OpenAiClient::DEFAULT_TIMEOUT`
  * - `connect_timeout`: optional connect timeout in seconds, defaults to `OpenAiClient::DEFAULT_CONNECT_TIMEOUT`
  *
  * @param string|PromptType|ToolType|array<int, string|PromptType|ToolType> $prompts
- * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int} $options
+ * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int, debug_log?: bool|LoggerInterface} $options
  */
 function phore_ai_text(string|PromptType|ToolType|array $prompts, array $options = []): string
 {
@@ -44,6 +47,7 @@ function phore_ai_text(string|PromptType|ToolType|array $prompts, array $options
  * is provided in the prompt list, one is created from image-related options.
  *
  * Options:
+ * - `debug_log`: false (default), true for ConsoleLogger on STDERR, or a LoggerInterface
  * - `client`: optional `OpenAiClient`, DSN string such as `openai:<key>`, or `null` for Keystore/default client
  * - `model`: optional OpenAI model name, defaults to `gpt-5-mini`
  * - `timeout`: optional request timeout in seconds, defaults to `OpenAiClient::DEFAULT_TIMEOUT`
@@ -59,6 +63,7 @@ function phore_ai_text(string|PromptType|ToolType|array $prompts, array $options
  *     model?: string,
  *     timeout?: int,
  *     connect_timeout?: int,
+ *     debug_log?: bool|LoggerInterface,
  *     size?: 'auto'|'1024x1024'|'1536x1024'|'1024x1536',
  *     output_format?: 'png'|'jpeg'|'webp',
  *     quality?: 'auto'|'low'|'medium'|'high',
@@ -89,6 +94,7 @@ function phore_ai_image(string|PromptType|ToolType|array $prompts, array $option
  * `PromptType` instances and `ToolType` instances.
  *
  * Options:
+ * - `debug_log`: false (default), true for ConsoleLogger on STDERR, or a LoggerInterface
  * - `client`: optional `OpenAiClient`, DSN string such as `openai:<key>`, or `null` for Keystore/default client
  * - `model`: optional OpenAI model name, defaults to `gpt-5-mini`
  * - `timeout`: optional request timeout in seconds, defaults to `OpenAiClient::DEFAULT_TIMEOUT`
@@ -97,7 +103,7 @@ function phore_ai_image(string|PromptType|ToolType|array $prompts, array $option
  * @template T of object
  * @param string|PromptType|ToolType|array<int, string|PromptType|ToolType> $prompts
  * @param class-string<T> $className
- * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int} $options
+ * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int, debug_log?: bool|LoggerInterface} $options
  * @return T
  */
 function phore_ai_struct(string|PromptType|ToolType|array $prompts, string $className, array $options = []): object
@@ -121,6 +127,7 @@ function phore_ai_struct(string|PromptType|ToolType|array $prompts, string $clas
  * `PromptType` instances and `ToolType` instances.
  *
  * Options:
+ * - `debug_log`: false (default), true for ConsoleLogger on STDERR, or a LoggerInterface
  * - `client`: optional `OpenAiClient`, DSN string such as `openai:<key>`, or `null` for Keystore/default client
  * - `model`: optional OpenAI model name, defaults to `gpt-5-mini`
  * - `timeout`: optional request timeout in seconds, defaults to `OpenAiClient::DEFAULT_TIMEOUT`
@@ -129,7 +136,7 @@ function phore_ai_struct(string|PromptType|ToolType|array $prompts, string $clas
  * @template T of object
  * @param string|PromptType|ToolType|array<int, string|PromptType|ToolType> $prompts
  * @param class-string<T> $className
- * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int} $options
+ * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int, debug_log?: bool|LoggerInterface} $options
  * @return list<T>
  */
 function phore_ai_struct_array(string|PromptType|ToolType|array $prompts, string $className, array $options = []): array
@@ -143,14 +150,14 @@ function phore_ai_struct_array(string|PromptType|ToolType|array $prompts, string
 }
 
 /**
- * Runs a file-editing prompt against exactly one existing local file.
+ * Runs a file-editing prompt against one or more local files.
  *
- * The target file is not sent as prompt content automatically. Instead, the AI
- * receives two callback tools scoped to this single file: one tool to read the
- * current content and one tool to replace the complete content. The write must
- * happen through the callback tool, so PHP performs the actual filesystem write.
+ * Each target filename and its current content are attached to the prompt. If a
+ * file cannot be read, empty content is attached. The AI receives one callback
+ * tool that can replace multiple complete file contents in a single call.
  *
  * Options:
+ * - `debug_log`: false (default), true for ConsoleLogger on STDERR, or a LoggerInterface
  * - `client`: optional `OpenAiClient`, DSN string such as `openai:<key>`, or `null` for Keystore/default client
  * - `model`: optional OpenAI model name, defaults to `gpt-5-mini`
  * - `timeout`: optional request timeout in seconds, defaults to `OpenAiClient::DEFAULT_TIMEOUT`
@@ -158,84 +165,100 @@ function phore_ai_struct_array(string|PromptType|ToolType|array $prompts, string
  *
  * @template T of object
  * @param string|PromptType|ToolType|array<int, string|PromptType|ToolType> $prompts
+ * @param string|list<string> $filenames One filename or a list of filenames to edit.
  * @param class-string<T>|null $className
- * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int} $options
+ * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int, debug_log?: bool|LoggerInterface} $options
  * @return ($className is class-string<T> ? T : string)
  */
-function phore_ai_file(string|PromptType|ToolType|array $prompts, string $filename, ?string $className = null, array $options = []): object|string
+function phore_ai_edit_file(string|PromptType|ToolType|array $prompts, string|array $filenames, ?string $className = null, array $options = []): object|string
 {
-    if (!is_file($filename)) {
-        throw new InvalidArgumentException('Target file must exist: ' . $filename);
-    }
-    if (!is_readable($filename)) {
-        throw new InvalidArgumentException('Target file must be readable: ' . $filename);
-    }
-    if (!is_writable($filename)) {
-        throw new InvalidArgumentException('Target file must be writable: ' . $filename);
-    }
     if ($className !== null && !class_exists($className)) {
         throw new InvalidArgumentException('Output class does not exist: ' . $className);
     }
 
-    $targetFile = realpath($filename) ?: $filename;
-    $fileWasWritten = false;
+    $filenames = is_string($filenames) ? [$filenames] : array_values($filenames);
+    if ($filenames === []) {
+        throw new InvalidArgumentException('At least one target filename is required.');
+    }
 
-    $readFileTool = new CallbackTool(
-        static function () use ($targetFile): string {
-            $content = @file_get_contents($targetFile);
-            if ($content === false) {
-                throw new RuntimeException('Could not read target file: ' . $targetFile);
+    $targetFiles = [];
+    foreach ($filenames as $targetFilename) {
+        if (!is_string($targetFilename) || trim($targetFilename) === '') {
+            throw new InvalidArgumentException('Every target filename must be a non-empty string.');
+        }
+
+        $targetFile = realpath($targetFilename) ?: $targetFilename;
+        $targetFiles[$targetFile] = $targetFile;
+    }
+    $filesWereWritten = false;
+
+    $writeFilesTool = new CallbackTool(
+        /**
+         * @param list<string> $filenames Exact supplied filenames to write.
+         * @param list<string> $contents Complete resulting contents in matching order.
+         */
+        static function (array $filenames, array $contents) use ($targetFiles, &$filesWereWritten): string {
+            if ($filenames === []) {
+                throw new InvalidArgumentException('At least one file must be written.');
+            }
+            if (count($filenames) !== count($contents)) {
+                throw new InvalidArgumentException('Filenames and contents must contain the same number of items.');
             }
 
-            return $content;
+            $contentsByFilename = [];
+            foreach ($filenames as $index => $targetFilename) {
+                $content = $contents[$index] ?? null;
+                if (!is_string($targetFilename) || !is_string($content)) {
+                    throw new InvalidArgumentException('Every filename and content must be a string.');
+                }
+                if (!isset($targetFiles[$targetFilename])) {
+                    throw new InvalidArgumentException('Cannot write file outside the supplied targets: ' . $targetFilename);
+                }
+                if (isset($contentsByFilename[$targetFilename])) {
+                    throw new InvalidArgumentException('Cannot write the same target file twice: ' . $targetFilename);
+                }
+
+                $contentsByFilename[$targetFilename] = $content;
+            }
+
+            $writtenFiles = [];
+            foreach ($contentsByFilename as $targetFile => $content) {
+                $bytes = @file_put_contents($targetFile, $content, LOCK_EX);
+                if ($bytes === false) {
+                    throw new RuntimeException('Could not write target file: ' . $targetFile);
+                }
+                $writtenFiles[] = ['filename' => $targetFile, 'bytes' => $bytes];
+            }
+
+            $filesWereWritten = true;
+
+            return Toolkit::jsonEncode(['files' => $writtenFiles]);
         },
-        'get_file_content',
-        'Returns the current complete content of the one target file. The file path is fixed by PHP and cannot be changed by the model.',
-    );
-
-    $writeFileTool = new CallbackTool(
-        static function (string $content, string $summary) use ($targetFile, &$fileWasWritten): string {
-            if (!is_file($targetFile)) {
-                throw new RuntimeException('Target file no longer exists: ' . $targetFile);
-            }
-
-            $bytes = @file_put_contents($targetFile, $content, LOCK_EX);
-            if ($bytes === false) {
-                throw new RuntimeException('Could not write target file: ' . $targetFile);
-            }
-
-            $fileWasWritten = true;
-
-            return Toolkit::jsonEncode([
-                'filename' => $targetFile,
-                'bytes' => $bytes,
-                'summary' => $summary,
-            ]);
-        },
-        'write_file_content',
-        'Replaces the complete content of the one target file. The file path is fixed by PHP and cannot be changed by the model. Parameters: content is the full new file content, summary is a concise description of the performed changes.',
+        'write_files',
+        'Replaces one or more supplied target files in one call. Pass exact supplied filenames and their complete resulting contents at matching list positions.',
     );
 
     $items = Toolkit::normalizePromptItems($prompts);
+    foreach (array_values($targetFiles) as $index => $targetFile) {
+        $originalContent = @file_get_contents($targetFile);
+        $items[] = new FilePrompt(
+            $targetFile,
+            $originalContent === false ? '' : $originalContent,
+            DataUrl::detectContentType($targetFile) ?? 'application/octet-stream',
+            alias: 'targetFile' . ($index + 1),
+            instructions: 'Editable target file.',
+        );
+    }
     $items[] = new SystemPrompt(
-        DefaultSystemPrompt::TEXT . "\n\n" .
-        'You are editing exactly one existing local file. ' .
-        'Use get_file_content to read the current file content before deciding on changes. ' .
-        'Write changes only by calling write_file_content exactly once with the complete new file content. ' .
-        'Do not attempt to edit, create, delete or reference any other local file. ' .
-        'After the required tool calls, return the requested result to the user. ' .
-        ($className === null
-            ? 'Return a concise text summary, for example a list of changes.'
-            : 'Return the final answer as structured data matching the requested output schema.')
+        'Edit only the supplied target files. Save all changes in one write_files call using exact supplied filenames and complete resulting content.'
     );
-    $items[] = $readFileTool;
-    $items[] = $writeFileTool;
+    $items[] = $writeFilesTool;
 
     $ai = Toolkit::createAi($options)->with(...$items);
     $result = $className === null ? $ai->run() : $ai->runCasted($className);
 
-    if (!$fileWasWritten) {
-        throw new RuntimeException('AI response did not write the target file through write_file_content.');
+    if (!$filesWereWritten) {
+        throw new RuntimeException('AI response did not write a target file through write_files.');
     }
 
     return $result;

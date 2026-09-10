@@ -6,6 +6,8 @@ namespace Phore\AiHarness\Helper;
 
 use InvalidArgumentException;
 use JsonException;
+use Phore\AiHarness\Logging\ConsoleLogger;
+use Phore\AiHarness\Logging\LoggerInterface;
 use Phore\AiHarness\Client\OpenAiClient;
 use Phore\AiHarness\PhoreAi;
 use Phore\AiHarness\PromptType\PromptType;
@@ -27,7 +29,7 @@ final class Toolkit
      */
     public static function jsonEncode(mixed $data, bool $pretty = false): string
     {
-        $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR;
+        $flags = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_THROW_ON_ERROR;
 
         if ($pretty) {
             $flags |= JSON_PRETTY_PRINT;
@@ -97,10 +99,15 @@ final class Toolkit
     /**
      * Creates a configured `PhoreAi` facade from common function options.
      *
-     * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int} $options
+     * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int, debug_log?: bool|LoggerInterface} $options
      */
     public static function createAi(array $options = []): PhoreAi
     {
+        $debugLog = array_key_exists('debug_log', $options) ? $options['debug_log'] : false;
+        if (!is_bool($debugLog) && !$debugLog instanceof LoggerInterface) {
+            throw new InvalidArgumentException('debug_log must be a boolean or LoggerInterface.');
+        }
+        $logger = $debugLog === true ? new ConsoleLogger() : ($debugLog === false ? null : $debugLog);
         $client = $options['client'] ?? null;
 
         if (!$client instanceof OpenAiClient && (isset($options['timeout']) || isset($options['connect_timeout']))) {
@@ -111,7 +118,7 @@ final class Toolkit
             );
         }
 
-        $ai = new PhoreAi($client);
+        $ai = new PhoreAi($client, logger: $logger);
 
         if (isset($options['model'])) {
             $ai = $ai->withModel($options['model']);

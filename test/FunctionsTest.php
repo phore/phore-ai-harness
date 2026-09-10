@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Phore\AiHarness\Client\AiRequest;
+use Phore\AiHarness\Client\AiRequestException;
 use Phore\AiHarness\Client\AiResponse;
 use Phore\AiHarness\Client\OpenAiClient;
 use Phore\AiHarness\Helper\Toolkit;
@@ -56,17 +57,99 @@ final class FunctionsTest extends TestCase
         self::assertTrue(function_exists('phore_ai_struct_array'));
     }
 
-    public function testFileFunctionExists(): void
+    public function testEditFileFunctionExists(): void
     {
-        self::assertTrue(function_exists('phore_ai_file'));
+        self::assertTrue(function_exists('phore_ai_edit_file'));
+        self::assertFalse(function_exists('phore_ai_file'));
     }
 
-    public function testFileFunctionRequiresExistingFile(): void
+    public function testEditFileAddsFilenamesAndOriginalContentWithOnlyBatchWriteTool(): void
+    {
+        $firstFile = tempnam(sys_get_temp_dir(), 'phore-ai-edit-file-');
+        $secondFile = tempnam(sys_get_temp_dir(), 'phore-ai-edit-file-');
+        self::assertIsString($firstFile);
+        self::assertIsString($secondFile);
+        file_put_contents($firstFile, 'First original');
+        file_put_contents($secondFile, 'Second original');
+
+        try {
+            phore_ai_edit_file('Change the files.', [$firstFile, $secondFile], options: [
+                'client' => new OpenAiClient(
+                    'test-key',
+                    baseUrl: 'http://127.0.0.1:1',
+                    timeout: 1,
+                    connectTimeout: 1,
+                ),
+            ]);
+            self::fail('Expected the intentionally unreachable test client to fail.');
+        } catch (AiRequestException) {
+            $request = get_last_ai_request();
+            self::assertNotNull($request);
+            self::assertCount(1, $request->tools ?? []);
+            self::assertSame('write_files', $request->tools[0]['name'] ?? null);
+            self::assertSame('string', $request->tools[0]['parameters']['properties']['filenames']['items']['type'] ?? null);
+            self::assertSame('string', $request->tools[0]['parameters']['properties']['contents']['items']['type'] ?? null);
+            self::assertSame($firstFile, $request->input[0]['content'][2]['filename'] ?? null);
+            self::assertStringContainsString(base64_encode('First original'), $request->input[0]['content'][2]['file_data'] ?? '');
+            self::assertSame($secondFile, $request->input[0]['content'][4]['filename'] ?? null);
+            self::assertStringContainsString(base64_encode('Second original'), $request->input[0]['content'][4]['file_data'] ?? '');
+            self::assertStringNotContainsString('get_file_content', $request->instructions ?? '');
+            self::assertStringNotContainsString('batch mode', $request->instructions ?? '');
+        } finally {
+            @unlink($firstFile);
+            @unlink($secondFile);
+        }
+    }
+
+    public function testEditFileUsesEmptyPromptContentForMissingFile(): void
+    {
+        $fileName = sys_get_temp_dir() . '/phore-ai-missing-' . bin2hex(random_bytes(4)) . '.txt';
+
+        try {
+            phore_ai_edit_file('Create the file.', $fileName, options: [
+                'client' => new OpenAiClient(
+                    'test-key',
+                    baseUrl: 'http://127.0.0.1:1',
+                    timeout: 1,
+                    connectTimeout: 1,
+                ),
+            ]);
+            self::fail('Expected the intentionally unreachable test client to fail.');
+        } catch (AiRequestException) {
+            $request = get_last_ai_request();
+            self::assertNotNull($request);
+            self::assertSame('data:text/plain;base64,', $request->input[0]['content'][2]['file_data'] ?? null);
+            self::assertFileDoesNotExist($fileName);
+        }
+    }
+
+    public function testEditFileRequiresAtLeastOneFilename(): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('Target file must exist');
+        $this->expectExceptionMessage('At least one target filename is required');
 
-        phore_ai_file('Change the file.', __DIR__ . '/does-not-exist-' . bin2hex(random_bytes(4)) . '.txt');
+        phore_ai_edit_file('Change the files.', []);
+    }
+
+    public function testEditFileSupportsStructuredOutput(): void
+    {
+        $fileName = sys_get_temp_dir() . '/phore-ai-structured-' . bin2hex(random_bytes(4)) . '.txt';
+
+        try {
+            phore_ai_edit_file('Create the file.', $fileName, FunctionsTestDto::class, [
+                'client' => new OpenAiClient(
+                    'test-key',
+                    baseUrl: 'http://127.0.0.1:1',
+                    timeout: 1,
+                    connectTimeout: 1,
+                ),
+            ]);
+            self::fail('Expected the intentionally unreachable test client to fail.');
+        } catch (AiRequestException) {
+            $request = get_last_ai_request();
+            self::assertNotNull($request);
+            self::assertSame('json_schema', $request->text['format']['type'] ?? null);
+        }
     }
 
     public function testCreateUsesClientAndModelOptions(): void

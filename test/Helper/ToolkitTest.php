@@ -21,6 +21,11 @@ final class ToolkitTest extends TestCase
         self::assertStringContainsString("\n", Toolkit::jsonEncode(['text' => 'hello'], true));
     }
 
+    public function testJsonEncodeSubstitutesMalformedUtf8(): void
+    {
+        self::assertSame('{"text":"�"}', Toolkit::jsonEncode(['text' => "\xFF"]));
+    }
+
     public function testDecodeJsonOutputAcceptsFencedJsonObject(): void
     {
         self::assertSame(['answer' => 'yes'], Toolkit::decodeJsonOutput("```json\n{\"answer\":\"yes\"}\n```"));
