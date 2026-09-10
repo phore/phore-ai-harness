@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace Phore\AiHarness\OutputFormat;
 
-use Phore\AiHarness\Patch\JsonPatch;
-use Phore\AiHarness\Patch\JsonValue;
-use Phore\AiHarness\Patch\PatchApplyOptions;
-use Phore\AiHarness\Patch\PatchLimitException;
-use Phore\AiHarness\Patch\PatchValidationException;
+use Phore\JsonPatch\JsonPatch;
+use Phore\JsonPatch\JsonValue;
+use Phore\JsonPatch\PatchApplyOptions;
+use Phore\JsonPatch\PatchLimitException;
+use Phore\JsonPatch\PatchValidationException;
 
 /** Strict provider envelope; value_json is decoded to native RFC 6902 value locally. */
 final readonly class StructPatchOutput implements OutputFormat

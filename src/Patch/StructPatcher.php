@@ -4,6 +4,15 @@ declare(strict_types=1);
 
 namespace Phore\AiHarness\Patch;
 
+use Phore\JsonPatch\JsonPatch;
+use Phore\JsonPatch\JsonPatchApplier;
+use Phore\JsonPatch\JsonValue;
+use Phore\JsonPatch\PatchApplyOptions;
+use Phore\JsonPatch\PatchApplyResult;
+use Phore\JsonPatch\PatchConflictException;
+use Phore\JsonPatch\PatchValidationException;
+use Phore\JsonPatch\StableArrayView;
+
 use Phore\Schema\Parser\SchemaParser;
 
 final class StructPatcher

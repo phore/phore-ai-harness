@@ -20,6 +20,7 @@
   "require": {
     "php" : ">=8.5",
     "phore/schema": "dev-main",
+    "phore/json-patch": "dev-main",
     "ext-curl": "*",
     "ext-yaml": "*",
     "ext-json": "*"

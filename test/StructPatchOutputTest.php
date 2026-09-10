@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 use Phore\AiHarness\Client\OpenAiClient;
 use Phore\AiHarness\OutputFormat\StructPatchOutput;
-use Phore\AiHarness\Patch\{JsonValue, PatchApplyOptions, PatchLimitException, PatchValidationException};
+use Phore\JsonPatch\{JsonValue, PatchApplyOptions, PatchLimitException, PatchValidationException};
 use Phore\AiHarness\ToolType\WebAccessTool;
 use PHPUnit\Framework\TestCase;
 

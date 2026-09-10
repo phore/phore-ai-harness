@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace Phore\AiHarness\Patch;
 
+use Phore\JsonPatch\JsonPointer;
+use Phore\JsonPatch\JsonValue;
+use Phore\JsonPatch\PatchApplyOptions;
+
 final class StructPatchPrompt
 {
     public static function instructions(string $addressing, PatchApplyOptions $policy, mixed $view): string

@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace Phore\AiHarness\Patch;
 
+use Phore\JsonPatch\JsonPointer;
+use Phore\JsonPatch\JsonValue;
+use Phore\JsonPatch\PatchLimitException;
+use Phore\JsonPatch\PatchValidationException;
+
 /** Validates the JSON Schema vocabulary emitted by phore/schema, before hydration. */
 final class StructSchemaValidator
 {
