@@ -104,6 +104,7 @@ final class FunctionsTest extends TestCase
             self::assertStringContainsString(base64_encode('Second original'), $request->input[0]['content'][4]['file_data'] ?? '');
             self::assertStringNotContainsString('get_file_content', $request->instructions ?? '');
             self::assertStringNotContainsString('batch mode', $request->instructions ?? '');
+            self::assertStringContainsString('targetFileN aliases', $request->instructions ?? '');
         } finally {
             @unlink($firstFile);
             @unlink($secondFile);

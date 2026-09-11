@@ -16,7 +16,7 @@ use Phore\AiHarness\ToolType\ToolType;
  * Edit one or more local files through an AI tool call and return the final response.
  * Each target filename and its current content are attached to the prompt; unreadable
  * files are represented by empty content. The write_files callback accepts only
- * supplied targets and replaces complete contents. At least one write is required.
+ * supplied target paths or their targetFileN aliases and replaces complete contents. At least one write is required.
  * Multiple writes are not transactional: an error can leave earlier files changed.
  * An optional output class controls the final response, not the file contents.
  *
@@ -74,22 +74,24 @@ function phore_ai_edit_file(string|PromptType|ToolType|array $prompts, string|ar
     }
 
     $targetFiles = [];
-    foreach ($filenames as $targetFilename) {
+    $targetAliases = [];
+    foreach ($filenames as $index => $targetFilename) {
         if (!is_string($targetFilename) || trim($targetFilename) === '') {
             throw new InvalidArgumentException('Every target filename must be a non-empty string.');
         }
 
         $targetFile = realpath($targetFilename) ?: $targetFilename;
         $targetFiles[$targetFile] = $targetFile;
+        $targetAliases['targetFile' . ($index + 1)] = $targetFile;
     }
     $filesWereWritten = false;
 
     $writeFilesTool = new CallbackTool(
         /**
-         * @param list<string> $filenames Exact supplied filenames to write.
+         * @param list<string> $filenames Supplied filenames or targetFileN aliases to write.
          * @param list<string> $contents Complete resulting contents in matching order.
          */
-        static function (array $filenames, array $contents) use ($targetFiles, &$filesWereWritten): string {
+        static function (array $filenames, array $contents) use ($targetFiles, $targetAliases, &$filesWereWritten): string {
             if ($filenames === []) {
                 throw new InvalidArgumentException('At least one file must be written.');
             }
@@ -103,6 +105,7 @@ function phore_ai_edit_file(string|PromptType|ToolType|array $prompts, string|ar
                 if (!is_string($targetFilename) || !is_string($content)) {
                     throw new InvalidArgumentException('Every filename and content must be a string.');
                 }
+                $targetFilename = $targetAliases[$targetFilename] ?? $targetFilename;
                 if (!isset($targetFiles[$targetFilename])) {
                     throw new InvalidArgumentException('Cannot write file outside the supplied targets: ' . $targetFilename);
                 }
@@ -127,7 +130,7 @@ function phore_ai_edit_file(string|PromptType|ToolType|array $prompts, string|ar
             return Toolkit::jsonEncode(['files' => $writtenFiles]);
         },
         'write_files',
-        'Replaces one or more supplied target files in one call. Pass exact supplied filenames and their complete resulting contents at matching list positions.',
+        'Replaces one or more supplied target files in one call. Pass each target alias (targetFile1, targetFile2, ...) and its complete resulting content at matching list positions.',
     );
 
     $items = Toolkit::normalizePromptItems($prompts);
@@ -142,7 +145,7 @@ function phore_ai_edit_file(string|PromptType|ToolType|array $prompts, string|ar
         );
     }
     $items[] = new SystemPrompt(
-        'Edit only the supplied target files. Save all changes in one write_files call using exact supplied filenames and complete resulting content.'
+        'Edit only the supplied target files. Save all changes in one write_files call using their targetFileN aliases and complete resulting content.'
     );
     $items[] = $writeFilesTool;
 
