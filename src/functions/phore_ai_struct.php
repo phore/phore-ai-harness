@@ -16,6 +16,7 @@ use Phore\AiHarness\ToolType\ToolType;
  * - client: OpenAiClient instance, an "openai:<apikey>" DSN, or null (default)
  *   to resolve credentials through the Keystore/default client.
  * - model: Model name; default "gpt-5-mini".
+ * - reasoning: Responses API settings; default ['effort' => 'low']; null omits it.
  * - timeout: Total request timeout in seconds, at least 1; default 600.
  * - connect_timeout: Connection timeout in seconds, at least 1; default 10.
  *   Both timeout options apply only when constructing a client; a supplied
@@ -43,6 +44,7 @@ use Phore\AiHarness\ToolType\ToolType;
  * @param array{
  *     client?: OpenAiClient|string|null,
  *     model?: string,
+ *     reasoning?: array<string, mixed>|null,
  *     timeout?: positive-int,
  *     connect_timeout?: positive-int,
  *     debug_log?: bool|LoggerInterface

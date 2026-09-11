@@ -173,6 +173,50 @@ final class FunctionsTest extends TestCase
         self::assertSame($client, $ai->getOpenAiClient());
     }
 
+    public function testReasoningOptionsReachRequests(): void
+    {
+        foreach ([
+            [[], ['effort' => 'low']],
+            [['reasoning' => ['effort' => 'medium', 'summary' => 'auto']], ['effort' => 'medium', 'summary' => 'auto']],
+            [['reasoning' => null], null],
+        ] as [$options, $expected]) {
+            AiRequest::$last = null;
+            try {
+                phore_ai_text('Hello', $options + [
+                    'client' => new OpenAiClient('test-key', baseUrl: 'http://127.0.0.1:1', timeout: 1, connectTimeout: 1),
+                ]);
+                self::fail('Expected the intentionally unreachable test client to fail.');
+            } catch (AiRequestException) {
+                self::assertNotNull(AiRequest::$last);
+                $body = AiRequest::$last->toArray();
+                if ($expected === null) {
+                    self::assertArrayNotHasKey('reasoning', $body);
+                } else {
+                    self::assertSame($expected, $body['reasoning']);
+                }
+            }
+        }
+    }
+
+    public function testReasoningRejectsInvalidOptionBeforeCreatingClient(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('reasoning must be an array or null.');
+
+        Toolkit::createAi(['reasoning' => 'low']);
+    }
+
+    public function testReasoningConfigurationClonesFacade(): void
+    {
+        $ai = new PhoreAi(new OpenAiClient('test-key'));
+        $configured = $ai->withReasoning(['effort' => 'high']);
+
+        self::assertNotSame($ai, $configured);
+        self::assertSame(['effort' => 'low'], $this->readProperty($ai, 'reasoning'));
+        self::assertSame(['effort' => 'high'], $this->readProperty($configured, 'reasoning'));
+        self::assertNull($this->readProperty($configured->withReasoning(null), 'reasoning'));
+    }
+
     public function testCreateConfiguresTimeoutOptions(): void
     {
         $ai = Toolkit::createAi([
