@@ -11,6 +11,7 @@ use Phore\AiHarness\Helper\Toolkit;
 use Phore\AiHarness\Keystore\Keystore;
 use Phore\AiHarness\Result\ImageResultType;
 use RuntimeException;
+use Phore\AiHarness\Usage\GlobalUsage;
 
 /**
  * CURL based client for the OpenAI Responses API.
@@ -56,10 +57,13 @@ final class OpenAiClient
      */
     public function createResponse(AiRequest $request): AiResponse
     {
+        $usage = GlobalUsage::instance();
+        $call = $usage->begin((string) ($request->extraBody['model'] ?? $request->model));
+        $response = null;
+        $failed = true;
         $headers = [];
-        $curl = $this->createCurlHandle($request, false, $headers);
-
         try {
+            $curl = $this->createCurlHandle($request, false, $headers);
             $rawBody = curl_exec($curl);
             if ($rawBody === false) {
                 throw AiRequestException::fromCurlError('OpenAI request failed', curl_error($curl));
@@ -68,8 +72,10 @@ final class OpenAiClient
             $response = $this->buildJsonResponse($curl, $headers, $rawBody);
             $this->assertSuccessfulResponse($response);
 
+            $failed = false;
             return $response;
         } finally {
+            $usage->finish($call, $response?->body, $failed);
             unset($curl);
         }
     }
@@ -91,15 +97,18 @@ final class OpenAiClient
      */
     public function streamResponse(AiRequest $request, callable $onEvent): AiResponse
     {
+        $usage = GlobalUsage::instance();
+        $call = $usage->begin((string) ($request->extraBody['model'] ?? $request->model));
+        $failed = true;
+        $response = null;
         $context = $this->createStreamContext();
-        $curl = $this->createCurlHandle(
-            $request,
-            true,
-            $context->headers,
-            $this->createStreamWriteFunction($context, $onEvent),
-        );
-
         try {
+            $curl = $this->createCurlHandle(
+                $request,
+                true,
+                $context->headers,
+                $this->createStreamWriteFunction($context, $onEvent),
+            );
             $result = curl_exec($curl);
             if ($result === false) {
                 throw AiRequestException::fromCurlError('OpenAI streaming request failed', curl_error($curl));
@@ -110,8 +119,10 @@ final class OpenAiClient
             $response = $this->buildStreamResponse($curl, $context);
             $this->assertSuccessfulResponse($response);
 
+            $failed = $context->failed || $context->completedBody === null;
             return $response;
         } finally {
+            $usage->finish($call, $response?->body ?? $context->completedBody, $failed);
             unset($curl);
         }
     }
@@ -170,6 +181,7 @@ final class OpenAiClient
             'rawBody' => '',
             'events' => [],
             'completedBody' => null,
+            'failed' => false,
             'sseBuffer' => '',
             'outputText' => '',
         ];
@@ -362,11 +374,14 @@ final class OpenAiClient
      */
     private function updateStreamSummary(object $context, array $event): void
     {
+        if (in_array($event['type'] ?? null, ['response.failed', 'response.incomplete', 'error'], true)) {
+            $context->failed = true;
+        }
         if (($event['type'] ?? null) === 'response.output_text.delta' && isset($event['delta']) && is_string($event['delta'])) {
             $context->outputText .= $event['delta'];
         }
 
-        if (($event['type'] ?? null) === 'response.completed' && isset($event['response']) && is_array($event['response'])) {
+        if (in_array($event['type'] ?? null, ['response.completed', 'response.failed', 'response.incomplete'], true) && isset($event['response']) && is_array($event['response'])) {
             $context->completedBody = $event['response'];
         }
     }

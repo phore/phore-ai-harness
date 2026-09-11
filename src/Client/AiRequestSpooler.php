@@ -7,6 +7,7 @@ namespace Phore\AiHarness\Client;
 use CurlHandle;
 use RuntimeException;
 use Throwable;
+use Phore\AiHarness\Usage\GlobalUsage;
 
 /**
  * Executes multiple OpenAI Responses API requests concurrently via curl_multi.
@@ -75,7 +76,12 @@ final class AiRequestSpooler
         try {
             foreach ($this->queue as $index => $entry) {
                 $context = $this->createContext($index, $entry);
-                $curl = $this->createHandleForContext($context);
+                try {
+                    $curl = $this->createHandleForContext($context);
+                } catch (Throwable $error) {
+                    GlobalUsage::instance()->finish($context->usageCall, failed: true);
+                    throw $error;
+                }
                 $id = (int) $curl;
                 $context->curl = $curl;
                 $contexts[$id] = $context;
@@ -93,14 +99,23 @@ final class AiRequestSpooler
                     continue;
                 }
 
+                $response = null;
+                $failed = true;
                 try {
-                    if (($info['result'] ?? CURLE_OK) !== CURLE_OK) {
-                        throw AiRequestException::fromCurlError('OpenAI request failed', curl_error($curl));
-                    }
+                    try {
+                        if (($info['result'] ?? CURLE_OK) !== CURLE_OK) {
+                            throw AiRequestException::fromCurlError('OpenAI request failed', curl_error($curl));
+                        }
 
-                    $response = $this->responseFromContext($curl, $context);
-                    $this->client->assertSuccessfulResponse($response);
-                    $responses[$context->index] = $response;
+                        $response = $this->responseFromContext($curl, $context);
+                        $this->client->assertSuccessfulResponse($response);
+                        $responses[$context->index] = $response;
+                        $failed = $context->stream && ($context->streamContext->failed || $context->streamContext->completedBody === null);
+                    } finally {
+                        GlobalUsage::instance()->finish(
+                            $context->usageCall, $response?->body ?? $context->streamContext?->completedBody, $failed,
+                        );
+                    }
 
                     if ($context->onResponse !== null) {
                         ($context->onResponse)($response, $context->index);
@@ -117,6 +132,28 @@ final class AiRequestSpooler
                 }
             }
         } finally {
+            foreach ($contexts as $context) {
+                // Other handles may already have completed when a user callback throws.
+                $body = $context->streamContext?->completedBody;
+                $failed = true;
+                try {
+                    if ($context->stream) {
+                        $this->client->flushStreamBuffer($context->streamContext);
+                        $response = $this->client->buildStreamResponse($context->curl, $context->streamContext);
+                    } else {
+                        $raw = curl_multi_getcontent($context->curl);
+                        $response = $this->client->buildJsonResponse($context->curl, $context->headers, is_string($raw) ? $raw : '');
+                    }
+                    $body = $response->body;
+                    $failed = curl_errno($context->curl) !== CURLE_OK
+                        || $response->statusCode < 200 || $response->statusCode >= 300
+                        || ($context->stream && ($context->streamContext->failed || $context->streamContext->completedBody === null));
+                } catch (Throwable) {
+                    // Preserve the original exception while accounting for available usage.
+                }
+                GlobalUsage::instance()->finish($context->usageCall, $body, $failed);
+                curl_multi_remove_handle($multi, $context->curl);
+            }
             $this->queue = [];
             curl_multi_close($multi);
         }
@@ -137,6 +174,7 @@ final class AiRequestSpooler
         $streamContext = $entry['stream'] ? $this->client->createStreamContext() : null;
 
         return (object) [
+            'usageCall' => GlobalUsage::instance()->begin((string) ($entry['request']->extraBody['model'] ?? $entry['request']->model)),
             'index' => $index,
             'request' => $entry['request'],
             'stream' => $entry['stream'],

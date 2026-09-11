@@ -4,19 +4,10 @@ declare(strict_types=1);
 
 namespace Phore\AiHarness\Result;
 
+use Phore\AiHarness\Usage\CostEstimator;
+
 final readonly class UsageInfoType
 {
-    /**
-     * OpenAI token prices in USD per 1M tokens.
-     *
-     * @var array<string, array{input: float, cachedInput: float|null, output: float}>
-     */
-    private const MODEL_PRICES_PER_MILLION_TOKENS_USD = [
-        'gpt-5' => ['input' => 1.25, 'cachedInput' => 0.125, 'output' => 10.00],
-        'gpt-5-mini' => ['input' => 0.25, 'cachedInput' => 0.025, 'output' => 2.00],
-        'gpt-5-nano' => ['input' => 0.05, 'cachedInput' => 0.005, 'output' => 0.40],
-    ];
-
     /**
      * @param array<string, mixed> $rawUsage
      */
@@ -60,7 +51,7 @@ final readonly class UsageInfoType
         $cachedInputTokens = self::readInt($inputDetails, 'cached_tokens');
         $reasoningOutputTokens = self::readInt($outputDetails, 'reasoning_tokens');
 
-        [$inputCostUsd, $outputCostUsd, $totalCostUsd] = self::calculateCosts(
+        [$inputCostUsd, $outputCostUsd, $totalCostUsd] = (new CostEstimator())->estimate(
             $model,
             $inputTokens,
             $cachedInputTokens,
@@ -140,48 +131,4 @@ final readonly class UsageInfoType
         return 0;
     }
 
-    /**
-     * @return array{0: ?float, 1: ?float, 2: ?float}
-     */
-    private static function calculateCosts(?string $model, int $inputTokens, int $cachedInputTokens, int $outputTokens): array
-    {
-        $prices = self::pricesForModel($model);
-        if ($prices === null) {
-            return [null, null, null];
-        }
-
-        $cachedInputTokens = min($cachedInputTokens, $inputTokens);
-        $regularInputTokens = $inputTokens - $cachedInputTokens;
-        $cachedInputPrice = $prices['cachedInput'] ?? $prices['input'];
-
-        $inputCostUsd = (($regularInputTokens * $prices['input']) + ($cachedInputTokens * $cachedInputPrice)) / 1_000_000;
-        $outputCostUsd = ($outputTokens * $prices['output']) / 1_000_000;
-
-        return [$inputCostUsd, $outputCostUsd, $inputCostUsd + $outputCostUsd];
-    }
-
-    /**
-     * @return array{input: float, cachedInput: float|null, output: float}|null
-     */
-    private static function pricesForModel(?string $model): ?array
-    {
-        if ($model === null) {
-            return null;
-        }
-
-        if (isset(self::MODEL_PRICES_PER_MILLION_TOKENS_USD[$model])) {
-            return self::MODEL_PRICES_PER_MILLION_TOKENS_USD[$model];
-        }
-
-        $prices = self::MODEL_PRICES_PER_MILLION_TOKENS_USD;
-        uksort($prices, static fn (string $a, string $b): int => strlen($b) <=> strlen($a));
-
-        foreach ($prices as $modelPrefix => $price) {
-            if (str_starts_with($model, $modelPrefix . '-') || str_starts_with($model, $modelPrefix . '.')) {
-                return $price;
-            }
-        }
-
-        return null;
-    }
 }
