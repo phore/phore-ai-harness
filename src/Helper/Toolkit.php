@@ -99,10 +99,14 @@ final class Toolkit
     /**
      * Creates a configured `PhoreAi` facade from common function options.
      *
-     * @param array{client?: OpenAiClient|string|null, model?: string, timeout?: int, connect_timeout?: int, debug_log?: bool|LoggerInterface} $options
+     * @param array{client?: OpenAiClient|string|null, model?: string, reasoning?: array<string, mixed>|null, timeout?: int, connect_timeout?: int, debug_log?: bool|LoggerInterface} $options
      */
     public static function createAi(array $options = []): PhoreAi
     {
+        $reasoning = array_key_exists('reasoning', $options) ? $options['reasoning'] : ['effort' => 'low'];
+        if ($reasoning !== null && !is_array($reasoning)) {
+            throw new InvalidArgumentException('reasoning must be an array or null.');
+        }
         $debugLog = array_key_exists('debug_log', $options) ? $options['debug_log'] : false;
         if (!is_bool($debugLog) && !$debugLog instanceof LoggerInterface) {
             throw new InvalidArgumentException('debug_log must be a boolean or LoggerInterface.');
@@ -118,7 +122,7 @@ final class Toolkit
             );
         }
 
-        $ai = new PhoreAi($client, logger: $logger);
+        $ai = (new PhoreAi($client, logger: $logger))->withReasoning($reasoning);
 
         if (isset($options['model'])) {
             $ai = $ai->withModel($options['model']);

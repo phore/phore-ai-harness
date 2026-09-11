@@ -39,6 +39,9 @@ final class PhoreAi
 
     private OpenAiClient $openAiClient;
 
+    /** @var array<string, mixed>|null */
+    private ?array $reasoning = ['effort' => 'low'];
+
     public function __construct(OpenAiClient|string|null $client = null, private string $model = 'gpt-5-mini', private ?LoggerInterface $logger = null)
     {
         $client ??= 'openai:';
@@ -59,6 +62,16 @@ final class PhoreAi
     public function withLogger(?LoggerInterface $logger): self
     {
         return clone($this, ['logger' => $logger]);
+    }
+
+    /**
+     * Configures Responses API reasoning; null omits the parameter.
+     *
+     * @param array<string, mixed>|null $reasoning
+     */
+    public function withReasoning(?array $reasoning): self
+    {
+        return clone($this, ['reasoning' => $reasoning]);
     }
 
     public function withModel(string $model): self
@@ -405,6 +418,10 @@ final class PhoreAi
 
     private function sendRequest(AiRequest $request, ?RunContext $context, bool $stream = true): AiResponse
     {
+        if ($this->reasoning !== null) {
+            $request = $request->withExtraBody(['reasoning' => $this->reasoning]);
+        }
+
         if ($context === null) {
             return $this->openAiClient->createResponse($request);
         }

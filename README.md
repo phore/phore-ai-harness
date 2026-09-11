@@ -18,6 +18,27 @@ git submodule update --remote --merge
 
 
 
+## Reasoning options
+
+All `phore_ai_*` helper functions send `['effort' => 'low']` by default.
+Override the Responses API reasoning settings through the shared options:
+
+```php
+$result = phore_ai_text('Explain the status.', [
+    'reasoning' => ['effort' => 'medium'],
+]);
+
+$ai = (new \Phore\AiHarness\PhoreAi())
+    ->withReasoning(['effort' => 'high']);
+```
+
+`withReasoning()` clones the facade. Settings also apply to streaming, image,
+structured-output and callback follow-up requests. Use `'reasoning' => null`
+(or `withReasoning(null)`) to omit the parameter for models that do not support
+reasoning. The array is passed through unchanged; supported fields and effort
+values depend on the selected model. See the
+[OpenAI reasoning guide](https://developers.openai.com/api/docs/guides/reasoning).
+
 ## Optional debug logging
 
 ```php
