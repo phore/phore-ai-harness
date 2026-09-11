@@ -70,6 +70,7 @@ final class GlobalUsage
         $estimator ??= new CostEstimator();
         $total = self::emptyCounters();
         $total['unpricedRequests'] = 0;
+        $total['fallbackRequests'] = 0;
         $total['knownCostUsd'] = 0.0;
         $models = [];
         foreach ($this->models as $model => $counters) {
@@ -77,6 +78,11 @@ final class GlobalUsage
                 (string) $model, $counters['inputTokens'], $counters['cachedInputTokens'], $counters['outputTokens'],
             );
             $row = $counters;
+            $priceInfo = $estimator->getPriceInfo((string) $model);
+            $row['pricingSource'] = $priceInfo['source'];
+            $row['pricesPerMillionTokensUsd'] = $priceInfo['prices'];
+            $row['fallbackRequests'] = str_ends_with($priceInfo['source'], '-fallback')
+                ? $counters['requests'] - $counters['pendingRequests'] : 0;
             $row['unpricedRequests'] = $cost === null ? $counters['requests'] - $counters['pendingRequests'] : 0;
             $row['knownCostUsd'] = $cost ?? 0.0;
             $row['totalCostUsd'] = $row['missingUsageRequests'] + $row['pendingRequests'] + $row['unpricedRequests'] === 0

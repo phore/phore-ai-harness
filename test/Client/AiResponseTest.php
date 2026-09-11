@@ -64,7 +64,7 @@ final class AiResponseTest extends TestCase
         self::assertSame('tokens in=1000 out=500 total=1500 cost=$0.001205', (string)$usage);
     }
 
-    public function testUsageFallsBackToTotalTokensAndUnknownCost(): void
+    public function testUsageFallsBackToTotalTokensAndConservativeCost(): void
     {
         $response = new AiResponse(200, [], [
             'model' => 'unknown-model',
@@ -79,7 +79,7 @@ final class AiResponseTest extends TestCase
         self::assertSame(3, $usage->inputTokens);
         self::assertSame(4, $usage->outputTokens);
         self::assertSame(7, $usage->totalTokens);
-        self::assertNull($usage->totalCostUsd);
-        self::assertNull($usage->formatTotalCostUsd());
+        self::assertEqualsWithDelta(0.00084, $usage->totalCostUsd, 1e-12);
+        self::assertSame('$0.000840', $usage->formatTotalCostUsd());
     }
 }

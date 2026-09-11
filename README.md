@@ -116,17 +116,64 @@ are not API errors. `pendingRequests` reports attempts still in progress.
 Tokens are summed only from reported usage. Cached input and reasoning output
 are subsets, not added again to totals. The response model takes precedence;
 the requested model is the fallback. Missing usage increments
-`missingUsageRequests`; unknown prices increment `unpricedRequests`.
+`missingUsageRequests`; only absent/blank model names remain `unpricedRequests`.
+Unknown named models receive a conservative fallback. `fallbackRequests` counts
+these requests; each model row includes `pricingSource` and
+`pricesPerMillionTokensUsd`. `knownCostUsd` includes fallback estimates.
 `knownCostUsd` always contains the priced subtotal. `totalCostUsd` is null
 when pending requests, missing usage or unknown prices prevent a complete estimate.
 Reading stats returns a detached snapshot and never clears the counters.
 State lasts for the PHP runtime (one request in typical PHP-FPM, whole execution
 in CLI/long-lived workers); separate processes are not combined.
 
-`Phore\AiHarness\Usage\CostEstimator` centralizes standard USD text-token rates
-for GPT-5, GPT-5 mini and GPT-5 nano and their dated snapshots, using the
-[OpenAI model pricing pages](https://developers.openai.com/api/docs/models/gpt-5)
-(checked 2026-09-11). Unknown families are never assigned a guessed family price.
+`Phore\AiHarness\Usage\CostEstimator` uses a price snapshot checked on 2026-09-11.
+Sources: [OpenAI pricing](https://developers.openai.com/api/docs/pricing),
+[GPT-5.5](https://developers.openai.com/api/docs/models/gpt-5.5),
+[GPT-5.5 Pro](https://developers.openai.com/api/docs/models/gpt-5.5-pro),
+[GPT-5.4](https://developers.openai.com/api/docs/models/gpt-5.4),
+[Mini](https://developers.openai.com/api/docs/models/gpt-5.4-mini),
+[Nano](https://developers.openai.com/api/docs/models/gpt-5.4-nano),
+[GPT-5.2](https://developers.openai.com/api/docs/models/gpt-5.2),
+[GPT-4.1](https://developers.openai.com/api/docs/models/gpt-4.1) and
+[GPT-5](https://developers.openai.com/api/docs/models/gpt-5).
+
+| Model | Input USD/1M | Cached input USD/1M | Output USD/1M |
+|---|---:|---:|---:|
+| chat-latest | 5 | 0.5 | 30 |
+| gpt-4.1 | 2 | 0.5 | 8 |
+| gpt-5.2 | 1.75 | 0.175 | 14 |
+| gpt-5.3-codex | 1.75 | 0.175 | 14 |
+| gpt-5.4 | 2.5 | 0.25 | 15 |
+| gpt-5.4-mini | 0.75 | 0.075 | 4.5 |
+| gpt-5.4-nano | 0.2 | 0.02 | 1.25 |
+| gpt-5.5 | 10 | 1 | 45 |
+| gpt-5.5-pro | 30 | no discount | 180 |
+| gpt-5.6-cyber | 12.5 | 1.25 | 75 |
+| gpt-5.6-luna | 0.4 | 0.04 | 1.8 |
+| gpt-5.6-sol | 8 | 0.8 | 30 |
+| gpt-5.6-terra | 4 | 0.4 | 18 |
+| gpt-6-astra | 20 | 2 | 75 |
+| gpt-5 | 1.25 | 0.125 | 10 |
+| gpt-5-mini | 0.25 | 0.025 | 2 |
+| gpt-5-nano | 0.05 | 0.005 | 0.40 |
+
+GPT-6 Astra, GPT-5.6 Sol/Terra/Luna and GPT-5.5 deliberately use their higher
+long-context standard rates even for short requests. Other named entries use
+published standard rates. These are budgeting estimates, not exact billing.
+
+Resolution order: explicit model/override, dated snapshot, then case-insensitive
+regex matching of complete name segments separated by `- _ . / :`.
+Unknown `mini` models use the highest input/output rates among listed mini models
+(currently 0.75 / 4.50); unknown `nano` models use 0.20 / 1.25.
+Premium segments (`pro|max|ultra|opus|astra`) take precedence over mini/nano.
+All other unknown names, including future higher model versions, use at least
+40 / 180 USD per million input/output tokens: the component-wise upper envelope
+of GPT-6 Astra long-context Fast input and GPT-5.5 Pro output.
+Fallbacks assume **no cache discount** and can rise with higher custom rates;
+lower overrides never reduce the built-in fallback floor. Exact overrides still win.
+`pricingSource` is `exact`, `snapshot`, `mini-fallback`, `nano-fallback`,
+`highest-fallback` or `unknown`; `exact` describes name matching, not invoice accuracy.
+
 Pass overrides in USD per million tokens to price additional models or use
 updated/custom rates; the resulting snapshot is recalculated from accumulated tokens:
 
@@ -139,5 +186,5 @@ $stats = get_ai_usage_stats($estimator);
 
 These are rough token-cost estimates, not invoices: hosted tool fees, separate
 image/audio generation charges, storage, taxes, service tiers and long-context
-surcharges are excluded. No network pricing lookup or automatic console output
+surcharges beyond the conservative rates above are excluded. No network pricing lookup or automatic console output
 takes place. Only counters are retained, not prompts or response history.
