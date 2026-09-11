@@ -85,3 +85,59 @@ errors, retries, available token totals and monotonic total/API/tool durations
 in seconds, including failed runs and structured-output hydration. Missing
 usage is `null` (`n/a` in console output); when only some responses report usage,
 totals sum those available values.
+
+## Global usage and estimated cost
+
+All `OpenAiClient` instances automatically accumulate process-local usage,
+independently of debug logging, including facade/helper calls, callback follow-ups,
+streaming, images and `AiRequestSpooler`. No setup is required.
+
+```php
+phore_ai_text('First task');
+phore_ai_text('Second task', ['model' => 'gpt-5-nano']);
+
+$stats = get_ai_usage_stats();
+printf(
+    "%d requests, %d errors, %d input / %d output / %d total tokens; approx. %s USD\n",
+    $stats['requests'], $stats['errors'],
+    $stats['inputTokens'], $stats['outputTokens'], $stats['totalTokens'],
+    $stats['totalCostUsd'] === null ? 'unknown (partial usage/prices)' : number_format($stats['totalCostUsd'], 6),
+);
+print_r($stats['models']); // Same counters and cost fields, keyed by response model.
+```
+
+`requests` counts client request attempts (including setup failures), not facade
+runs or individual tools; every callback follow-up is another request.
+`errors` counts failed client attempts, HTTP failures, failed/incomplete/cancelled
+response statuses and stream callback aborts, once per request. Errors in local
+tools, hydration or spooler result callbacks after a successful API response
+are not API errors. `pendingRequests` reports attempts still in progress.
+
+Tokens are summed only from reported usage. Cached input and reasoning output
+are subsets, not added again to totals. The response model takes precedence;
+the requested model is the fallback. Missing usage increments
+`missingUsageRequests`; unknown prices increment `unpricedRequests`.
+`knownCostUsd` always contains the priced subtotal. `totalCostUsd` is null
+when pending requests, missing usage or unknown prices prevent a complete estimate.
+Reading stats returns a detached snapshot and never clears the counters.
+State lasts for the PHP runtime (one request in typical PHP-FPM, whole execution
+in CLI/long-lived workers); separate processes are not combined.
+
+`Phore\AiHarness\Usage\CostEstimator` centralizes standard USD text-token rates
+for GPT-5, GPT-5 mini and GPT-5 nano and their dated snapshots, using the
+[OpenAI model pricing pages](https://developers.openai.com/api/docs/models/gpt-5)
+(checked 2026-09-11). Unknown families are never assigned a guessed family price.
+Pass overrides in USD per million tokens to price additional models or use
+updated/custom rates; the resulting snapshot is recalculated from accumulated tokens:
+
+```php
+$estimator = new \Phore\AiHarness\Usage\CostEstimator([
+    'my-model' => ['input' => 1.0, 'cachedInput' => 0.1, 'output' => 5.0],
+]);
+$stats = get_ai_usage_stats($estimator);
+```
+
+These are rough token-cost estimates, not invoices: hosted tool fees, separate
+image/audio generation charges, storage, taxes, service tiers and long-context
+surcharges are excluded. No network pricing lookup or automatic console output
+takes place. Only counters are retained, not prompts or response history.
