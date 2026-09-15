@@ -21,6 +21,7 @@
     "php" : ">=8.5",
     "phore/schema": "dev-main",
     "phore/json-patch": "dev-main",
+    "phore/filesystem": "*",
     "ext-curl": "*",
     "ext-yaml": "*",
     "ext-json": "*"
