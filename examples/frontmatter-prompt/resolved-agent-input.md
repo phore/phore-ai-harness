@@ -1,6 +1,6 @@
 # Resolved agent input
 
-This file shows the effective request content produced by the example `prompts/review.prompt.md` after resolving `extends` and `references`.
+This file shows the effective request content produced by `prompts/review.prompt.md` after resolving `extends` and `references`.
 
 The paths are resolved from the file that declares them:
 
@@ -8,9 +8,9 @@ The paths are resolved from the file that declares them:
 - `php.prompt.md` resolves `shared/base.prompt.md` relative to `prompts/`.
 - `shared/base.prompt.md` resolves `../../references/project-rules.md` relative to `prompts/shared/`.
 
-Therefore the same inherited prompt file can be moved into another directory together with its own relative dependencies without changing the caller.
+This is recursive: an inherited file becomes the new declaring file for its own `extends` and `references`. A prompt module can therefore keep its own relative dependencies when reused from another directory.
 
-The OpenAI request contains one user message with ordered content sections. File references remain file sections rather than being concatenated into the prompt text.
+The OpenAI request contains one user message with ordered content sections. References are real `input_file` sections and are not concatenated into the surrounding text.
 
 ## 1. Provenance preamble — `input_text`
 
@@ -21,7 +21,7 @@ Prompt inheritance: base.prompt.md -> php.prompt.md -> review.prompt.md
 
 ## 2. Inherited base prompt — `input_text`
 
-The alias and description belong to the `extends` entry in `php.prompt.md`, so they are rendered directly before the inherited prompt body:
+The alias and description belong to the `extends` entry in `php.prompt.md`, so the converter renders them immediately before the inherited body:
 
 ```text
 Reference alias: baseRules
@@ -34,7 +34,7 @@ Prefer small, reviewable changes and make assumptions explicit when they affect 
 
 ## 3. Reference metadata — `input_text`
 
-The reference is declared inside `shared/base.prompt.md`. Its relative path is therefore resolved from `prompts/shared/`.
+The reference itself was declared in `shared/base.prompt.md`, therefore its relative path is evaluated from `prompts/shared/`:
 
 ```text
 Reference alias: projectRules
@@ -45,7 +45,7 @@ Treat these project rules as binding source material.
 
 ## 4. Referenced file — `input_file`
 
-The next content section is a real OpenAI `input_file` segment. Conceptually it is sent as:
+The next OpenAI content section is an actual file input. Apart from the machine-specific absolute path and Base64 data, its structure is:
 
 ```json
 {
@@ -55,7 +55,7 @@ The next content section is a real OpenAI `input_file` segment. Conceptually it 
 }
 ```
 
-The file content represented by that segment is:
+The encoded file contains:
 
 ```markdown
 # Project rules
@@ -79,13 +79,37 @@ Review the supplied change for correctness, regressions, and unnecessary complex
 Report only actionable findings and order them by severity.
 ```
 
+## Effective request shape
+
+The relevant part of the Responses API payload therefore has this ordering:
+
+```json
+{
+  "input": [
+    {
+      "role": "user",
+      "content": [
+        {"type": "input_text", "text": "<provenance preamble>"},
+        {"type": "input_text", "text": "<baseRules metadata + base prompt>"},
+        {"type": "input_text", "text": "<projectRules reference metadata>"},
+        {"type": "input_file", "filename": "<resolved project-rules.md path>", "file_data": "<data URL>"},
+        {"type": "input_text", "text": "<PHP prompt>"},
+        {"type": "input_text", "text": "<main review prompt>"}
+      ]
+    }
+  ]
+}
+```
+
+The normal default/system instructions are still carried separately in the Responses API `instructions` field.
+
 ## Alias validation
 
-Before these sections are sent, the complete resolved request contains the aliases:
+Before these sections are sent, the fully resolved request exposes:
 
 ```text
 baseRules
 projectRules
 ```
 
-`review.prompt.md` requires both aliases. The validation therefore succeeds. The same validation also sees aliases from separately supplied prompt objects outside this `FrontMatterPrompt`.
+`review.prompt.md` requires both aliases, so validation succeeds. The same validation also sees aliases from separately supplied prompt objects outside this `FrontMatterPrompt`.
