@@ -10,6 +10,7 @@ use Phore\AiHarness\Helper\DataUrl;
 use Phore\AiHarness\Helper\Toolkit;
 use Phore\AiHarness\PromptType\AudioPrompt;
 use Phore\AiHarness\PromptType\FilePrompt;
+use Phore\AiHarness\PromptType\FrontMatterPrompt;
 use Phore\AiHarness\PromptType\ImagePrompt;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\PromptType\StructPrompt;
@@ -25,8 +26,11 @@ final readonly class OpenAiPromptToContentConverter
      */
     public function convert(PromptType|iterable $prompts): array
     {
+        $normalized = iterator_to_array($this->normalizePrompts($prompts), false);
+        $this->validateRequiredAliases($normalized);
+
         $sections = [];
-        foreach ($this->normalizePrompts($prompts) as $prompt) {
+        foreach ($this->expandPrompts($normalized) as $prompt) {
             array_push($sections, ...$this->convertPromptToSections($prompt));
         }
 
@@ -39,6 +43,7 @@ final readonly class OpenAiPromptToContentConverter
      */
     public function convertPrompt(PromptType $prompt): array
     {
+        $this->validateRequiredAliases([$prompt]);
         return $this->convertPromptToSections($prompt)[0];
     }
 
@@ -49,6 +54,7 @@ final readonly class OpenAiPromptToContentConverter
     private function convertPromptToSections(PromptType $prompt): array
     {
         return match (true) {
+            $prompt instanceof FrontMatterPrompt => $this->convert($prompt->segments()),
             $prompt instanceof TextPrompt => [[
                 'type' => 'input_text',
                 'text' => $this->convertTextPrompt($prompt),
@@ -93,6 +99,15 @@ final readonly class OpenAiPromptToContentConverter
      */
     public function convertPromptToText(PromptType $prompt): string
     {
+        if ($prompt instanceof FrontMatterPrompt) {
+            $this->validateRequiredAliases([$prompt]);
+            $parts = [];
+            foreach ($this->expandPrompts([$prompt]) as $segment) {
+                $parts[] = $this->convertPromptToText($segment);
+            }
+            return implode("\n\n", $parts);
+        }
+
         return match (true) {
             $prompt instanceof TextPrompt => $this->convertTextPrompt($prompt),
             $prompt instanceof FilePrompt => $this->segmentMetadataText($prompt, 'file')
@@ -192,6 +207,49 @@ final readonly class OpenAiPromptToContentConverter
         }
 
         return $text;
+    }
+
+    /** @param list<PromptType> $prompts */
+    private function validateRequiredAliases(array $prompts): void
+    {
+        $aliases = [];
+        foreach ($this->expandPrompts($prompts) as $prompt) {
+            $array = $prompt->toArray();
+            if (isset($array['alias']) && is_string($array['alias'])) {
+                $aliases[$array['alias']] = true;
+            }
+        }
+
+        foreach ($prompts as $prompt) {
+            if (!$prompt instanceof FrontMatterPrompt) {
+                continue;
+            }
+
+            $missing = array_values(array_filter(
+                $prompt->requiredAliases(),
+                static fn (string $alias): bool => !isset($aliases[$alias]),
+            ));
+            if ($missing !== []) {
+                throw new InvalidArgumentException(
+                    'FrontMatterPrompt ' . $prompt->fileName . ' requires missing aliases: ' . implode(', ', $missing)
+                );
+            }
+        }
+    }
+
+    /**
+     * @param iterable<PromptType> $prompts
+     * @return iterable<PromptType>
+     */
+    private function expandPrompts(iterable $prompts): iterable
+    {
+        foreach ($prompts as $prompt) {
+            if ($prompt instanceof FrontMatterPrompt) {
+                yield from $this->expandPrompts($prompt->segments());
+                continue;
+            }
+            yield $prompt;
+        }
     }
 
     /**
