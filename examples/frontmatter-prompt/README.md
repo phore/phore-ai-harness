@@ -1,13 +1,13 @@
 # Frontmatter prompt files
 
-`FrontMatterPrompt` is the preferred way to load reusable prompts from files.
+`PromptFile` is the preferred way to load reusable prompts from files. `PromptFile` means that the file defines the prompt itself; `FilePrompt` means that the file itself is attached to a prompt as source material. Frontmatter is the current file format, not the public concept represented by the class name.
 
 ## Usage
 
 ```php
-use Phore\AiHarness\PromptType\FrontMatterPrompt;
+use Phore\AiHarness\PromptType\PromptFile;
 
-$prompt = new FrontMatterPrompt(__DIR__ . '/prompts/review.prompt.md');
+$prompt = new PromptFile(__DIR__ . '/prompts/review.prompt.md');
 $result = phore_ai_text($prompt);
 ```
 
@@ -79,12 +79,12 @@ Requirements declared by inherited prompts are retained as well. This lets any l
 Example with an external alias:
 
 ```php
-use Phore\AiHarness\PromptType\FrontMatterPrompt;
+use Phore\AiHarness\PromptType\PromptFile;
 use Phore\AiHarness\PromptType\StructPrompt;
 
 $result = phore_ai_text([
     new StructPrompt($customerData, alias: 'customerContext'),
-    new FrontMatterPrompt(__DIR__ . '/prompts/review.prompt.md'),
+    new PromptFile(__DIR__ . '/prompts/review.prompt.md'),
 ]);
 ```
 

@@ -10,7 +10,7 @@ use Phore\AiHarness\Helper\DataUrl;
 use Phore\AiHarness\Helper\Toolkit;
 use Phore\AiHarness\PromptType\AudioPrompt;
 use Phore\AiHarness\PromptType\FilePrompt;
-use Phore\AiHarness\PromptType\FrontMatterPrompt;
+use Phore\AiHarness\PromptType\PromptFile;
 use Phore\AiHarness\PromptType\ImagePrompt;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\PromptType\StructPrompt;
@@ -54,7 +54,7 @@ final readonly class OpenAiPromptToContentConverter
     private function convertPromptToSections(PromptType $prompt): array
     {
         return match (true) {
-            $prompt instanceof FrontMatterPrompt => $this->convert($prompt->segments()),
+            $prompt instanceof PromptFile => $this->convert($prompt->segments()),
             $prompt instanceof TextPrompt => [[
                 'type' => 'input_text',
                 'text' => $this->convertTextPrompt($prompt),
@@ -99,7 +99,7 @@ final readonly class OpenAiPromptToContentConverter
      */
     public function convertPromptToText(PromptType $prompt): string
     {
-        if ($prompt instanceof FrontMatterPrompt) {
+        if ($prompt instanceof PromptFile) {
             $this->validateRequiredAliases([$prompt]);
             $parts = [];
             foreach ($this->expandPrompts([$prompt]) as $segment) {
@@ -221,7 +221,7 @@ final readonly class OpenAiPromptToContentConverter
         }
 
         foreach ($prompts as $prompt) {
-            if (!$prompt instanceof FrontMatterPrompt) {
+            if (!$prompt instanceof PromptFile) {
                 continue;
             }
 
@@ -231,7 +231,7 @@ final readonly class OpenAiPromptToContentConverter
             ));
             if ($missing !== []) {
                 throw new InvalidArgumentException(
-                    'FrontMatterPrompt ' . $prompt->fileName . ' requires missing aliases: ' . implode(', ', $missing)
+                    'PromptFile ' . $prompt->fileName . ' requires missing aliases: ' . implode(', ', $missing)
                 );
             }
         }
@@ -244,7 +244,7 @@ final readonly class OpenAiPromptToContentConverter
     private function expandPrompts(iterable $prompts): iterable
     {
         foreach ($prompts as $prompt) {
-            if ($prompt instanceof FrontMatterPrompt) {
+            if ($prompt instanceof PromptFile) {
                 yield from $this->expandPrompts($prompt->segments());
                 continue;
             }

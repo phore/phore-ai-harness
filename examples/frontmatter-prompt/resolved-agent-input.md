@@ -112,4 +112,4 @@ baseRules
 projectRules
 ```
 
-`review.prompt.md` requires both aliases, so validation succeeds. The same validation also sees aliases from separately supplied prompt objects outside this `FrontMatterPrompt`.
+`review.prompt.md` requires both aliases, so validation succeeds. The same validation also sees aliases from separately supplied prompt objects outside this `PromptFile`.
