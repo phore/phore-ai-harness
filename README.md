@@ -28,9 +28,9 @@ $result = phore_ai_text(
 );
 ```
 
-The file body is the prompt text. YAML frontmatter can compose prompt files with ordered `extends`, attach source files with `references`, and declare `requires_aliases` as a safety contract. `extends` and `references` entries can be a simple path or a mapping with `path`, optional `alias`, and optional `description`. Aliases introduced by inherited prompts and references remain available to later derived prompts and count toward `requires_aliases`; externally supplied aliased prompts count as well. Missing files, invalid frontmatter, inheritance cycles, and missing required aliases fail before the AI request is sent.
+The file body is the prompt text. YAML frontmatter can compose prompt files with ordered `extends`, attach source files with `references`, and declare `requires_aliases` as a safety contract. `extends` and `references` entries can be a simple path or a mapping with `path`, optional `alias`, and optional `description`. Every relative path is resolved from the directory of the file that declares that entry, recursively through inherited prompts. Aliases introduced by inherited prompts and references remain available to later derived prompts and count toward `requires_aliases`; externally supplied aliased prompts count as well. Missing files, invalid frontmatter, inheritance cycles, and missing required aliases fail before the AI request is sent.
 
-See [`examples/frontmatter-prompt/`](examples/frontmatter-prompt/) for the complete format and resolution rules. `FilePrompt` remains the type for attaching arbitrary files as source material; `FrontMatterPrompt` is the preferred way to load prompt definitions from files.
+See [`examples/frontmatter-prompt/`](examples/frontmatter-prompt/) for the complete format, nested relative-path example, and the resolved Responses API content layout. `FilePrompt` remains the type for attaching arbitrary files as source material; `FrontMatterPrompt` is the preferred way to load prompt definitions from files.
 
 ## Reasoning options
 
