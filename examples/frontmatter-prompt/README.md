@@ -17,17 +17,10 @@ The Markdown body is the prompt text. YAML frontmatter can define `description`,
 ---
 description: Review an existing PHP change.
 extends:
-  - base.prompt.md
   - path: php.prompt.md
-    alias: phpRules
-    description: PHP-specific rules for this review.
-references:
-  - path: ../references/project-rules.md
-    alias: projectContext
-    description: Treat these project rules as binding context.
 requires_aliases:
-  - phpRules
-  - projectContext
+  - baseRules
+  - projectRules
 ---
 
 Review the supplied change and report only actionable findings.
@@ -35,19 +28,25 @@ Review the supplied change and report only actionable findings.
 
 `extends` and `references` accept either a path string, one mapping, or an ordered list. Mapping entries support:
 
-- `path`: required file path, relative to the file that declares it unless absolute.
+- `path`: required file path.
 - `alias`: optional alias for the included prompt body or referenced file.
 - `description`: optional handling instructions for that included prompt body or referenced file.
 
-`description` at the top level is descriptive metadata only. A `description` attached to an `extends` or `references` entry is passed to the resulting prompt segment as its handling instructions.
+Every relative `path` is resolved against the directory of the file that declares it. This rule is recursive for both `extends` and `references`: if `review.prompt.md` extends `php.prompt.md`, paths inside `php.prompt.md` are resolved relative to `php.prompt.md`, and paths inside a prompt extended by `php.prompt.md` are resolved relative to that file. This makes complete prompt modules portable between directories.
 
-Unknown frontmatter keys and unknown keys inside `extends`/`references` entries are rejected.
+The example deliberately demonstrates this:
+
+- `prompts/review.prompt.md` extends `php.prompt.md` relative to `prompts/`.
+- `prompts/php.prompt.md` extends `shared/base.prompt.md` relative to `prompts/`.
+- `prompts/shared/base.prompt.md` references `../../references/project-rules.md` relative to `prompts/shared/`.
+
+`description` at the top level is descriptive metadata only. A `description` attached to an `extends` or `references` entry is passed to the resulting prompt segment as its handling instructions. Unknown frontmatter keys and unknown keys inside `extends`/`references` entries are rejected.
 
 ## Resolution order
 
 For `review.prompt.md` the effective prompt order is parent-first and child-last. Resolution is recursive and `extends` entries are processed left to right. The same canonical prompt file is emitted only once at its first resolved position.
 
-A short generated preamble is prepended so the model can see the effective composition, for example:
+A short generated preamble is prepended so the model can see the effective composition:
 
 ```text
 Main prompt: review.prompt.md
@@ -56,11 +55,13 @@ Prompt inheritance: base.prompt.md -> php.prompt.md -> review.prompt.md
 
 The main prompt therefore remains the most specific instruction layer.
 
+See [`resolved-agent-input.md`](resolved-agent-input.md) for the ordered `input_text` and `input_file` sections produced by this example, including the exact metadata formatting used for aliased references.
+
 ## References
 
 `references` are additional source files, not inherited prompt bodies. They are emitted as normal `FilePrompt` segments. References declared by inherited prompts remain available further down the inheritance chain.
 
-An alias declared on a reference is part of the resolved alias space and can satisfy `requires_aliases` in any later derived prompt.
+An alias declared on a reference is part of the fully resolved alias space and can satisfy `requires_aliases` in any later derived prompt.
 
 ## Required aliases
 
@@ -73,7 +74,7 @@ Aliases can come from:
 - aliased `references` entries;
 - inherited prompt layers and their references.
 
-This lets a prompt safely refer to required context without silently running when that context was omitted.
+Requirements declared by inherited prompts are retained as well. This lets any layer safely depend on context introduced earlier in the inheritance tree or supplied externally.
 
 Example with an external alias:
 
@@ -87,7 +88,7 @@ $result = phore_ai_text([
 ]);
 ```
 
-If `review.prompt.md` contains `requires_aliases: customerContext`, the request fails before it is sent when that alias is missing.
+If a resolved prompt contains `requires_aliases: customerContext`, the request fails before it is sent when that alias is missing.
 
 ## Errors
 
