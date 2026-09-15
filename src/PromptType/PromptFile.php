@@ -7,7 +7,7 @@ namespace Phore\AiHarness\PromptType;
 use InvalidArgumentException;
 use RuntimeException;
 
-final readonly class FrontMatterPrompt implements PromptType
+final readonly class PromptFile implements PromptType
 {
     /** @var list<PromptType> */
     private array $segments;
@@ -21,7 +21,7 @@ final readonly class FrontMatterPrompt implements PromptType
     {
         $canonical = realpath($fileName);
         if ($canonical === false || !is_file($canonical)) {
-            throw new RuntimeException('Could not read frontmatter prompt file: ' . $fileName);
+            throw new RuntimeException('Could not read prompt file: ' . $fileName);
         }
 
         $this->fileName = $canonical;
@@ -43,7 +43,7 @@ final readonly class FrontMatterPrompt implements PromptType
 
     public function type(): string
     {
-        return 'frontmatter';
+        return 'prompt_file';
     }
 
     /** @return list<PromptType> */
@@ -89,7 +89,7 @@ final readonly class FrontMatterPrompt implements PromptType
         if ($cycleIndex !== false) {
             $cycle = array_slice($stack, $cycleIndex);
             $cycle[] = $fileName;
-            throw new RuntimeException('Frontmatter prompt inheritance cycle: ' . implode(' -> ', array_map('basename', $cycle)));
+            throw new RuntimeException('Prompt file inheritance cycle: ' . implode(' -> ', array_map('basename', $cycle)));
         }
 
         if (isset($resolved[$fileName])) {
@@ -99,19 +99,19 @@ final readonly class FrontMatterPrompt implements PromptType
         $stack[] = $fileName;
         $frontMatter = phore_file($fileName)->get_front_matter();
         if (!is_array($frontMatter->header)) {
-            throw new InvalidArgumentException('Frontmatter header must be a YAML mapping in: ' . $fileName);
+            throw new InvalidArgumentException('Prompt file frontmatter must be a YAML mapping in: ' . $fileName);
         }
 
         $header = $frontMatter->header;
         $allowed = ['description', 'extends', 'references', 'requires_aliases'];
         foreach (array_keys($header) as $key) {
             if (!is_string($key) || !in_array($key, $allowed, true)) {
-                throw new InvalidArgumentException('Unknown frontmatter field ' . var_export($key, true) . ' in: ' . $fileName);
+                throw new InvalidArgumentException('Unknown prompt file frontmatter field ' . var_export($key, true) . ' in: ' . $fileName);
             }
         }
 
         if (isset($header['description']) && !is_string($header['description'])) {
-            throw new InvalidArgumentException('Frontmatter field description must be a string in: ' . $fileName);
+            throw new InvalidArgumentException('Prompt file field description must be a string in: ' . $fileName);
         }
 
         foreach ($this->normalizeIncludes($header['extends'] ?? [], 'extends', $fileName) as $include) {
@@ -144,21 +144,21 @@ final readonly class FrontMatterPrompt implements PromptType
 
         $items = is_string($value) || $this->isIncludeMap($value) ? [$value] : $value;
         if (!is_array($items)) {
-            throw new InvalidArgumentException("Frontmatter field {$field} must be a string, mapping, or list in: {$fileName}");
+            throw new InvalidArgumentException("Prompt file field {$field} must be a string, mapping, or list in: {$fileName}");
         }
 
         $result = [];
         foreach ($items as $item) {
             if (is_string($item)) {
                 if (trim($item) === '') {
-                    throw new InvalidArgumentException("Frontmatter field {$field} contains an empty path in: {$fileName}");
+                    throw new InvalidArgumentException("Prompt file field {$field} contains an empty path in: {$fileName}");
                 }
                 $result[] = ['path' => $item, 'alias' => null, 'description' => null];
                 continue;
             }
 
             if (!is_array($item)) {
-                throw new InvalidArgumentException("Frontmatter field {$field} contains an invalid entry in: {$fileName}");
+                throw new InvalidArgumentException("Prompt file field {$field} contains an invalid entry in: {$fileName}");
             }
 
             foreach (array_keys($item) as $key) {
@@ -168,16 +168,16 @@ final readonly class FrontMatterPrompt implements PromptType
             }
 
             if (!isset($item['path']) || !is_string($item['path']) || trim($item['path']) === '') {
-                throw new InvalidArgumentException("Frontmatter field {$field} entry requires a non-empty path in: {$fileName}");
+                throw new InvalidArgumentException("Prompt file field {$field} entry requires a non-empty path in: {$fileName}");
             }
 
             $entryAlias = $item['alias'] ?? null;
             $entryDescription = $item['description'] ?? null;
             if ($entryAlias !== null && (!is_string($entryAlias) || trim($entryAlias) === '')) {
-                throw new InvalidArgumentException("Frontmatter field {$field} alias must be a non-empty string in: {$fileName}");
+                throw new InvalidArgumentException("Prompt file field {$field} alias must be a non-empty string in: {$fileName}");
             }
             if ($entryDescription !== null && (!is_string($entryDescription) || trim($entryDescription) === '')) {
-                throw new InvalidArgumentException("Frontmatter field {$field} description must be a non-empty string in: {$fileName}");
+                throw new InvalidArgumentException("Prompt file field {$field} description must be a non-empty string in: {$fileName}");
             }
 
             $result[] = ['path' => $item['path'], 'alias' => $entryAlias, 'description' => $entryDescription];
@@ -195,13 +195,13 @@ final readonly class FrontMatterPrompt implements PromptType
 
         $items = is_string($value) ? [$value] : $value;
         if (!is_array($items)) {
-            throw new InvalidArgumentException("Frontmatter field {$field} must be a string or list in: {$fileName}");
+            throw new InvalidArgumentException("Prompt file field {$field} must be a string or list in: {$fileName}");
         }
 
         $result = [];
         foreach ($items as $item) {
             if (!is_string($item) || trim($item) === '') {
-                throw new InvalidArgumentException("Frontmatter field {$field} must contain only non-empty strings in: {$fileName}");
+                throw new InvalidArgumentException("Prompt file field {$field} must contain only non-empty strings in: {$fileName}");
             }
             $result[] = $item;
         }
@@ -213,7 +213,7 @@ final readonly class FrontMatterPrompt implements PromptType
         $candidate = $this->isAbsolutePath($path) ? $path : dirname($declaringFile) . DIRECTORY_SEPARATOR . $path;
         $canonical = realpath($candidate);
         if ($canonical === false || !is_file($canonical)) {
-            throw new RuntimeException("Frontmatter {$field} file not found: {$path} (declared in {$declaringFile})");
+            throw new RuntimeException("Prompt file {$field} target not found: {$path} (declared in {$declaringFile})");
         }
         return $canonical;
     }
