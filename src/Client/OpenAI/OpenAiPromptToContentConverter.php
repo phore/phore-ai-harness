@@ -94,7 +94,9 @@ final readonly class OpenAiPromptToContentConverter
         };
     }
 
-    /** @throws JsonException */
+    /**
+     * @throws JsonException
+     */
     public function convertPromptToText(PromptType $prompt): string
     {
         if ($prompt instanceof PromptFile) {
@@ -108,9 +110,12 @@ final readonly class OpenAiPromptToContentConverter
 
         return match (true) {
             $prompt instanceof TextPrompt => $this->convertTextPrompt($prompt),
-            $prompt instanceof FilePrompt => $this->segmentMetadataText($prompt, 'file') . "File: {$prompt->fileName}\n```\n{$prompt->content}\n```",
-            $prompt instanceof ImagePrompt => $this->segmentMetadataText($prompt, 'image') . ($prompt->fileName !== null ? 'Image: ' . $prompt->fileName : 'Image') . "\n" . $prompt->imageUrl,
-            $prompt instanceof AudioPrompt => $this->segmentMetadataText($prompt, 'audio') . ($prompt->fileName !== null ? 'Audio: ' . $prompt->fileName : 'Audio') . "\n" . $prompt->format,
+            $prompt instanceof FilePrompt => $this->segmentMetadataText($prompt, 'file')
+                . "File: {$prompt->fileName}\n```\n{$prompt->content}\n```",
+            $prompt instanceof ImagePrompt => $this->segmentMetadataText($prompt, 'image')
+                . ($prompt->fileName !== null ? 'Image: ' . $prompt->fileName : 'Image') . "\n" . $prompt->imageUrl,
+            $prompt instanceof AudioPrompt => $this->segmentMetadataText($prompt, 'audio')
+                . ($prompt->fileName !== null ? 'Audio: ' . $prompt->fileName : 'Audio') . "\n" . $prompt->format,
             $prompt instanceof StructPrompt => $this->convertStructPrompt($prompt),
             $prompt instanceof SystemPrompt => $prompt->text,
             default => throw new InvalidArgumentException('Unsupported PromptType: ' . $prompt::class),
@@ -120,56 +125,87 @@ final readonly class OpenAiPromptToContentConverter
     private function convertTextPrompt(TextPrompt $prompt): string
     {
         $text = '';
+
         if ($prompt->alias !== null) {
-            $text .= "Reference alias: {$prompt->alias}\nOther prompts may refer to this text as `{$prompt->alias}`.\n";
+            $text .= "Reference alias: {$prompt->alias}\n"
+                . "Other prompts may refer to this text as `{$prompt->alias}`.\n";
         }
+
         if ($prompt->instructions !== null) {
             $text .= "Text instructions:\n{$prompt->instructions}\n";
         }
+
         if ($prompt->type !== null) {
-            return $text . "```{$prompt->type}\n{$prompt->text}\n```";
+            $text .= "```{$prompt->type}\n{$prompt->text}\n```";
+            return $text;
         }
+
         return $text . $prompt->text;
     }
 
-    /** @return list<array{type: string, text: string}> */
+    /**
+     * @return list<array{type: string, text: string}>
+     */
     private function segmentInstructions(FilePrompt|ImagePrompt|AudioPrompt $prompt, string $segmentType): array
     {
         $text = $this->segmentMetadataText($prompt, $segmentType);
-        return $text === '' ? [] : [['type' => 'input_text', 'text' => rtrim($text)]];
+        if ($text === '') {
+            return [];
+        }
+
+        return [[
+            'type' => 'input_text',
+            'text' => rtrim($text),
+        ]];
     }
 
     private function segmentMetadataText(FilePrompt|ImagePrompt|AudioPrompt $prompt, string $segmentType): string
     {
         $parts = [];
+
         if ($prompt->alias !== null) {
             $parts[] = "Reference alias: {$prompt->alias}\nOther prompts may refer to the following {$segmentType} segment as `{$prompt->alias}`.";
         }
+
         if ($prompt->instructions !== null) {
             $parts[] = "Instructions for the following {$segmentType} segment:\n{$prompt->instructions}";
         }
+
         if ($prompt->type !== null) {
             $parts[] = "Content type hint for the following {$segmentType} segment: {$prompt->type}.";
         }
+
         return $parts === [] ? '' : implode("\n", $parts) . "\n";
     }
 
-    /** @throws JsonException */
+    /**
+     * @throws JsonException
+     */
     private function convertStructPrompt(StructPrompt $prompt): string
     {
-        $text = $prompt->className() !== null ? "Structured PHP type: {$prompt->className()}\n" : "Structured data\n";
+        $text = $prompt->className() !== null
+            ? "Structured PHP type: {$prompt->className()}\n"
+            : "Structured data\n";
+
         if ($prompt->alias() !== null) {
-            $text .= "Reference alias: {$prompt->alias()}\nOther prompts may refer to this struct as `{$prompt->alias()}`.\n";
+            $text .= "Reference alias: {$prompt->alias()}\n"
+                . "Other prompts may refer to this struct as `{$prompt->alias()}`.\n";
         }
+
         if ($prompt->instructions() !== null) {
             $text .= "Struct instructions:\n{$prompt->instructions()}\n";
         }
+
         if ($prompt->jsonSchema() !== null) {
-            $text .= "JSON Schema:\n```json\n" . Toolkit::jsonEncode($prompt->jsonSchema(), true) . "\n```";
+            $text .= "JSON Schema:\n```json\n"
+                . Toolkit::jsonEncode($prompt->jsonSchema(), true)
+                . "\n```";
         }
+
         if ($prompt->hasData()) {
             $text .= "\nData:\n```json\n" . Toolkit::jsonEncode($prompt->data(), true) . "\n```";
         }
+
         return $text;
     }
 
@@ -188,14 +224,23 @@ final readonly class OpenAiPromptToContentConverter
             if (!$prompt instanceof PromptFile) {
                 continue;
             }
-            $missing = array_values(array_filter($prompt->requiredAliases(), static fn (string $alias): bool => !isset($aliases[$alias])));
+
+            $missing = array_values(array_filter(
+                $prompt->requiredAliases(),
+                static fn (string $alias): bool => !isset($aliases[$alias]),
+            ));
             if ($missing !== []) {
-                throw new InvalidArgumentException('PromptFile ' . $prompt->fileName . ' requires missing aliases: ' . implode(', ', $missing));
+                throw new InvalidArgumentException(
+                    'PromptFile ' . $prompt->fileName . ' requires missing aliases: ' . implode(', ', $missing)
+                );
             }
         }
     }
 
-    /** @param iterable<PromptType> $prompts @return iterable<PromptType> */
+    /**
+     * @param iterable<PromptType> $prompts
+     * @return iterable<PromptType>
+     */
     private function expandPrompts(iterable $prompts): iterable
     {
         foreach ($prompts as $prompt) {
@@ -207,17 +252,22 @@ final readonly class OpenAiPromptToContentConverter
         }
     }
 
-    /** @param PromptType|iterable<PromptType> $prompts @return iterable<PromptType> */
+    /**
+     * @param PromptType|iterable<PromptType> $prompts
+     * @return iterable<PromptType>
+     */
     private function normalizePrompts(PromptType|iterable $prompts): iterable
     {
         if ($prompts instanceof PromptType) {
             yield $prompts;
             return;
         }
+
         foreach ($prompts as $prompt) {
             if (!$prompt instanceof PromptType) {
                 throw new InvalidArgumentException('Expected only PromptType instances.');
             }
+
             yield $prompt;
         }
     }
