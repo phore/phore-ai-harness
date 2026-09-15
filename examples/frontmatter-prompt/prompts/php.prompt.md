@@ -1,8 +1,13 @@
 ---
 description: PHP-specific coding instructions.
-extends: base.prompt.md
+extends:
+  - path: base.prompt.md
+    alias: baseRules
+    description: General rules that remain binding for PHP work.
 references:
-  - ../references/project-rules.md
+  - path: ../references/project-rules.md
+    alias: projectRules
+    description: Treat these project rules as binding source material.
 ---
 
 Target PHP 8.5.
