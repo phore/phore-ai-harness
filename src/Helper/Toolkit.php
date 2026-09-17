@@ -152,6 +152,11 @@ final class Toolkit
     /**
      * Normalizes strings, prompt instances and tool instances to values accepted by `PhoreAi::with()`.
      *
+     * Plain strings are the convenience form for an explicit task instruction and
+     * are therefore converted to instruction-enabled TextPrompt instances. Explicit
+     * TextPrompt objects keep their safer default allowInstructions=false unless
+     * the caller opts in.
+     *
      * @param string|PromptType|ToolType|array<int, string|PromptType|ToolType> $prompts
      * @return list<PromptType|ToolType>
      */
@@ -162,7 +167,7 @@ final class Toolkit
 
         foreach ($items as $item) {
             if (is_string($item)) {
-                $normalized[] = new TextPrompt($item);
+                $normalized[] = new TextPrompt($item, allowInstructions: true);
                 continue;
             }
 
