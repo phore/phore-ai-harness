@@ -10,6 +10,14 @@ use Phore\Schema\Generator\JsonSchema\JsonSchemaGeneratorOptions;
 use Phore\Schema\Parser\SchemaParser;
 use ReflectionClass;
 
+/**
+ * Structured source data and optional schema information supplied to the model.
+ *
+ * Struct data is treated as external/untrusted data by default. Set
+ * allowInstructions to true only when instruction-like values contained inside
+ * the structured data are intentionally allowed to influence model behavior.
+ * The separate instructions metadata remains application-provided guidance.
+ */
 final readonly class StructPrompt implements PromptType
 {
     private ?string $className;
@@ -35,6 +43,7 @@ final readonly class StructPrompt implements PromptType
         ?string $alias = null,
         ?string $instructions = null,
         ?JsonSchemaGeneratorOptions $jsonSchemaOptions = null,
+        public bool $allowInstructions = false,
     ) {
         $this->alias = $this->validateAlias($alias);
         $this->instructions = $this->validateInstructions($instructions);
@@ -95,12 +104,13 @@ final readonly class StructPrompt implements PromptType
     }
 
     /**
-     * @return array{type: string, className?: string, jsonSchema?: array<string, mixed>, alias?: string, instructions?: string, data?: mixed}
+     * @return array{type: string, allowInstructions: bool, className?: string, jsonSchema?: array<string, mixed>, alias?: string, instructions?: string, data?: mixed}
      */
     public function toArray(): array
     {
         $array = [
             'type' => $this->type(),
+            'allowInstructions' => $this->allowInstructions,
         ];
 
         if ($this->className !== null) {

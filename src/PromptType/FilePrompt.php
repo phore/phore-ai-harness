@@ -7,6 +7,15 @@ namespace Phore\AiHarness\PromptType;
 use Phore\AiHarness\Helper\DataUrl;
 use RuntimeException;
 
+/**
+ * File content attached to a prompt as source material.
+ *
+ * File content is treated as external/untrusted data by default. Set
+ * allowInstructions to true only when instructions contained inside the file
+ * are intentionally allowed to influence model behavior. The separate
+ * instructions metadata is application-provided guidance about how the model
+ * should use the source and is not affected by allowInstructions.
+ */
 final readonly class FilePrompt implements PromptType
 {
     public ?string $alias;
@@ -28,6 +37,7 @@ final readonly class FilePrompt implements PromptType
      * @param string|null $alias Optional non-empty reference name, e.g. "contract". Other prompts may refer to this alias.
      * @param string|null $instructions Optional non-empty file-specific usage instructions for the model.
      * @param string|null $type Optional non-empty logical content format, e.g. "markdown" or "csv".
+     * @param bool $allowInstructions Whether instructions embedded inside the file content may be followed; defaults to false.
      */
     public function __construct(
         public string $fileName,
@@ -36,6 +46,7 @@ final readonly class FilePrompt implements PromptType
         ?string $alias = null,
         ?string $instructions = null,
         ?string $type = null,
+        public bool $allowInstructions = false,
     ) {
         $this->alias = PromptMetadata::validateAlias($alias, 'FilePrompt');
         $this->instructions = PromptMetadata::validateInstructions($instructions, 'FilePrompt');
@@ -47,12 +58,13 @@ final readonly class FilePrompt implements PromptType
      *
      * Use this helper instead of manually calling file_get_contents() when the file exists on disk.
      * The optional alias and instructions are forwarded to the constructor and therefore included
-     * in the prompt metadata.
+     * in the prompt metadata. File content remains untrusted unless allowInstructions is explicitly true.
      *
      * @param string $fileName Local file path to read and attach. The same value is exposed as prompt fileName.
      * @param string|null $alias Optional non-empty reference name for this file prompt.
      * @param string|null $instructions Optional non-empty instructions that describe how the model should use this file.
      * @param string|null $type Optional non-empty logical content format, e.g. "markdown" or "csv".
+     * @param bool $allowInstructions Whether instructions embedded inside the file content may be followed; defaults to false.
      *
      * @throws RuntimeException If the file cannot be read.
      */
@@ -61,6 +73,7 @@ final readonly class FilePrompt implements PromptType
         ?string $alias = null,
         ?string $instructions = null,
         ?string $type = null,
+        bool $allowInstructions = false,
     ): self {
         $content = @file_get_contents($fileName);
         if ($content === false) {
@@ -74,6 +87,7 @@ final readonly class FilePrompt implements PromptType
             $alias,
             $instructions,
             $type,
+            $allowInstructions,
         );
     }
 
@@ -83,7 +97,7 @@ final readonly class FilePrompt implements PromptType
     }
 
     /**
-     * @return array{type: string, fileName: string, content: string, contentType: string, alias?: string, instructions?: string, contentFormat?: string}
+     * @return array{type: string, fileName: string, content: string, contentType: string, allowInstructions: bool, alias?: string, instructions?: string, contentFormat?: string}
      */
     public function toArray(): array
     {
@@ -92,6 +106,7 @@ final readonly class FilePrompt implements PromptType
             'fileName' => $this->fileName,
             'content' => $this->content,
             'contentType' => $this->contentType,
+            'allowInstructions' => $this->allowInstructions,
         ];
 
         PromptMetadata::addToArray($array, $this->alias, $this->instructions, $this->type);

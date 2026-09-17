@@ -7,6 +7,15 @@ namespace Phore\AiHarness\PromptType;
 use InvalidArgumentException;
 use RuntimeException;
 
+/**
+ * Loads a reusable prompt definition from YAML-frontmatter/Markdown files.
+ *
+ * PromptFile bodies and inherited prompt bodies define prompt instructions and
+ * are therefore rendered with allowInstructions enabled. Files attached through
+ * references are source material and remain external/untrusted by default. A
+ * reference may explicitly opt in with `allow_instructions: true` when embedded
+ * instructions in that referenced file are intentionally executable.
+ */
 final readonly class PromptFile implements PromptType
 {
     /** @var list<PromptType> */
@@ -121,11 +130,21 @@ final readonly class PromptFile implements PromptType
 
         $resolved[$fileName] = true;
         $chain[] = $fileName;
-        $segments[] = new TextPrompt($frontMatter->content, alias: $alias, instructions: $description);
+        $segments[] = new TextPrompt(
+            $frontMatter->content,
+            alias: $alias,
+            instructions: $description,
+            allowInstructions: true,
+        );
 
         foreach ($this->normalizeIncludes($header['references'] ?? [], 'references', $fileName) as $include) {
             $target = $this->resolvePath($fileName, $include['path'], 'references');
-            $segments[] = FilePrompt::fromFile($target, alias: $include['alias'], instructions: $include['description']);
+            $segments[] = FilePrompt::fromFile(
+                $target,
+                alias: $include['alias'],
+                instructions: $include['description'],
+                allowInstructions: $include['allowInstructions'],
+            );
         }
 
         foreach ($this->normalizeStringList($header['requires_aliases'] ?? [], 'requires_aliases', $fileName) as $requiredAlias) {
@@ -135,7 +154,7 @@ final readonly class PromptFile implements PromptType
         array_pop($stack);
     }
 
-    /** @return list<array{path: string, alias: ?string, description: ?string}> */
+    /** @return list<array{path: string, alias: ?string, description: ?string, allowInstructions: bool}> */
     private function normalizeIncludes(mixed $value, string $field, string $fileName): array
     {
         if ($value === null || $value === []) {
@@ -153,7 +172,7 @@ final readonly class PromptFile implements PromptType
                 if (trim($item) === '') {
                     throw new InvalidArgumentException("Prompt file field {$field} contains an empty path in: {$fileName}");
                 }
-                $result[] = ['path' => $item, 'alias' => null, 'description' => null];
+                $result[] = ['path' => $item, 'alias' => null, 'description' => null, 'allowInstructions' => false];
                 continue;
             }
 
@@ -161,8 +180,12 @@ final readonly class PromptFile implements PromptType
                 throw new InvalidArgumentException("Prompt file field {$field} contains an invalid entry in: {$fileName}");
             }
 
+            $allowedEntryFields = ['path', 'alias', 'description'];
+            if ($field === 'references') {
+                $allowedEntryFields[] = 'allow_instructions';
+            }
             foreach (array_keys($item) as $key) {
-                if (!in_array($key, ['path', 'alias', 'description'], true)) {
+                if (!in_array($key, $allowedEntryFields, true)) {
                     throw new InvalidArgumentException("Unknown {$field} entry field " . var_export($key, true) . " in: {$fileName}");
                 }
             }
@@ -173,14 +196,23 @@ final readonly class PromptFile implements PromptType
 
             $entryAlias = $item['alias'] ?? null;
             $entryDescription = $item['description'] ?? null;
+            $allowInstructions = $item['allow_instructions'] ?? false;
             if ($entryAlias !== null && (!is_string($entryAlias) || trim($entryAlias) === '')) {
                 throw new InvalidArgumentException("Prompt file field {$field} alias must be a non-empty string in: {$fileName}");
             }
             if ($entryDescription !== null && (!is_string($entryDescription) || trim($entryDescription) === '')) {
                 throw new InvalidArgumentException("Prompt file field {$field} description must be a non-empty string in: {$fileName}");
             }
+            if (!is_bool($allowInstructions)) {
+                throw new InvalidArgumentException("Prompt file field {$field} allow_instructions must be a boolean in: {$fileName}");
+            }
 
-            $result[] = ['path' => $item['path'], 'alias' => $entryAlias, 'description' => $entryDescription];
+            $result[] = [
+                'path' => $item['path'],
+                'alias' => $entryAlias,
+                'description' => $entryDescription,
+                'allowInstructions' => $allowInstructions,
+            ];
         }
 
         return $result;
