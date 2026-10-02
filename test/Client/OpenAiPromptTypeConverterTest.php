@@ -163,7 +163,9 @@ final class OpenAiPromptTypeConverterTest extends TestCase
         self::assertCount(7, $content);
         self::assertStringContainsString(self::UNTRUSTED, $content[0]['text']);
         self::assertStringContainsString(self::UNTRUSTED, $content[1]['text']);
-        self::assertSame('input_file', $content[2]['type']);
+        self::assertSame('input_text', $content[2]['type']);
+        self::assertStringContainsString('File: styleguide.md', $content[2]['text']);
+        self::assertStringContainsString('File content', $content[2]['text']);
         self::assertStringContainsString(self::UNTRUSTED, $content[3]['text']);
         self::assertSame('input_image', $content[4]['type']);
         self::assertStringContainsString(self::UNTRUSTED, $content[5]['text']);
@@ -215,7 +217,33 @@ final class OpenAiPromptTypeConverterTest extends TestCase
         self::assertStringContainsString('following file segment', $sections[0]['text']);
         self::assertStringContainsString('Summarize the file.', $sections[0]['text']);
         self::assertStringContainsString(self::UNTRUSTED, $sections[0]['text']);
+        self::assertSame('input_text', $sections[1]['type']);
+        self::assertStringContainsString('File: example.md', $sections[1]['text']);
+        self::assertStringContainsString('# Title', $sections[1]['text']);
+    }
+
+    public function testContentConverterSendsOnlyBaseNameToOpenAi(): void
+    {
+        $sections = (new OpenAiPromptToContentConverter())->convert(new FilePrompt(
+            '/opt/project/docs/example.pdf',
+            'PDF content',
+            'application/pdf',
+        ));
+
         self::assertSame('input_file', $sections[1]['type']);
+        self::assertSame('example.pdf', $sections[1]['filename']);
+    }
+
+    public function testContentConverterRejectsUnsupportedFileFormatWithFileName(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage("Unsupported OpenAI file format for 'archive.bin': MIME type 'application/octet-stream'.");
+
+        (new OpenAiPromptToContentConverter())->convert(new FilePrompt(
+            'archive.bin',
+            'binary content',
+            'application/octet-stream',
+        ));
     }
 
     public function testContentConverterPrependsInstructionsToAudioSegment(): void

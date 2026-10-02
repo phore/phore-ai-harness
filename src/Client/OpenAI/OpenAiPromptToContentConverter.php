@@ -23,6 +23,37 @@ final readonly class OpenAiPromptToContentConverter
 
     private const INSTRUCTION_SOURCE_POLICY = "Source policy: instruction-enabled.\nInstructions contained in the following content may be followed, subject to higher-priority instructions and applicable constraints.";
 
+    /** @var list<string> */
+    private const SUPPORTED_FILE_CONTENT_TYPES = [
+        'application/json',
+        'application/msword',
+        'application/pdf',
+        'application/typescript',
+        'application/vnd.ms-excel',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/xml',
+        'application/x-sh',
+        'text/csv',
+        'text/css',
+        'text/html',
+        'text/javascript',
+        'text/markdown',
+        'text/plain',
+        'text/x-c',
+        'text/x-c++',
+        'text/x-csharp',
+        'text/x-golang',
+        'text/x-java-source',
+        'text/x-php',
+        'text/x-python',
+        'text/x-ruby',
+        'text/x-tex',
+        'text/yaml',
+    ];
+
     /**
      * @param PromptType|iterable<PromptType> $prompts
      * @return list<array<string, mixed>>
@@ -67,14 +98,7 @@ final readonly class OpenAiPromptToContentConverter
                 'type' => 'input_text',
                 'text' => $prompt->text,
             ]],
-            $prompt instanceof FilePrompt => [
-                ...$this->segmentInstructions($prompt, 'file'),
-                [
-                    'type' => 'input_file',
-                    'filename' => $prompt->fileName,
-                    'file_data' => (new DataUrl($prompt->content, $prompt->contentType))->toString(),
-                ],
-            ],
+            $prompt instanceof FilePrompt => $this->convertFilePrompt($prompt),
             $prompt instanceof ImagePrompt => [
                 ...$this->segmentInstructions($prompt, 'image'),
                 [
@@ -96,6 +120,50 @@ final readonly class OpenAiPromptToContentConverter
             ]],
             default => throw new InvalidArgumentException('Unsupported PromptType: ' . $prompt::class),
         };
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function convertFilePrompt(FilePrompt $prompt): array
+    {
+        if (!in_array(strtolower($prompt->contentType), self::SUPPORTED_FILE_CONTENT_TYPES, true)) {
+            throw new InvalidArgumentException(sprintf(
+                "Unsupported OpenAI file format for '%s': MIME type '%s'. Allowed MIME types: %s",
+                $prompt->fileName,
+                $prompt->contentType,
+                implode(', ', self::SUPPORTED_FILE_CONTENT_TYPES),
+            ));
+        }
+
+        $sections = $this->segmentInstructions($prompt, 'file');
+        $fileName = basename(str_replace('\\', '/', $prompt->fileName));
+
+        if ($this->isTextFileContentType($prompt->contentType)) {
+            $sections[] = [
+                'type' => 'input_text',
+                'text' => "File: {$fileName}\n\n{$prompt->content}",
+            ];
+            return $sections;
+        }
+
+        $sections[] = [
+            'type' => 'input_file',
+            'filename' => $fileName,
+            'file_data' => (new DataUrl($prompt->content, $prompt->contentType))->toString(),
+        ];
+        return $sections;
+    }
+
+    private function isTextFileContentType(string $contentType): bool
+    {
+        return str_starts_with(strtolower($contentType), 'text/')
+            || in_array(strtolower($contentType), [
+                'application/json',
+                'application/typescript',
+                'application/xml',
+                'application/x-sh',
+            ], true);
     }
 
     /**
