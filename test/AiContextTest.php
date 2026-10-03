@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Phore\AiHarness\Test;
 
 use Phore\AiHarness\AiContext;
+use Phore\AiHarness\AiOptions;
 use Phore\AiHarness\Client\AiRequestException;
 use Phore\AiHarness\Client\OpenAiClient;
 use Phore\AiHarness\Context\AiContextRegistry;
@@ -13,8 +14,10 @@ use Phore\AiHarness\Logging\ConsoleLogger;
 use Phore\AiHarness\Logging\LogEvent;
 use Phore\AiHarness\Logging\LoggerInterface;
 use Phore\AiHarness\PhoreAi;
+use Phore\AiHarness\PromptType\TextPrompt;
 use Phore\AiHarness\ToolType\CallbackRoundLimitException;
 use Phore\AiHarness\ToolType\CallbackTool;
+use Phore\AiHarness\ToolType\WebAccessTool;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -96,9 +99,12 @@ final class AiContextTest extends TestCase
         return new OpenAiClient('fixture-key', baseUrl: self::$baseUrl . '/' . $scenario, timeout: 5);
     }
 
-    private function context(string $scenario = 'normal', array $callbacks = []): AiContext
+    private function context(string $scenario = 'normal', array $prompts = []): AiContext
     {
-        return new AiContext(['client' => $this->client($scenario)], callbacks: $callbacks);
+        return new AiContext(
+            prompts: $prompts,
+            options: new AiOptions(client: $this->client($scenario)),
+        );
     }
 
     private function lastRequest(): array
@@ -228,7 +234,30 @@ final class AiContextTest extends TestCase
         (new AiContext())->rollback();
     }
 
-    public function testCallbacksAreAvailableAcrossAllOperationsIncludingStructPatching(): void
+    public function testContextContentLoadsOnceWhileToolsRemainAvailable(): void
+    {
+        $context = new AiContext(
+            prompts: [
+                new TextPrompt('Persistent briefing', alias: 'briefing'),
+                new WebAccessTool(),
+            ],
+            options: new AiOptions(client: $this->client()),
+        );
+
+        $context->text('First task.');
+        $first = $this->lastRequest();
+        self::assertStringContainsString('Persistent briefing', json_encode($first['input']));
+        self::assertContains('web_search_preview', array_column($first['tools'] ?? [], 'type'));
+
+        $parent = $context->getResponseId();
+        $context->text('Second task.');
+        $second = $this->lastRequest();
+        self::assertSame($parent, $second['previous_response_id']);
+        self::assertStringNotContainsString('Persistent briefing', json_encode($second['input']));
+        self::assertContains('web_search_preview', array_column($second['tools'] ?? [], 'type'));
+    }
+
+    public function testContextToolsAreAvailableAcrossAllOperationsIncludingStructPatching(): void
     {
         $questions = [];
         $context = $this->context('ask', [new CallbackTool(
@@ -265,32 +294,37 @@ final class AiContextTest extends TestCase
         self::assertCount(8, $questions);
     }
 
-    public function testDuplicateAndReservedSharedCallbackNamesAreRejected(): void
+    public function testDuplicateContextCallbackToolNamesAreRejected(): void
     {
-        $callback = new CallbackTool(static fn (string $question): string => 'answer', 'ask_user_question');
-        $context = new AiContext(callbacks: [$callback]);
-        $fork = clone $context;
-        $fork->addCallback(new CallbackTool(static fn (): string => 'extra', 'extra'));
-        $context->addCallback(new CallbackTool(static fn (): string => 'independent', 'extra'));
         $this->expectException(\InvalidArgumentException::class);
-        $context->addCallback($callback);
+        new AiContext(prompts: [
+            new CallbackTool(static fn (): string => 'one', 'same_name'),
+            new CallbackTool(static fn (): string => 'two', 'same_name'),
+        ]);
     }
 
-    public function testReservedCallbackCannotOverrideTheEditPrimitive(): void
+    public function testReservedContextCallbackCannotOverrideEditPrimitive(): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        new AiContext(callbacks: [new CallbackTool(static fn (): string => 'no', 'write_files')]);
+        new AiContext(prompts: [
+            new CallbackTool(static fn (): string => 'no', 'write_files'),
+        ]);
     }
 
     public function testReentrantUseOfSameContextIsRejectedWithoutStartingAnotherRequest(): void
     {
-        $context = $this->context('ask');
-        $context->addCallback(new CallbackTool(
-            static function (string $question) use ($context): string {
+        $context = null;
+        $callback = new CallbackTool(
+            static function (string $question) use (&$context): string {
                 return $context->text('Nested use must fail.');
             },
             'ask_user_question',
-        ));
+        );
+        $context = new AiContext(
+            prompts: [$callback],
+            options: new AiOptions(client: $this->client('ask')),
+        );
+
         $this->expectException(\LogicException::class);
         $context->text('Ask first.');
     }

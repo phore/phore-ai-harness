@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Phore\AiHarness\AiContext;
+use Phore\AiHarness\AiOptions;
 use Phore\AiHarness\Context\AiContextRegistry;
 use Phore\AiHarness\ToolType\CallbackTool;
 
@@ -18,43 +19,49 @@ $askUser = new CallbackTool(
         if ($answer === false) {
             throw new RuntimeException('No user answer available on STDIN.');
         }
+
         return trim($answer);
     },
     name: 'ask_user_question',
     description: 'Ask the user a necessary clarification and return the answer.',
 );
 
-$context = new AiContext(['debug_log' => true], callbacks: [$askUser]);
+$config = AiOptions::fromArray([
+    'model' => 'gpt-5-mini',
+    'reasoning' => ['effort' => 'low'],
+    'debug_log' => true,
+]);
+
+$context = new AiContext(
+    prompts: [
+        'The subject is a practice website relaunch. Audience: practice owners. Use German.',
+        $askUser,
+    ],
+    options: $config,
+);
 $options = ['ai_context' => $context];
 
-// Die globalen Funktionen bleiben der bevorzugte Einstieg.
-phore_ai_text(
-    'The subject is a practice website relaunch. Audience: practice owners. '
-    . 'Use German. Acknowledge this briefing in one short sentence.',
-    $options,
-);
-$context->setCheckpoint('briefing');
+// Die globalen Funktionen bleiben der bevorzugte Einstieg. Beim ersten Aufruf
+// werden die vorbereiteten Daten-Prompts geladen; das Tool bleibt danach aktiv.
 $draft = phore_ai_text('Write a two-sentence introduction in German.', $options);
+$context->setCheckpoint('briefing');
 $edited = phore_ai_text('Make the existing text more direct, in German.', [
     ...$options,
     'input' => $draft,
 ]);
 printf("Edited introduction:\n%s\n\n", $edited);
 
-// Ein eigener Zweig veraendert den Gespraechszeiger des Originals nicht.
 $alternative = clone $context;
 $alternative->rollback('briefing');
 $variant = $alternative->text('Write a more personal introduction in German.');
 printf("Alternative:\n%s\n\n", $variant);
 
-// Ohne Namen stellt rollback() den zuletzt gesetzten Checkpoint wieder her.
 $context->setCheckpoint();
 $context->text('Suggest a tentative German title.');
 $context->rollback();
 $finalTitle = $context->text('Suggest a factual German title instead.');
 printf("Title:\n%s\n", $finalTitle);
 
-// IDs sind eine optionale prozesslokale Convenience-Funktion.
 try {
     phore_ai_text('The project code is WEBSITE. Acknowledge briefly.', [
         'ai_context' => 'example-job',

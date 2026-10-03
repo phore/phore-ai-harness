@@ -27,8 +27,8 @@ trait StructTrait
      * Generate a typed object from a class name, or patch an existing instance.
      * Object input preserves the existing bounded JSON Patch/schema safeguards
      * and returns a new object; it never mutates or persists the original.
-     * Shared context callbacks can clarify the task before a patch is produced.
-     * Explicit prompt tools remain unsupported for object-edit mode.
+     * Tools prepared on the context can clarify or support patch generation.
+     * Tools passed only to this object-edit call remain unsupported.
      *
      * @template T of object
      * @param string|PromptType|ToolType|array $prompts Instructions and sources.

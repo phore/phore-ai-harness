@@ -6,23 +6,31 @@ namespace Phore\AiHarness;
 
 use InvalidArgumentException;
 use LogicException;
+use Phore\AiHarness\Client\OpenAiClient;
 use Phore\AiHarness\Context\Traits\FileTrait;
 use Phore\AiHarness\Context\Traits\ImageTrait;
 use Phore\AiHarness\Context\Traits\StructArrayTrait;
 use Phore\AiHarness\Context\Traits\StructTrait;
 use Phore\AiHarness\Context\Traits\TextTrait;
-use Phore\AiHarness\Client\OpenAiClient;
 use Phore\AiHarness\Helper\Toolkit;
 use Phore\AiHarness\OutputFormat\OutputFormat;
+use Phore\AiHarness\PromptType\PromptType;
+use Phore\AiHarness\PromptType\SystemPrompt;
 use Phore\AiHarness\ToolType\CallbackTool;
+use Phore\AiHarness\ToolType\ToolType;
 
 /**
  * Explicit, process-local conversation cursor shared by the typed operations.
  *
- * Cloning copies the cursor and checkpoint/registration arrays, not external
- * services, callback closures, files or provider caches. A context is not a
+ * Constructor prompts form the prepared context. Content prompts are sent when
+ * a root conversation starts; tools and system prompts are attached to every
+ * request so they remain available while following previous_response_id.
+ *
+ * Cloning copies the cursor, prompt stack and checkpoints, not external service
+ * state, callback closure state, files or provider caches. A context is not a
  * filesystem transaction and must not be used concurrently or reentrantly.
  *
+ * @see AiOptions
  * @see Context\AiContextRegistry
  * @see https://developers.openai.com/api/docs/guides/conversation-state
  */
@@ -34,61 +42,37 @@ final class AiContext
     use StructArrayTrait;
     use ImageTrait;
 
-    private const OPTION_KEYS = ['client', 'model', 'reasoning', 'timeout', 'connect_timeout', 'debug_log'];
-
-    private array $defaults;
+    /** @var list<PromptType|ToolType> */
+    private array $prompts;
+    private AiOptions $defaults;
     private ?OpenAiClient $client = null;
     private mixed $clientSelection = null;
     private ?string $responseId = null;
-    /** @var array<string, CallbackTool> */
-    private array $callbacks = [];
     /** @var list<array{name: ?string, responseId: ?string}> */
     private array $checkpoints = [];
     private bool $running = false;
 
     /**
-     * Configure defaults and callbacks without making a provider request.
-     * Credentials use the existing default client/Keystore on the first call.
-     * Method options override these defaults for that call only; the first
-     * resolved client stays bound for the lifetime of this context.
+     * Prepare reusable prompt/tool context and common defaults without a request.
      *
-     * @param array<string, mixed> $options Existing common helper options.
-     * @param list<CallbackTool> $callbacks Tools available in every operation.
-     * @throws InvalidArgumentException For invalid callback registrations.
-     * @example $context = new AiContext(['model' => 'gpt-5-mini'], callbacks: [$askUser]);
-     * @see addCallback()
-     */
-    public function __construct(array $options = [], array $callbacks = [])
-    {
-        $this->defaults = array_intersect_key($options, array_flip(self::OPTION_KEYS));
-        foreach ($callbacks as $callback) {
-            if (!$callback instanceof CallbackTool) {
-                throw new InvalidArgumentException('Context callbacks must be CallbackTool instances.');
-            }
-            $this->addCallback($callback);
-        }
-    }
-
-    /**
-     * Register a shared callback; never silently replace another tool.
-     * The callback runs only when requested by the model. Its own side effects
-     * are not undone by rollback. Register before starting an operation.
+     * Strings, PromptType and ToolType values use the same normalization as the
+     * global helpers. AiOptions::fromArray() normalizes arrays and passes an
+     * existing options object through unchanged. Method options override these
+     * defaults for one call; the first resolved client stays bound afterwards.
      *
-     * @return $this
-     * @throws InvalidArgumentException For duplicate or reserved names.
-     * @throws LogicException While this context is running.
-     * @example $context->addCallback(new CallbackTool($ask, 'ask_user_question'));
-     * @see \Phore\AiHarness\ToolType\CallbackTool
+     * @param string|PromptType|ToolType|array<int, string|PromptType|ToolType> $prompts Reusable context items.
+     * @param AiOptions|array<string, mixed> $options Common context defaults.
+     * @throws InvalidArgumentException For invalid prompts, options or duplicate/reserved callback tools.
+     * @example $context = new AiContext(prompts: [$skill, $tool], options: ['model' => 'gpt-5-mini']);
+     * @see AiOptions::fromArray()
+     * @see Toolkit::normalizePromptItems()
      */
-    public function addCallback(CallbackTool $callback): self
-    {
-        $this->assertIdle();
-        $name = $callback->name();
-        if (in_array($name, ['write_text', 'write_files'], true) || isset($this->callbacks[$name])) {
-            throw new InvalidArgumentException('Duplicate or reserved context callback: ' . $name);
-        }
-        $this->callbacks[$name] = $callback;
-        return $this;
+    public function __construct(
+        string|PromptType|ToolType|array $prompts = [],
+        AiOptions|array $options = [],
+    ) {
+        $this->prompts = $this->normalizeContextItems(Toolkit::normalizePromptItems($prompts));
+        $this->defaults = AiOptions::fromArray($options);
     }
 
     /**
@@ -114,13 +98,14 @@ final class AiContext
             ));
         }
         $this->checkpoints[] = ['name' => $name, 'responseId' => $this->responseId];
+
         return $this;
     }
 
     /**
      * Restore a named checkpoint, or the most recently set marker when omitted.
      * Markers are not consumed; repeated rollback restores the same position.
-     * This restores only the response cursor, never files, callbacks, options,
+     * This restores only the response cursor, never files, prompt/tool defaults,
      * accrued usage/costs or external effects. The next request forms a branch.
      *
      * @return $this
@@ -138,9 +123,11 @@ final class AiContext
             $checkpoint = $this->checkpoints[$index];
             if ($name === null || $checkpoint['name'] === $name) {
                 $this->responseId = $checkpoint['responseId'];
+
                 return $this;
             }
         }
+
         throw new LogicException('AI context checkpoint does not exist: ' . ($name ?? '(latest)'));
     }
 
@@ -158,7 +145,7 @@ final class AiContext
 
     /**
      * Fork an idle context at its current position; the original stays unchanged.
-     * Callback closures and the configured client remain shared dependencies.
+     * Prompt/tool objects and the configured client remain shared dependencies.
      *
      * @throws LogicException If cloning is attempted during an operation.
      * @example $alternative = clone $context;
@@ -175,30 +162,39 @@ final class AiContext
         $this->assertIdle();
         $this->running = true;
         $ai = null;
+
         try {
             // Aufrufoptionen bleiben lokal; ein laufender Kontext behaelt seinen Client.
-            $effective = array_replace($this->defaults, $options);
+            $effective = array_replace($this->defaults->toArray(), $options);
             unset($effective['ai_context']);
             $selection = $effective['client'] ?? null;
             if ($this->client !== null) {
                 $explicitSelection = $options['client'] ?? null;
-                if ($explicitSelection !== null && $explicitSelection !== $this->client && $explicitSelection !== $this->clientSelection) {
-                    throw new InvalidArgumentException('Cannot change the client of an initialized AI context; create a new context.');
+                if (
+                    $explicitSelection !== null
+                    && $explicitSelection !== $this->client
+                    && $explicitSelection !== $this->clientSelection
+                ) {
+                    throw new InvalidArgumentException(
+                        'Cannot change the client of an initialized AI context; create a new context.',
+                    );
                 }
                 $effective['client'] = $this->client;
             }
+
             $ai = Toolkit::createAi($effective);
             if ($this->client === null) {
                 $this->client = $ai->getOpenAiClient();
                 $this->clientSelection = $selection;
             }
 
-            // Gemeinsame Callbacks werden pro Request mit den lokalen Tools kombiniert.
-            $items = $this->withContextCallbacks($items);
+            // Daten-Prompts werden beim Root geladen; Tools/Systemprompts bleiben request-lokal aktiv.
+            $items = $this->withContextItems($items);
             $ai = $ai->with(...$items)->withPreviousResponseId($this->responseId);
             if ($format !== null) {
                 $ai = $ai->withOutput($format);
             }
+
             return $operation($ai);
         } finally {
             // Nur abgeschlossene Tool-Schleifen liefern einen fortsetzbaren Cursor.
@@ -210,30 +206,79 @@ final class AiContext
         }
     }
 
-    private function withContextCallbacks(array $items): array
+    /**
+     * @param list<PromptType|ToolType> $items
+     * @return list<PromptType|ToolType>
+     */
+    private function normalizeContextItems(array $items): array
     {
-        $names = $this->callbacks;
-        $merged = array_values($this->callbacks);
+        $callbacks = [];
+        $normalized = [];
+
         foreach ($items as $item) {
             if ($item instanceof CallbackTool) {
                 $name = $item->name();
-                if (isset($names[$name])) {
-                    if ($names[$name] === $item) {
+                if (in_array($name, ['write_text', 'write_files'], true)) {
+                    throw new InvalidArgumentException('Reserved context callback tool name: ' . $name);
+                }
+                if (isset($callbacks[$name])) {
+                    if ($callbacks[$name] === $item) {
+                        continue;
+                    }
+                    throw new InvalidArgumentException('Duplicate context callback tool name: ' . $name);
+                }
+                $callbacks[$name] = $item;
+            }
+            $normalized[] = $item;
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * @param list<PromptType|ToolType> $items
+     * @return list<PromptType|ToolType>
+     */
+    private function withContextItems(array $items): array
+    {
+        $contextItems = $this->responseId === null
+            ? $this->prompts
+            : array_values(array_filter(
+                $this->prompts,
+                static fn (PromptType|ToolType $item): bool => $item instanceof ToolType || $item instanceof SystemPrompt,
+            ));
+
+        $callbacks = [];
+        $merged = [];
+        foreach ([...$contextItems, ...$items] as $item) {
+            if ($item instanceof CallbackTool) {
+                $name = $item->name();
+                if (isset($callbacks[$name])) {
+                    if ($callbacks[$name] === $item) {
                         continue;
                     }
                     throw new InvalidArgumentException('Duplicate callback tool name: ' . $name);
                 }
-                $names[$name] = $item;
+                $callbacks[$name] = $item;
             }
             $merged[] = $item;
         }
+
         return $merged;
+    }
+
+    /** @param class-string<ToolType> $className */
+    private function hasContextTool(string $className): bool
+    {
+        return Toolkit::hasTool($this->prompts, $className);
     }
 
     private function assertIdle(): void
     {
         if ($this->running) {
-            throw new LogicException('AI context is already running; use an independent context for another operation.');
+            throw new LogicException(
+                'AI context is already running; use an independent context for another operation.',
+            );
         }
     }
 

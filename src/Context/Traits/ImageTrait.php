@@ -14,7 +14,7 @@ use Phore\AiHarness\ToolType\ToolType;
 trait ImageTrait
 {
     /**
-     * Generate an image in the current conversation, including shared callbacks.
+     * Generate an image in the current conversation, including context tools.
      * The returned image is not persisted; call saveToFile() explicitly.
      * An explicitly supplied ImageGenerationTool keeps its generation settings.
      *
@@ -28,7 +28,7 @@ trait ImageTrait
     public function image(string|PromptType|ToolType|array $prompts, array $options = []): ImageResultType
     {
         $items = Toolkit::normalizePromptItems($prompts);
-        if (!Toolkit::hasTool($items, ImageGenerationTool::class)) {
+        if (!Toolkit::hasTool($items, ImageGenerationTool::class) && !$this->hasContextTool(ImageGenerationTool::class)) {
             $items[] = new ImageGenerationTool(
                 size: $options['size'] ?? null,
                 output_format: $options['output_format'] ?? null,

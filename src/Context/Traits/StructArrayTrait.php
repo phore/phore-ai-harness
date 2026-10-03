@@ -13,7 +13,7 @@ trait StructArrayTrait
 {
     /**
      * Generate and hydrate a list of typed objects in this conversation.
-     * Shared callbacks are available; an empty result is a valid empty list.
+     * Context tools are available; an empty result is a valid empty list.
      *
      * @template T of object
      * @param string|PromptType|ToolType|array $prompts Instructions and sources.

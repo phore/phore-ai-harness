@@ -6,6 +6,7 @@ namespace Phore\AiHarness\Test;
 
 use InvalidArgumentException;
 use Phore\AiHarness\AiContext;
+use Phore\AiHarness\AiOptions;
 use Phore\AiHarness\Client\AiRequestException;
 use Phore\AiHarness\Client\OpenAiClient;
 use Phore\AiHarness\Edit\FileBatchEditor;
@@ -13,11 +14,32 @@ use PHPUnit\Framework\TestCase;
 
 final class ContextEdgeCasesTest extends TestCase
 {
+    public function testAiOptionsFromArrayPassesInstancesThroughAndMapsKeys(): void
+    {
+        $options = AiOptions::fromArray([
+            'model' => 'gpt-5-mini',
+            'reasoning' => ['effort' => 'medium'],
+            'debug_log' => true,
+        ]);
+
+        self::assertSame($options, AiOptions::fromArray($options));
+        self::assertSame('gpt-5-mini', $options->toArray()['model']);
+        self::assertSame(['effort' => 'medium'], $options->toArray()['reasoning']);
+        self::assertTrue($options->toArray()['debug_log']);
+    }
+
+    public function testAiOptionsRejectUnknownArrayKeys(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('Unknown AI option(s): modle');
+        AiOptions::fromArray(['modle' => 'gpt-5-mini']);
+    }
+
     public function testFirstCallClientOverrideRemainsBoundWhenLaterCallsOmitTheOption(): void
     {
         $default = new OpenAiClient('unused', baseUrl: 'http://127.0.0.1:1', timeout: 1);
         $selected = new OpenAiClient('selected', baseUrl: 'http://127.0.0.1:1', timeout: 1);
-        $context = new AiContext(['client' => $default]);
+        $context = new AiContext(options: ['client' => $default]);
 
         // Absichtlich unerreichbarer Loopback-Client: kein externer Modellaufruf.
         foreach ([['client' => $selected], []] as $options) {
