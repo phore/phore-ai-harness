@@ -71,6 +71,99 @@ $ok = (new \Phore\AiHarness\PhoreAi())
     ->do();
 ```
 
+## Einfache Entscheidungen und Klassifizierungen
+
+Für Entscheidungen, bei denen kein DTO benötigt wird, stellt `AiContext`
+`choice()`, `choices()`, `yesNo()`, `rank()` und `score()` bereit. Der
+Prompt steht aus Konsistenzgründen immer zuerst. Er ist nullable, aber nicht
+optional: `null` fordert ausdrücklich den Standard-Prompt der Methode an.
+
+```php
+$tag = $context->choice('Welcher Tag passt am besten?', ['news', 'guide', 'review']);
+
+$tag = $context->choice(null, [
+    'news' => 'Aktuelle Nachricht oder neue Entwicklung.',
+    'guide' => 'Konkrete Anleitung.',
+    'review' => 'Bewertung oder Vergleich.',
+]);
+
+$tags = $context->choices(null, ['news', 'guide', 'review'], min: 1, max: 2);
+$ready = $context->yesNo(null, allowNull: true);
+$ranking = $context->rank(null, ['news', 'guide', 'review']);
+$score = $context->score(null);
+```
+
+Die öffentliche Methodensignatur ist:
+
+```php
+public function choice(?string $prompt, array $choices, AiOptions|array|string|null $options = null): string|int;
+public function choices(?string $prompt, array $choices, int $min = 0, ?int $max = null, AiOptions|array|string|null $options = null): array;
+public function yesNo(?string $prompt, bool $allowNull = false, AiOptions|array|string|null $options = null): ?bool;
+public function rank(?string $prompt, array $choices, AiOptions|array|string|null $options = null): array;
+public function score(?string $prompt, AiOptions|array|string|null $options = null): float;
+```
+
+### Choice-Werte und optionale Beschreibungen
+
+Die kurze Form ist eine normale Liste. Jeder Eintrag ist gleichzeitig Name und
+Rückgabewert:
+
+```php
+$tag = $context->choice(null, ['news', 'guide', 'review']);
+```
+
+Wenn der Name allein nicht erklärt, wann eine Auswahl passt, kann eine Map
+verwendet werden. Der Array-Key ist der erlaubte String-/Integer-Wert, der
+Array-Wert ist die optionale Beschreibung:
+
+```php
+$priority = $context->choice(null, [
+    10 => 'Sofort bearbeiten; blockiert einen laufenden Prozess.',
+    20 => 'Normal priorisieren; kein akuter Blocker.',
+]);
+```
+
+Beschreibungen werden als Quelldaten eingebettet, nicht als zusätzliche
+Instruktionen. Das Modell liefert intern nur Indizes; der Harness mappt sie
+lokal auf die erlaubten Werte zurück. Dadurch können keine anderen Strings oder
+Integer als Rückgabewert durchrutschen. Doppelte Listeneinträge, leere
+String-Werte und ungültige Beschreibungen werden vor dem Provider-Aufruf
+abgelehnt.
+
+`choices()` erlaubt mehrere eindeutige Werte. `min` ist standardmäßig `0`,
+`max: null` bedeutet Anzahl der vorhandenen Choices. `min > max` oder ein
+`max` oberhalb der Anzahl Choices ist ungültig. Die Rückgabe bleibt in der vom
+Modell bevorzugten Reihenfolge.
+
+Bei `choice()` kann das Array unter `options['selected']` einen aktuell
+gesetzten String-/Integer-Wert enthalten. Bei `choices()` ist `selected` eine
+Liste. Das ist Kontext für die Neubewertung; es erzwingt nicht, dass die
+bisherige Auswahl erhalten bleibt.
+
+### Standard-Prompts und Model-Kurzform
+
+Bei `prompt: null` werden folgende kurzen Arbeitsanweisungen erzeugt:
+
+- `choice()`: `Choose exactly one option that best matches the current context.`
+- `choices()`: z. B. `Choose between 1 and 2 options that best match the current context.`; bei identischem Minimum/Maximum wird `Choose exactly N ...` verwendet.
+- `yesNo()`: `Answer the current question from the conversation with yes or no.`; mit `allowNull: true` kommt `null` für nicht zuverlässig entscheidbare Fälle hinzu.
+- `rank()`: `Rank all options from best match to worst match for the current context.`
+- `score()`: `Score how well the current context matches the task on a scale from 0.0 to 1.0.`
+
+Die üblichen per-call Optionen können als Array oder `AiOptions` übergeben
+werden. Für den häufigsten Fall reicht auch direkt der Modellname:
+
+```php
+$tag = $context->choice(null, ['news', 'guide'], 'gpt-5-mini');
+```
+
+`yesNo()` liefert ohne `allowNull` immer bool und mit `allowNull: true`
+`bool|null`. `rank()` enthält jeden Wert genau einmal. `score()` wird lokal
+auf den Bereich `0.0..1.0` geprüft.
+
+Das ausführbare Gegenüberstellungsbeispiel steht unter
+[`examples/simple-types.php`](../examples/simple-types.php).
+
 ## Text erzeugen und vorhandenen Text bearbeiten
 
 Die globale Funktion behält `($prompts, $options)`. Bestehender Text wird über
@@ -324,8 +417,8 @@ $context = new AiContext(prompts: [
 $text = $context->text('Kläre fehlende Angaben bei Bedarf und schreibe den Text.');
 ```
 
-Context-Tools stehen bei `do()`, `text()`, `file()`, `struct()`, `structArray()`
-und `image()` zur Verfügung. Bei Objekt-Patches bleiben nur Tools gesperrt, die
+Context-Tools stehen bei `do()`, `text()`, `file()`, `struct()`, `structArray()`,
+`image()`, `choice()`, `choices()`, `yesNo()`, `rank()` und `score()` zur Verfügung. Bei Objekt-Patches bleiben nur Tools gesperrt, die
 zusätzlich ausschließlich an diesen einzelnen `struct()`-Aufruf übergeben
 werden. Gleichnamige unterschiedliche `CallbackTool`-Instanzen werden
 abgelehnt. `write_text` und `write_files` sind als Context-Tool-Namen
