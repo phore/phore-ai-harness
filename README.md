@@ -4,210 +4,183 @@ PHP helpers for the OpenAI Responses API, typed results, shared conversation
 contexts and targeted text/file editing. Prefer the global `phore_ai_*`
 functions for normal use; their existing signatures remain supported.
 
-## Quick start: functions first, contexts when needed
+## Quick start: functions first
 
-Examples require `vendor/autoload.php` and configured credentials. Each direct
-`AiContext` call below is an alternative to the corresponding global call.
-
-Start with [`examples/01-basic-functions.php`](examples/01-basic-functions.php):
-it shows the global helpers first, without a prepared `AiContext` or shared
-options variable. [`examples/02-context.php`](examples/02-context.php) then
-adds prepared prompts/tools, checkpoints and resumable state.
+For a one-shot request, start with the global helper. Common runtime options are
+shown once here, directly on the call:
 
 ```php
-$text = phore_ai_text('Write a short introduction.');
-$edited = phore_ai_text('Correct spelling only.', [
-    'input' => 'Welcome to our practce.',
+echo phore_ai_text('Write a four-line poem about a rainy autumn morning.', [
+    'client' => null,
+    'model' => 'gpt-5-mini',
+    'reasoning' => ['effort' => 'medium'],
+    'timeout' => 120,
+    'connect_timeout' => 10,
+    'debug_log' => true,
 ]);
-
-// Direct alternative with the new signature: prompts, input, options.
-$context = new \Phore\AiHarness\AiContext();
-$text = $context->text('Write a short introduction.');
-$edited = $context->text('Correct spelling only.', input: 'Welcome to our practce.');
 ```
 
-`text()` generates when input is `null` and edits when it is a string, including
-an empty string. Editing returns the complete text assembled locally from the
-model's replacements, not a separately generated copy of the whole result.
+Normally omit options you do not need. `client => null` resolves the configured
+default client/credentials; the default reasoning setting is low effort.
 
-| Preferred helper | Direct `AiContext` equivalent |
+### Convenience functions
+
+Use the helpers for isolated one- or two-shot work:
+
+| Function | Purpose |
 | --- | --- |
-| `phore_ai_do($prompts, $throw, $options)` | `$context->do($prompts, $throw, $options)` |
-| `phore_ai_choice($prompt, $choices, $allowNull, $options)` | `$context->choice($prompt, $choices, $allowNull, $options)` |
-| `phore_ai_choices($prompt, $choices, $min, $max, $allowNull, $options)` | `$context->choices($prompt, $choices, $min, $max, $allowNull, $options)` |
-| `phore_ai_yes_no($prompt, $allowNull, $options)` | `$context->yesNo($prompt, $allowNull, $options)` |
-| `phore_ai_rank($prompt, $choices, $allowNull, $options)` | `$context->rank($prompt, $choices, $allowNull, $options)` |
-| `phore_ai_score($prompt, $allowNull, $options)` | `$context->score($prompt, $allowNull, $options)` |
-| `phore_ai_text($prompts, $options)` | `$context->text($prompts, $input, $options)` |
-| `phore_ai_edit_file($prompts, $paths, $class, $options)` | `$context->file($prompts, $paths, ['output_class' => $class] + $options)` |
-| `phore_ai_struct($prompts, Dto::class, $options)` | `$context->struct($prompts, Dto::class, $options)` |
-| `phore_ai_edit_struct($prompts, $object, $options)` | `$context->struct($prompts, $object, $options)` |
-| `phore_ai_struct_array($prompts, Dto::class, $options)` | `$context->structArray($prompts, Dto::class, $options)` |
-| `phore_ai_image($prompts, $options)` | `$context->image($prompts, $options)` |
+| `phore_ai_text()` | generate or edit text |
+| `phore_ai_do()` | perform a work step without returning user-facing text |
+| `phore_ai_choice()` / `phore_ai_choices()` | select one or several values |
+| `phore_ai_yes_no()` | boolean decision, optionally `null` |
+| `phore_ai_rank()` / `phore_ai_score()` | rank values or return a `0.0..1.0` score |
+| `phore_ai_struct()` / `phore_ai_struct_array()` | hydrate one DTO or a DTO list |
+| `phore_ai_edit_struct()` | patch an existing DTO |
+| `phore_ai_image()` | generate an image |
+| `phore_ai_edit_file()` | edit one or more explicit files |
+| `get_last_ai_request()` / `get_last_ai_response()` | inspect the latest request/response |
+| `get_ai_usage_stats()` | inspect process-wide usage and estimated cost |
 
-The helpers' argument names and return types are preserved. Their bodies only
-resolve a context and delegate to the operation traits. The context has no
-redundant `editText()`, `editFile()` or `editStruct()` methods.
+A file can be attached directly to a one-shot call:
 
-Use `do()` when only the prepared conversation state or tool side effect is
-needed. It returns `true`/`false`; `throw: true` raises `DoException`, or
-a `DoException` subclass can be supplied for a domain-specific failure type.
-See [`examples/04-do.php`](examples/04-do.php) for one preparatory callback
-inside `do()`, followed by questions against the prepared conversation state.
-Checkpoints and state export are shown in
-[`examples/02-context.php`](examples/02-context.php).
+```php
+use Phore\AiHarness\PromptType\FilePrompt;
 
-## Simple typed decisions
+$summary = phore_ai_text([
+    'Summarize the important claims in three bullets.',
+    FilePrompt::fromFile('/path/to/File.pdf'),
+]);
+```
 
-`AiContext` also has small typed decision helpers when a DTO would be
-unnecessary:
+## When several requests belong together
+
+The functional API can share a conversation by repeating exactly the same
+`ai_context` name:
+
+```php
+use Phore\AiHarness\PromptType\FilePrompt;
+use Phore\AiHarness\ToolType\WebAccessTool;
+
+phore_ai_do([
+    'Verify the claims in this file against current web sources.',
+    FilePrompt::fromFile('/path/to/File.pdf'),
+    new WebAccessTool(),
+], throw: true, options: ['ai_context' => 'article-review']);
+
+$correct = phore_ai_yes_no(
+    'Are the central claims in the previously checked article correct?',
+    options: ['ai_context' => 'article-review'],
+);
+
+$summary = phore_ai_text(
+    'Summarize the corrections that are needed.',
+    ['ai_context' => 'article-review'],
+);
+```
+
+This is the same underlying context mechanism as the object API. The string name
+is convenient, but a typo or renamed identifier silently selects another
+context. For repeated, stateful work, prefer one `AiContext` object:
+
+```php
+use Phore\AiHarness\AiContext;
+
+$context = new AiContext(prompts: [
+    FilePrompt::fromFile('/path/to/File.pdf'),
+    new WebAccessTool(),
+]);
+
+$context->do('Verify the claims in this file against current web sources.', throw: true);
+$context->setCheckpoint('verified');
+$correct = $context->yesNo('Are the central claims in the checked article correct?');
+$summary = $context->text('Summarize the corrections that are needed.');
+```
+
+From this point on, the detailed examples use `AiContext`; the helper functions
+delegate to the same operations and do not need a parallel explanation.
+
+### State, checkpoints and sessions
+
+`setCheckpoint()` and `rollback()` move only the conversation cursor. They do
+not undo file writes, tool side effects or incurred cost. `clone $context`
+creates an independent cursor/checkpoint branch while external dependencies are
+still shared.
+
+For a chat that spans HTTP requests, persist the exported state in the session
+and rebuild the same prepared prompt/tool setup before importing it:
+
+```php
+session_start();
+
+$context = new AiContext(prompts: [new WebAccessTool()]);
+if (isset($_SESSION['ai_state'])) {
+    $context->importState($_SESSION['ai_state']);
+}
+
+$answer = $context->text($userMessage);
+$_SESSION['ai_state'] = $context->exportState();
+```
+
+The export contains provider/cursor metadata and checkpoints, not prompts,
+tools, client or model. Provider/setup mismatches fail by default; provider-side
+response retention still limits how long a cursor can be resumed.
+
+### Callbacks and `do()`
+
+`CallbackTool` is just another prepared tool on the context:
+
+```php
+use Phore\AiHarness\ToolType\CallbackTool;
+
+$context = new AiContext(prompts: [
+    new CallbackTool(
+        static fn (string $customerId): array => ['customerId' => $customerId, 'status' => 'active'],
+        name: 'load_customer',
+    ),
+]);
+
+$context->do('Load customer C-1001 and retain the relevant facts.', throw: true);
+$status = $context->text('What is the customer status?');
+```
+
+`do()` is useful when the work or tool side effect matters but no text result is
+needed yet. `RecoverableToolException` is the only callback failure returned to
+the model as retryable tool feedback; other exceptions abort the run.
+
+### Simple typed decisions
 
 ```php
 $tag = $context->choice('Which tag fits best?', ['news', 'guide', 'review']);
 $tags = $context->choices(null, ['news', 'guide', 'review'], min: 1, max: 2);
-$ready = $context->yesNo(null, allowNull: true);
-$ranking = $context->rank(null, ['news', 'guide', 'review']);
-$score = $context->score(null);
+$ready = $context->yesNo('Is the draft ready?', allowNull: true);
+$ranking = $context->rank('Rank by relevance.', ['news', 'guide', 'review']);
+$score = $context->score('How well does the draft fit the audience?');
 ```
 
-The prompt is always the first argument. Passing `null` asks the harness to
-generate the method's short default prompt. Choice input can be a plain list of
-string/integer values, or a `value => description` map. Descriptions are
-optional source data used to explain when a value fits. `choices()` validates
-`min`/`max`; every simple-type method accepts `allowNull` (default `false`).
-When the model explicitly reports that the available context is insufficient,
-`allowNull: true` returns `null`; otherwise a `TaskErrorException` is raised.
-Invalid provider values remain exceptions. `rank()` returns every choice once
-and `score()` is constrained to `0.0..1.0`.
+`prompt: null` uses the method's short default prompt. `allowNull: true` permits
+`null` when the current context is explicitly insufficient for a reliable
+decision.
 
-The final options argument accepts the normal options array or `AiOptions`,
-and a model name can be passed directly as a string. For `choice()` and
-`choices()`, array options may also contain `selected` to describe the
-current selection before the model re-evaluates it.
-
-See [`examples/03-simple-types.php`](examples/03-simple-types.php) for every helper
-with an explicit prompt and with its generated default prompt.
-
-## Reuse a context, ask questions, branch and roll back
-
-All helpers accept `options['ai_context']`: a non-empty registry ID, an
-`AiContext` instance, or `null`. Without it, each call remains isolated.
-A named context is created on first use and reused within the PHP runtime.
+### Targeted text and file edits
 
 ```php
-phore_ai_text('Project briefing: a practice website relaunch. Acknowledge.', [
-    'ai_context' => 'website',
-]);
-$title = phore_ai_text('Suggest a title based on the briefing.', [
-    'ai_context' => 'website',
-]);
+$generated = $context->text('Write a short introduction.');
+$edited = $context->text('Correct spelling only.', input: 'Welcome to our practce.');
 
-// Direct alternative with prepared context.
-$context = new \Phore\AiHarness\AiContext(
-    prompts: ['Project briefing: a practice website relaunch.'],
-    options: ['model' => 'gpt-5-mini'],
-);
-$title = $context->text('Suggest a title based on the briefing.');
-```
-
-Prepare recurring prompts and tools directly on `AiContext`. `CallbackTool` is
-not a separate registration mechanism; it is a normal `ToolType` in `prompts`.
-
-```php
-$config = \Phore\AiHarness\AiOptions::fromArray([
-    'model' => 'gpt-5-mini',
-    'debug_log' => true,
-]);
-
-$context = new \Phore\AiHarness\AiContext(
-    prompts: [
-        new \Phore\AiHarness\PromptType\PromptFile(__DIR__ . '/review.prompt.md'),
-        new \Phore\AiHarness\ToolType\WebAccessTool(),
-    ],
-    options: $config,
-);
-```
-
-`AiOptions::fromArray()` also accepts an existing `AiOptions` instance and
-returns it unchanged. Unknown array keys are rejected instead of ignored.
-
-```php
-$context->setCheckpoint('briefing');
-$variantA = phore_ai_text('Write a factual version.', ['ai_context' => $context]);
-$context->rollback('briefing');
-$variantB = $context->text('Write a more personal version.');
-
-$context->setCheckpoint(); // Anonymous marker.
-$trial = $context->text('Try another structure.');
-$context->rollback();      // Restore the most recently set marker.
-
-$branch = clone $context;  // Independent conversation cursor and markers.
-$branch->text('Explore a separate alternative.');
-```
-
-Checkpoint names are optional. Reusing a name replaces that marker and makes
-it the newest. Rollback does not consume markers. **It only restores the
-conversation cursor, not written files, tool side effects or incurred
-usage/costs.** Clones still share external client/tool dependencies.
-
-The registry is process-local and is not shared between workers. For a PHP
-session or later request, persist `$context->exportState()` and import that JSON
-into a newly constructed context with the same prepared prompts/tools. The
-export stores only provider/cursor metadata and checkpoints, not prompt/tool
-content. Provider and setup hash mismatches throw `ResumeStateException` by
-default; `ResumeOptions::ON_MISMATCH_RESTART` deliberately starts blank.
-
-The exported response IDs still depend on provider-side retention. This lifetime
-is provider-specific; OpenAI documents at least roughly 30 days of application
-state retention for stored Responses by default. If the remote cursor has
-expired, the next provider call fails normally because import does not perform a
-remote preflight. A context cannot run concurrently or reentrantly. Per-call
-model overrides are supported where the provider permits continuation; response
-chaining does not guarantee a cache hit. Cache warming is intentionally not
-implemented.
-
-See the [complete context guide](docs/ai-context.md) for the full contracts.
-The numbered series starts with
-[`examples/01-basic-functions.php`](examples/01-basic-functions.php) for the
-helper API and continues with
-[`examples/02-context.php`](examples/02-context.php) for the object API.
-Use the object API when checkpoints, rollback, `exportState()`/`importState()`
-or resume across requests are required.
-
-## Targeted text and multi-file edits
-
-```php
-$summary = phore_ai_edit_file(
+$summary = $context->file(
     'Correct spelling in both files.',
-    ['intro.md', 'contact.md'],
-    options: ['ai_context' => 'website'],
-);
-
-// Direct alternative. Input is the required target path or list of paths.
-$summary = (new \Phore\AiHarness\AiContext())->file(
-    'Correct spelling in both files.',
-    ['intro.md', 'contact.md'],
+    ['/path/to/intro.md', '/path/to/contact.md'],
 );
 ```
 
-Text and file edits share exact `search`/`replacement` operations. Multiple
-non-overlapping replacements are matched against the same original snapshot.
-A `null` search means a full rewrite and must be the only operation for that
-target. There is no automatic full-rewrite fallback for an ambiguous search.
+Text and file edits use exact `search`/`replacement` operations against the
+original snapshot. A `null` search is a full rewrite and must be the only
+operation for that target. A failed file remains unchanged while other valid
+files in the batch may still be written; this is not a cross-file transaction.
 
-One `write_files` callback can contain multiple files. A failed edit leaves
-its entire file untouched while other valid files are kept; corrections only
-need to resend failed files. Unresolved results are exposed through
-`FileEditException::$files`. Five callback rounds, including questions and
-corrections, are the total limit per invocation, with or without logging.
-
-Only explicitly supplied UTF-8 text targets may be edited. Missing files can
-be created in existing directories; unreadable files fail instead of being
-mistaken for empty files. Candidates are fully prepared before replacing a
-file, and source changes are checked. This is not a cross-file transaction or
-a substitute for application-level synchronization with external writers.
-Domain validation and linting remain separate application steps.
-
+See [`examples/01-basic-functions.php`](examples/01-basic-functions.php) first,
+then [`examples/02-context.php`](examples/02-context.php). The complete context
+contract is documented in [`docs/ai-context.md`](docs/ai-context.md).
 ## Git Submodules
 
 Beim Klonen direkt mit auschecken:
@@ -225,116 +198,53 @@ git submodule update --remote --merge
 
 ## Preferred: prompts from files
 
-For reusable file-based prompts, prefer `PromptFile`. The constructor takes the prompt filename directly:
+For reusable prompt files, prepare `PromptFile` directly on the context:
 
 ```php
 use Phore\AiHarness\PromptType\PromptFile;
 
-$result = phore_ai_text(
-    new PromptFile(__DIR__ . '/prompts/review.prompt.md')
-);
-
-// Direct alternative:
-$result = (new \Phore\AiHarness\AiContext())->text(
-    new PromptFile(__DIR__ . '/prompts/review.prompt.md')
-);
+$context = new \Phore\AiHarness\AiContext(prompts: [
+    new PromptFile(__DIR__ . '/prompts/review.prompt.md'),
+]);
+$result = $context->text('Run the review.');
 ```
 
-`PromptFile` means that the file defines the prompt itself. `FilePrompt` means that the file is attached to an existing prompt as source material. The distinction is semantic; YAML frontmatter is the current `PromptFile` storage format, not the concept represented by the class name.
-
-The file body is the prompt text. YAML frontmatter can compose prompt files with ordered `extends`, attach source files with `references`, and declare `requires_aliases` as a safety contract. `extends` and `references` entries can be a simple path or a mapping with `path`, optional `alias`, and optional `description`. Every relative path is resolved from the directory of the file that declares that entry, recursively through inherited prompts. Aliases introduced by inherited prompts and references remain available to later derived prompts and count toward `requires_aliases`; externally supplied aliased prompts count as well. Missing files, invalid frontmatter, inheritance cycles, and missing required aliases fail before the AI request is sent.
-
-See [`examples/frontmatter-prompt/`](examples/frontmatter-prompt/) for the complete format, nested relative-path example, and the resolved Responses API content layout.
-
+`PromptFile` means the file defines the prompt. `FilePrompt` means the file is
+source material attached to a prompt. YAML frontmatter can compose ordered
+`extends`, `references` and `requires_aliases`; see
+[`examples/frontmatter-prompt/`](examples/frontmatter-prompt/) for the complete
+format and resolved Responses API content.
 ## Reasoning options
 
-All `phore_ai_*` helper functions send `['effort' => 'low']` by default.
-Override the Responses API reasoning settings through the shared options:
-
-```php
-$result = phore_ai_text('Explain the status.', [
-    'reasoning' => ['effort' => 'medium'],
-]);
-
-// Direct context alternative:
-$result = (new \Phore\AiHarness\AiContext())->text('Explain the status.', options: [
-    'reasoning' => ['effort' => 'medium'],
-]);
-
-// The existing lower-level facade is also retained.
-$ai = (new \Phore\AiHarness\PhoreAi())
-    ->withReasoning(['effort' => 'high']);
-```
-
-`withReasoning()` clones the facade. Settings also apply to streaming, image,
-structured-output and callback follow-up requests. Use `'reasoning' => null`
-(or `withReasoning(null)`) to omit the parameter for models that do not support
-reasoning. The array is passed through unchanged; supported fields and effort
-values depend on the selected model. See the
-[OpenAI reasoning guide](https://developers.openai.com/api/docs/guides/reasoning).
-
+The common options shown in the quick start can be supplied as `AiContext`
+defaults or overridden for one call. Reasoning defaults to
+`['effort' => 'low']`. Set `reasoning => null` to omit the parameter for models
+that do not support it. Supported reasoning fields and effort values depend on
+the selected model.
 ## Optional debug logging
 
+`debug_log` is one of the common options shown in the quick start. Set it on an
+`AiContext` to keep the setting for all operations:
+
 ```php
-$result = phore_ai_text('Explain the status.', ['debug_log' => true]);
-
-// Direct context alternative:
-$result = (new \Phore\AiHarness\AiContext())->text('Explain the status.', options: [
-    'debug_log' => true,
-]);
-
-$ai = (new \Phore\AiHarness\PhoreAi())
-    ->withLogger(new \Phore\AiHarness\Logging\ConsoleLogger())
-    ->withModel('gpt-5-mini');
+$context = new \Phore\AiHarness\AiContext(options: ['debug_log' => true]);
+$result = $context->text('Explain the status.');
 ```
 
-`debug_log` is supported by `phore_ai_do`, the simple-type helpers
-`phore_ai_choice`/`phore_ai_choices`/`phore_ai_yes_no`/`phore_ai_rank`/
-`phore_ai_score`, `phore_ai_text`, `phore_ai_struct`, `phore_ai_struct_array`,
-`phore_ai_edit_struct`, `phore_ai_image`,
-`phore_ai_edit_file`, and their `AiContext` methods. It accepts
-`false` (the default), `true` (console output on STDERR), or a
-`Phore\AiHarness\Logging\LoggerInterface` implementation. Invalid values,
-including `null`, throw `InvalidArgumentException` before a request is sent.
-`withLogger()` clones the facade; `withLogger(null)` disables logging again.
+`false` disables logging, `true` logs to STDERR, and a
+`Phore\AiHarness\Logging\LoggerInterface` instance receives structured events.
+Text and structured requests stream while logging is enabled; images remain
+non-streaming. Return values and STDOUT are unaffected.
 
-Debug text and structured-output requests stream. Every console line starts
-with `[model]`; partial lines are flushed at response end. Images remain
-non-streaming but produce lifecycle and statistics events. Return values and
-STDOUT are unaffected. Warnings are red only on a terminal that supports color;
-`NO_COLOR` disables color. Custom loggers implement `log(LogEvent $event)` and
-receive sanitized events (`run_start`, `request_start`, `text_delta`,
-`response_end`, `tool_start`, `tool_result`, `tool_end`, `warning`, `stats`).
-Text events are buffered through complete lines before redaction. `runId`
-identifies each invocation; the final event contains an immutable
-`RunStatistics` object. Logger exceptions are isolated from the AI operation.
+Only `RecoverableToolException` becomes retryable tool feedback. Other callback,
+binding, transport, authentication and serialization errors propagate. The hard
+limit is five callback rounds per invocation. Logs redact tool arguments and
+known credentials; results are represented by byte counts.
 
-As in the current tool-error contract, only an explicit `RecoverableToolException`
-produces an `ok: false` tool output so the model can correct its call. Logging
-never changes which callback errors are recoverable. Five
-callback rounds are the hard limit (`PhoreAi::MAX_CALLBACK_ROUNDS`); unresolved
-calls after that limit throw. All other exceptions, including argument decoding/binding errors,
-`TaskErrorException`, transport/authentication failures, internal PHP errors and
-result-serialization failures, propagate unchanged without retries. Each failed callback counts as one error; one follow-up request
-counts as one retry even if multiple calls failed in that round. With logging
-disabled, requests remain non-streaming; recoverability, the round cap and
-follow-up instruction/schema retention are identical.
-
-Tool arguments are redacted recursively; invalid argument JSON is omitted.
-Results are logged by byte count, and raw exception messages, request headers
-and stack traces are omitted. Recognized credentials in model text are redacted
-only in logs. A single final summary includes status, requests, tool calls,
-errors, retries, available token totals and monotonic total/API/tool durations
-in seconds, including failed runs and structured-output hydration. Missing
-usage is `null` (`n/a` in console output); when only some responses report usage,
-totals sum those available values.
-
-The final statistics also include `tokens_cached`, summed from
-`usage.input_tokens_details.cached_tokens`. A reported zero remains `0`;
-missing data remains `null`/`n/a`. Cached tokens are a subset of `tokens_in`,
-not additional tokens. Custom loggers access the same field through
-`$event->statistics?->tokens_cached`.
-
+The final `RunStatistics` event contains status, request/tool/error/retry counts,
+`tokens_in`, `tokens_out`, `tokens_total`, `tokens_cached` and monotonic
+total/API/tool durations. Cached tokens are part of input tokens and are not
+counted twice.
 ## Global usage and estimated cost
 
 All `OpenAiClient` instances automatically accumulate process-local usage,
