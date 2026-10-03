@@ -45,16 +45,36 @@ final class AiContextRegistry
         return self::$contexts[$selection] ??= new AiContext(options: $defaults);
     }
 
+    /**
+     * Find an existing named context without creating one or making an API call.
+     *
+     * @return AiContext|null The live instance, or null for an unknown ID.
+     * @example AiContextRegistry::get('default')?->setCheckpoint();
+     * @see resolve()
+     */
     public static function get(string $id): ?AiContext
     {
         return self::$contexts[$id] ?? null;
     }
 
+    /**
+     * Remove a registry entry; references already held by callers remain valid.
+     * Use at a request/job boundary in long-lived workers to isolate users/jobs.
+     *
+     * @example AiContextRegistry::forget('job-42');
+     * @see clear()
+     */
     public static function forget(string $id): void
     {
         unset(self::$contexts[$id]);
     }
 
+    /**
+     * Drop all process-local registrations without resetting usage or files.
+     *
+     * @example AiContextRegistry::clear();
+     * @see forget()
+     */
     public static function clear(): void
     {
         self::$contexts = [];

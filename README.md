@@ -52,20 +52,31 @@ $title = phore_ai_text('Suggest a title based on the briefing.', [
     'ai_context' => 'website',
 ]);
 
-// Direct alternative; both methods continue this explicit object.
-$context = new \Phore\AiHarness\AiContext();
-$context->text('Project briefing: a practice website relaunch. Acknowledge.');
+// Direct alternative with prepared context.
+$context = new \Phore\AiHarness\AiContext(
+    prompts: ['Project briefing: a practice website relaunch.'],
+    options: ['model' => 'gpt-5-mini'],
+);
 $title = $context->text('Suggest a title based on the briefing.');
 ```
 
-Register shared `CallbackTool` instances with
-`new AiContext(callbacks: [$askUser])` or `$context->addCallback($askUser)`.
-For example, an `ask_user_question` callback can request clarification from
-an application UI or CLI and return the answer. It is available in text,
-file, structured and image operations, including when the context is passed
-through a helper's `ai_context` option. The application implements the actual
-interaction; the model decides when to call the supplied tool. Duplicate
-names are rejected rather than silently overriding another callback.
+Prepare recurring prompts and tools directly on `AiContext`. `CallbackTool` is
+not a separate registration mechanism; it is a normal `ToolType` in `prompts`.
+
+```php
+$config = \Phore\AiHarness\AiOptions::fromArray([
+    'model' => 'gpt-5-mini',
+    'debug_log' => true,
+]);
+
+$context = new \Phore\AiHarness\AiContext(
+    prompts: [$skillPrompt, new WebAccessTool(), $askUserTool],
+    options: $config,
+);
+```
+
+`AiOptions::fromArray()` also accepts an existing `AiOptions` instance and
+returns it unchanged. Unknown array keys are rejected instead of ignored.
 
 ```php
 $context->setCheckpoint('briefing');
@@ -83,8 +94,8 @@ $branch->text('Explore a separate alternative.');
 
 Checkpoint names are optional. Reusing a name replaces that marker and makes
 it the newest. Rollback does not consume markers. **It only restores the
-conversation cursor, not written files, callback side effects or incurred
-usage/costs.** Clones still share external client/callback dependencies.
+conversation cursor, not written files, tool side effects or incurred
+usage/costs.** Clones still share external client/tool dependencies.
 
 The registry is process-local, not persistent or shared between workers. Use
 separate IDs per job/user and `AiContextRegistry::forget($id)` or `clear()` at
@@ -94,7 +105,7 @@ continuation; response chaining does not guarantee a cache hit, particularly
 across models. Cache warming is intentionally not implemented.
 
 See the [complete context guide](docs/ai-context.md) for paired examples of
-every operation, shared callbacks, registry lifecycle, checkpoint semantics,
+every operation, prepared prompts/tools, registry lifecycle, checkpoint semantics,
 options and error handling. [examples/ai-context.php](examples/ai-context.php)
 is a runnable CLI example; it makes real, billable model calls when executed.
 

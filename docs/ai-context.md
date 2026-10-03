@@ -1,4 +1,4 @@
-# AI-Kontext, gemeinsame Callbacks und gezielte Änderungen
+# AI-Kontext, vorbereitete Prompts und gezielte Änderungen
 
 Verwende für normale Aufrufe weiterhin die globalen `phore_ai_*`-Funktionen.
 Ihre Signaturen und Rückgabewerte bleiben erhalten. Für zusammenhängende
@@ -129,9 +129,9 @@ weder verändert noch automatisch gespeichert. `dry_run`, `return_patch`,
 `expected_hash`, `addressing` und die übrigen Optionen sind unter
 [`struct-patch.md`](struct-patch.md) beschrieben. Es gibt weiterhin keine
 automatische Reparatur einer ungültigen Objekt-Patch-Antwort und keinen
-vollständigen Objekt-Rewrite als Fallback. Gemeinsame Context-Callbacks
-können vor der Patch-Antwort Rückfragen klären. Direkt in den Prompt-Stack
-gegebene Tools bleiben beim Bearbeiten von Objekten abgelehnt.
+vollständigen Objekt-Rewrite als Fallback. Vorbereitete Context-Tools können
+vor der Patch-Antwort Rückfragen klären. Nur zusätzlich für diesen einzelnen
+Objekt-Patch übergebene Tools bleiben abgelehnt.
 
 ## Bilder erzeugen
 
@@ -149,7 +149,7 @@ $image = $context->image('Ein schlichtes Symbol für einen Kalender.', [
 $image->saveToFile(__DIR__ . '/calendar.png');
 ```
 
-Bilder werden erst durch `saveToFile()` gespeichert. Gemeinsame Callbacks
+Bilder werden erst durch `saveToFile()` gespeichert. Vorbereitete Context-Tools
 stehen auch bei der Bildgenerierung zur Verfügung. Bildantworten bleiben
 nicht-streamend, auch bei aktiviertem Debug-Logging.
 
@@ -189,9 +189,8 @@ Alternativ hält die Anwendung das Objekt selbst:
 use Phore\AiHarness\AiContext;
 use Phore\AiHarness\PromptType\FilePrompt;
 
-$context = new AiContext();
-$context->text([
-    'Lies die Projektbeschreibung und bestätige die Aufnahme.',
+$context = new AiContext(prompts: [
+    'Nutze die Projektbeschreibung als Grundlage für alle folgenden Aufgaben.',
     FilePrompt::fromFile(__DIR__ . '/briefing.md'),
 ]);
 $title = $context->text('Formuliere dazu einen Titel.');
@@ -201,6 +200,8 @@ $intro = phore_ai_text('Schreibe jetzt die Einleitung.', [
     'ai_context' => $context,
 ]);
 ```
+
+Vorbereitete Daten-Prompts werden beim ersten Root-Request eingebracht und liegen danach in der Response-Historie. `SystemPrompt` und `ToolType` werden dagegen bei jedem Request erneut angehängt, damit Instructions und Tools aktiv bleiben. Ein Rollback auf den leeren Ausgangspunkt lädt die vorbereiteten Daten beim nächsten Request erneut.
 
 Die Registry lebt nur innerhalb des PHP-Prozesses beziehungsweise Requests.
 Sie ist kein persistenter Session-Speicher und wird nicht automatisch zwischen
@@ -219,60 +220,43 @@ Ein bereits gehaltenes Objekt bleibt nach `forget()` gültig. Ein einzelner
 Kontext darf nicht gleichzeitig oder reentrant verwendet werden. Für
 unabhängige Ausführungspfade wird er vorher geklont.
 
-## Allgemeine Callbacks, beispielsweise Rückfragen
+## Vorbereitete Prompts und Tools
 
-Registriere gemeinsame `CallbackTool`-Instanzen beim Erzeugen des Kontexts
-oder mit `addCallback()`. Die Traits erhalten sie bei jedem Aufruf. Sie werden
-nicht automatisch beim Registrieren ausgeführt, sondern nur dann, wenn das
-Modell das Tool aufruft. Die Anwendung implementiert die eigentliche
-Interaktion, beispielsweise über CLI, eine Oberfläche oder einen Dienst.
+Der Constructor nimmt unter `prompts` dieselben Strings, `PromptType`- und
+`ToolType`-Objekte wie die globalen `phore_ai_*`-Funktionen. Ein
+`CallbackTool` ist deshalb kein Sonderfall und benötigt keine eigene
+Registrierungs-API.
 
 ```php
 use Phore\AiHarness\AiContext;
+use Phore\AiHarness\PromptType\PromptFile;
 use Phore\AiHarness\ToolType\CallbackTool;
+use Phore\AiHarness\ToolType\WebAccessTool;
 
 $askUser = new CallbackTool(
-    static function (string $question): string {
-        fwrite(STDERR, $question . PHP_EOL . '> ');
-        $answer = fgets(STDIN);
-        if ($answer === false) {
-            throw new RuntimeException('Keine Benutzerantwort verfügbar.');
-        }
-        return trim($answer);
-    },
+    static fn (string $question): string => askUser($question),
     name: 'ask_user_question',
-    description: 'Stellt dem Benutzer eine notwendige Rückfrage.',
 );
 
-$context = new AiContext(callbacks: [$askUser]);
-$text = phore_ai_text('Kläre zuerst den gewünschten Ton und schreibe den Text.', [
-    'ai_context' => $context,
+$context = new AiContext(prompts: [
+    new PromptFile(__DIR__ . '/SKILL.md'),
+    new WebAccessTool(),
+    $askUser,
 ]);
 
-// Alternative mit derselben Callback-Registrierung:
-$text = $context->text('Kläre zuerst den gewünschten Ton und schreibe den Text.');
+$text = $context->text('Kläre fehlende Angaben bei Bedarf und schreibe den Text.');
 ```
 
-Alternativ: `$context->addCallback($askUser)` vor dem ersten oder zwischen
-zwei Aufrufen. Für eine ID kannst du den Kontext vorab mit
-`AiContextRegistry::resolve(['ai_context' => 'default'])` beziehen und dort
-registrieren. Ein Aufruf mit dieser ID nutzt anschließend dieselben Tools.
+Context-Tools stehen bei `text()`, `file()`, `struct()`, `structArray()` und
+`image()` zur Verfügung. Bei Objekt-Patches bleiben nur Tools gesperrt, die
+zusätzlich ausschließlich an diesen einzelnen `struct()`-Aufruf übergeben
+werden. Gleichnamige unterschiedliche `CallbackTool`-Instanzen werden
+abgelehnt. `write_text` und `write_files` sind als Context-Tool-Namen
+reserviert, weil die Edit-Primitive sie intern verwenden.
 
-Gemeinsame und aufrufbezogene Callbacks werden zusammengeführt. Gleichnamige,
-unterschiedliche Tools werden nicht stillschweigend überschrieben. Dieselbe
-Instanz darf im Prompt nochmals vorkommen; sie wird nur einmal registriert.
-`write_text` und `write_files` sind für die Edit-Primitive reserviert.
-
-Der Standardprompt erlaubt Rückfragen über bereitgestellte
-Klärungs-Callbacks; ohne ein solches Tool bleibt der Ablauf nicht-interaktiv.
-Ein eigener Systemprompt darf dem gewünschten Rückfrageablauf nicht
-widersprechen. Halte Antworten und Tool-Ausgaben möglichst klein.
-
-Nur `RecoverableToolException` wird als korrigierbarer Tool-Fehler an das
-Modell zurückgegeben. Andere Callback-Exceptions, insbesondere fachliche
-Abbrüche, werden unverändert an die Anwendung weitergereicht. Eine Rückfrage
-zählt wie jeder andere Callback zur gemeinsamen Rundengrenze.
-
+Der Standardprompt erlaubt Rückfragen über bereitgestellte Klärungs-Tools.
+`RecoverableToolException` bleibt der korrigierbare Tool-Fehler; andere
+Callback-Exceptions werden an die Anwendung weitergereicht.
 ## Checkpoints und Rollback
 
 Benannter Checkpoint mit den weiterhin bevorzugten Funktionen:
@@ -323,8 +307,8 @@ ist ungültig. Ein Checkpoint vor dem ersten Aufruf kann den leeren
 Ausgangskontext wiederherstellen.
 
 **Rollback betrifft ausschließlich den Gesprächszeiger.** Bereits geschriebene
-Dateien, gesendete Nachrichten oder andere Callback-Nebenwirkungen werden
-nicht rückgängig gemacht. Ebenso bleiben Callback-Registrierungen,
+Dateien, gesendete Nachrichten oder andere Tool-Nebenwirkungen werden
+nicht rückgängig gemacht. Ebenso bleiben vorbereiteter Prompt-/Tool-Stack,
 Konfiguration und angefallene Token-/Kostenstatistiken erhalten. Ein
 Datei-Rollback oder eine fachliche Transaktion gehört in die Anwendung.
 
@@ -343,64 +327,54 @@ $base->text('Verfeinere nur Variante A.');
 $branch->text('Verfeinere nur Variante B.');
 ```
 
-Der Klon übernimmt den aktuellen Gesprächsstand und die bisherigen
-Checkpoint- und Callback-Registrierungen. Anschließende Änderungen an diesen
-Registrierungen und am Gesprächszeiger beeinflussen das Original nicht.
-Client-Objekt und Callback-Closures werden als externe Abhängigkeiten geteilt,
-nicht tief kopiert. Eine Closure, die veränderlichen Anwendungszustand
+Der Klon übernimmt den aktuellen Gesprächsstand, den vorbereiteten
+Prompt-/Tool-Stack und die Checkpoints. Prompt- und Tool-Objekte sowie der
+Client werden dabei nicht tief kopiert. Eine Closure, die veränderlichen Anwendungszustand
 referenziert, teilt diesen Zustand daher weiterhin. Dateien sind ebenfalls
 nicht branch-isoliert.
 
 ## Optionen, Modelle und Provider-Kontext
 
 `new AiContext()` nutzt den vorhandenen Standardclient und die
-Keystore-Auflösung. Erst ein Methodenaufruf erzeugt einen Provider-Request.
-Gemeinsame Defaults können im Konstruktor gesetzt werden:
+Keystore-Auflösung. Gemeinsame Defaults können als Array oder als `AiOptions`
+gesetzt werden:
 
 ```php
-$context = new \Phore\AiHarness\AiContext([
+use Phore\AiHarness\AiContext;
+use Phore\AiHarness\AiOptions;
+
+$config = AiOptions::fromArray([
     'model' => 'gpt-5-mini',
     'reasoning' => ['effort' => 'low'],
     'debug_log' => true,
 ]);
 
-phore_ai_text('Analysiere genauer.', [
-    'ai_context' => $context,
-    'reasoning' => ['effort' => 'medium'],
-]);
+$context = new AiContext(options: $config);
+assert(AiOptions::fromArray($config) === $config);
 
-// Alternative:
-$context->text('Analysiere genauer.', options: [
-    'reasoning' => ['effort' => 'medium'],
+$other = new AiContext(options: [
+    'model' => 'gpt-5-mini',
+    'debug_log' => true,
 ]);
 ```
 
-Die gemeinsamen Optionen bleiben `client`, `model`, `reasoning`, `timeout`,
-`connect_timeout` und `debug_log`. Aufrufoptionen überschreiben Defaults nur
-für diesen Aufruf. Bei einer neuen Registry-ID werden diese gemeinsamen
-Optionen beim ersten Aufruf als Context-Defaults übernommen. `input`,
-`output_class` und bildspezifische Einstellungen sind aufrufbezogen.
+`AiOptions::fromArray()` akzeptiert ein Array oder eine vorhandene
+`AiOptions`-Instanz. Eine Instanz wird unverändert zurückgegeben. Arrays
+werden validiert; unbekannte Keys wie `modle` führen zu
+`InvalidArgumentException`. Unterstützt werden `client`, `model`, `reasoning`,
+`timeout`, `connect_timeout` und `debug_log`.
 
-Der beim ersten Aufruf aufgelöste Client bleibt an diesen Kontext gebunden.
-Ein anderer Client beziehungsweise Provider erfordert einen neuen Kontext.
-Timeout-Optionen konfigurieren nur neu erzeugte Clients; eine bereits
-bereitgestellte Client-Instanz behält ihre Einstellungen. Ein anderes Modell
-kann pro Aufruf angegeben werden, soweit der Provider diese Fortsetzung
-unterstützt. Ein abgelehnter Modellwechsel wird nicht durch stilles Vergessen
-der bisherigen Unterhaltung umgangen.
+Aufrufoptionen überschreiben diese Defaults nur für den jeweiligen Aufruf.
+`input`, `output_class` sowie bild- und patch-spezifische Einstellungen bleiben
+aufrufbezogen. Der beim ersten Aufruf aufgelöste Client bleibt an den Kontext
+gebunden. Ein anderes Modell kann pro Aufruf angegeben werden, soweit der
+Provider die Fortsetzung akzeptiert.
 
 Intern verkettet der Harness abgeschlossene Antworten über
-`previous_response_id`. Folgeaufrufe müssen daher das bisherige Quellmaterial
-nicht erneut als HTTP-Payload übertragen. Sie enthalten die neuen Eingaben
-und die für den aktuellen Aufruf gültigen Tools und Ausgabevorgaben.
-Innerhalb einer Callback-Schleife bleiben Instructions, Tools und
-Structured-Output-Schema in allen Runden erhalten.
-
-Aufrufbezogene Systemprompts, Tools und Ausgabeformate werden nicht als
-allgemeine dauerhafte Context-Konfiguration übernommen. Wiederkehrende
-Systemvorgaben müssen deshalb in den betreffenden Aufrufen wieder angegeben
-werden. Gemeinsam registrierte Callbacks sind davon ausgenommen.
-
+`previous_response_id`. Vorbereitete Daten-Prompts liegen danach in der
+Conversation-History; vorbereitete `SystemPrompt`- und `ToolType`-Items werden
+bei jedem Request erneut angehängt. Response-Verkettung ist weiterhin nicht
+gleichbedeutend mit Prompt-Caching.
 ## Patch-Vertrag und Teilfehler
 
 Die interne Schreiboperation verwendet für Text `edits` und für Dateien eine
@@ -525,8 +499,8 @@ Provider-Referenzen:
 
 ## Aufbau und Kompatibilität
 
-`AiContext` verwaltet nur Kontextzustand, Konfiguration, gemeinsame Callbacks
-und die Ausführungskoordination. Die Operationen liegen in separaten Dateien
+`AiContext` verwaltet nur Kontextzustand, vorbereitete Prompts/Tools,
+Konfiguration und die Ausführungskoordination. Die Operationen liegen in separaten Dateien
 unter `src/Context/Traits/`: `TextTrait`, `FileTrait`, `StructTrait`,
 `StructArrayTrait` und `ImageTrait`. Die globalen Funktionen lösen lediglich
 den Kontext auf und reichen ihre bisherigen Argumente weiter.
