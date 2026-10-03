@@ -9,6 +9,10 @@ functions for normal use; their existing signatures remain supported.
 Examples require `vendor/autoload.php` and configured credentials. Each direct
 `AiContext` call below is an alternative to the corresponding global call.
 
+For the shortest stateful example, see [`examples/basic.php`](examples/basic.php):
+it configures `AiContext` with an inline options array and then runs several
+prompts in sequence on the same conversation.
+
 ```php
 $text = phore_ai_text('Write a short introduction.');
 $edited = phore_ai_text('Correct spelling only.', [
