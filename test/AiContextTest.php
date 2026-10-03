@@ -311,7 +311,7 @@ final class AiContextTest extends TestCase
         self::assertSame($context, $result);
         self::assertNull($context->getResponseId());
 
-        $this->expectException(LogicException::class);
+        $this->expectException(\LogicException::class);
         $context->rollback('existing');
     }
 
@@ -324,7 +324,7 @@ final class AiContextTest extends TestCase
             self::assertStringContainsString('Invalid AI context state JSON', $error->getMessage());
         }
 
-        $this->expectException(InvalidArgumentException::class);
+        $this->expectException(\InvalidArgumentException::class);
         ResumeOptions::fromArray(['unknown' => true]);
     }
 

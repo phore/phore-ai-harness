@@ -195,6 +195,7 @@ final class AiContext
      * @return $this
      * @throws ResumeStateException For malformed state or an incompatible state when configured to throw.
      * @throws InvalidArgumentException For invalid resume options.
+     * @throws JsonException If the current setup cannot be encoded for hashing.
      * @throws LogicException While an operation is running.
      * @example $context->importState($_SESSION['ai_state']);
      * @example $context->importState($state, new ResumeOptions(onMismatch: ResumeOptions::ON_MISMATCH_RESTART));
