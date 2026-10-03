@@ -49,6 +49,34 @@ a `DoException` subclass can be supplied for a domain-specific failure type.
 See [`examples/do.php`](examples/do.php) for a callback, checkpoint and
 following file edit.
 
+## Simple typed decisions
+
+`AiContext` also has small typed decision helpers when a DTO would be
+unnecessary:
+
+```php
+$tag = $context->choice('Which tag fits best?', ['news', 'guide', 'review']);
+$tags = $context->choices(null, ['news', 'guide', 'review'], min: 1, max: 2);
+$ready = $context->yesNo(null, allowNull: true);
+$ranking = $context->rank(null, ['news', 'guide', 'review']);
+$score = $context->score(null);
+```
+
+The prompt is always the first argument. Passing `null` asks the harness to
+generate the method's short default prompt. Choice input can be a plain list of
+string/integer values, or a `value => description` map. Descriptions are
+optional source data used to explain when a value fits. `choices()` validates
+`min`/`max`; `yesNo()` can explicitly allow `null`; `rank()` returns
+every choice once; `score()` is constrained to `0.0..1.0`.
+
+The final options argument accepts the normal options array or `AiOptions`,
+and a model name can be passed directly as a string. For `choice()` and
+`choices()`, array options may also contain `selected` to describe the
+current selection before the model re-evaluates it.
+
+See [`examples/simple-types.php`](examples/simple-types.php) for every helper
+with an explicit prompt and with its generated default prompt.
+
 ## Reuse a context, ask questions, branch and roll back
 
 All helpers accept `options['ai_context']`: a non-empty registry ID, an

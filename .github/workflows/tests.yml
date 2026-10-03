@@ -33,8 +33,10 @@ jobs:
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
 
-      - name: Validate basic example
-        run: php -l examples/basic.php
+      - name: Validate examples
+        run: |
+          php -l examples/basic.php
+          php -l examples/simple-types.php
 
       - name: UnitTests
         run: vendor/bin/phpunit -c phpunit.xml.dist
