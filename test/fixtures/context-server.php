@@ -84,6 +84,10 @@ $body = [
     'fixture_request' => $request,
     'usage' => ['input_tokens' => 2048, 'output_tokens' => 32, 'total_tokens' => 2080],
 ];
+if ($scenario === 'response-failure' && str_contains(json_encode($input), 'fail-now')) {
+    $body['status'] = 'incomplete';
+    $body['output'] = [['type' => 'function_call', 'name' => 'ask_user_question', 'call_id' => 'partial', 'arguments' => '{"question":"Do not execute this."}']];
+}
 if ($scenario !== 'missing-cache') {
     $body['usage']['input_tokens_details'] = ['cached_tokens' => $scenario === 'zero-cache' ? 0 : 1024];
 }

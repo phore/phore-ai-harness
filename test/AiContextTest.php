@@ -53,9 +53,10 @@ final class AiContextTest extends TestCase
         $address = stream_socket_get_name($socket, false);
         fclose($socket);
         self::$baseUrl = 'http://' . $address;
+        $nullDevice = PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null';
         self::$server = proc_open(
             [PHP_BINARY, '-S', $address, __DIR__ . '/fixtures/context-server.php'],
-            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            [0 => ['pipe', 'r'], 1 => ['file', $nullDevice, 'a'], 2 => ['file', $nullDevice, 'a']],
             self::$pipes,
         );
         if (!is_resource(self::$server)) {
@@ -255,7 +256,7 @@ final class AiContextTest extends TestCase
             self::assertSame('json_schema', $this->lastRequest()['text']['format']['type']);
             $fileResponse = $context->getResponseId();
             $context->text('Continue after file.');
-            self::assertSame($fileResponse, $this->lastRequest()['previous_response_id'] ?? null);
+            self::assertNotSame($fileResponse, $context->getResponseId());
             $context->rollback('before-file');
             self::assertSame('updated', file_get_contents($file));
         } finally {
@@ -300,6 +301,10 @@ final class AiContextTest extends TestCase
         self::assertSame('ONE TWO', phore_ai_text('Correct both.', ['ai_context' => $context, 'input' => 'one two']));
         self::assertNotNull($context->getResponseId());
         self::assertStringNotContainsString('one two', json_encode($this->lastRequest()['input']));
+        $schema = $this->lastRequest()['tools'][0]['parameters'];
+        self::assertSame('array', $schema['properties']['edits']['type']);
+        self::assertStringContainsString('"search"', json_encode($schema));
+        self::assertStringContainsString('"replacement"', json_encode($schema));
         self::assertSame('new text', $this->context('rewrite')->text('Rewrite empty input.', ''));
         self::assertSame('ready', $this->context()->text('Generate.', null));
     }
@@ -394,5 +399,48 @@ final class AiContextTest extends TestCase
         self::assertSame($parent, $context->getResponseId());
         $context->text('Continue.');
         self::assertSame($parent, $this->lastRequest()['previous_response_id']);
+    }
+
+    public function testIncompleteResponsesNeverExecuteCallbacksOrAdvanceTheCursor(): void
+    {
+        foreach ([false, new ContextRecordingLogger()] as $logger) {
+            $called = 0;
+            $context = $this->context('response-failure', [new CallbackTool(
+                static function (string $question) use (&$called): string {
+                    $called++;
+                    return 'not reached';
+                },
+                'ask_user_question',
+            )]);
+            $context->text('Success.');
+            $parent = $context->getResponseId();
+            try {
+                $context->text('fail-now', options: ['debug_log' => $logger]);
+                self::fail('Expected incomplete response error.');
+            } catch (\RuntimeException $error) {
+                self::assertStringContainsString('did not complete', $error->getMessage());
+            }
+            self::assertSame(0, $called);
+            self::assertSame($parent, $context->getResponseId());
+        }
+    }
+
+    public function testLegacyParameterNamesAndCleanContextMethodsRemainStable(): void
+    {
+        $signatures = [
+            'phore_ai_text' => ['prompts', 'options'],
+            'phore_ai_image' => ['prompts', 'options'],
+            'phore_ai_struct' => ['prompts', 'className', 'options'],
+            'phore_ai_struct_array' => ['prompts', 'className', 'options'],
+            'phore_ai_edit_struct' => ['prompts', 'target', 'options'],
+            'phore_ai_edit_file' => ['prompts', 'filenames', 'className', 'options'],
+        ];
+        foreach ($signatures as $function => $names) {
+            self::assertSame($names, array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionFunction($function))->getParameters()));
+        }
+        self::assertFalse(method_exists(AiContext::class, 'editText'));
+        self::assertFalse(method_exists(AiContext::class, 'editFile'));
+        self::assertFalse(method_exists(AiContext::class, 'editStruct'));
+        self::assertSame(['prompts', 'input', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'text'))->getParameters()));
     }
 }

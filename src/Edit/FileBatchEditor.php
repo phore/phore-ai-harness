@@ -69,7 +69,10 @@ final class FileBatchEditor
     }
 
     /**
-     * @param list<array{filename: string, edits: list<array{search: string|null, replacement: string}>}> $files Target aliases and all edits per target.
+     * The DTO annotation defines the provider schema; callback JSON is passed
+     * as arrays and validated explicitly before any file is written.
+     *
+     * @param \Phore\AiHarness\Edit\FileEdits[] $files Target aliases and all edits per target.
      */
     public function write(array $files): string
     {

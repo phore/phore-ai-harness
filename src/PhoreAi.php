@@ -182,7 +182,7 @@ final class PhoreAi
     {
         $request = (new OpenAiPromptTypeConverter())->toAiRequest($this->model, $this->prompts);
         if ($this->previousResponseId !== null) {
-            $request = clone($request, ['previousResponseId' => $this->previousResponseId]);
+            $request = $request->withFollowUp($request->input, $this->previousResponseId);
         }
         if ($this->tools !== []) {
             $request = $request->withTools(...$this->tools);
@@ -212,7 +212,7 @@ final class PhoreAi
 
         $request = (new OpenAiPromptTypeConverter())->toAiRequest($instance->model, $instance->prompts);
         if ($this->previousResponseId !== null) {
-            $request = clone($request, ['previousResponseId' => $this->previousResponseId]);
+            $request = $request->withFollowUp($request->input, $this->previousResponseId);
         }
         if ($instance->tools !== []) {
             $request = $request->withTools(...$instance->tools);
@@ -288,7 +288,7 @@ final class PhoreAi
 
         $request = (new OpenAiPromptTypeConverter())->toAiRequest($this->model, $this->prompts);
         if ($this->previousResponseId !== null) {
-            $request = clone($request, ['previousResponseId' => $this->previousResponseId]);
+            $request = $request->withFollowUp($request->input, $this->previousResponseId);
         }
         if ($this->tools !== []) {
             $request = $request->withTools(...$this->tools);
@@ -353,7 +353,7 @@ final class PhoreAi
             }
             $outputs = $this->callbackToolCallOutputs($response, $callbackTools, $context);
             if ($outputs === []) {
-                return $response;
+                throw new \RuntimeException('Callback response contains malformed tool calls.');
             }
 
             // Instructions, Tools und Output-Schema muessen in jeder Runde erhalten bleiben.
@@ -459,7 +459,9 @@ final class PhoreAi
         }
 
         if ($context === null) {
-            return $this->openAiClient->createResponse($request);
+            $response = $this->openAiClient->createResponse($request);
+            $this->assertCompletedResponse($response);
+            return $response;
         }
         // Image generation has no compatible text streaming contract.
         $stream = $stream && !$this->hasTool(ImageGenerationTool::class);
@@ -478,10 +480,20 @@ final class PhoreAi
                 })
                 : $this->openAiClient->createResponse($request);
             $context->addResponse($response);
+            $this->assertCompletedResponse($response);
             return $response;
         } finally {
             $context->durationApi += (hrtime(true) - $started) / 1e9;
             $context->flushText();
+        }
+    }
+
+    private function assertCompletedResponse(AiResponse $response): void
+    {
+        // HTTP 200 allein reicht nicht: partielle Antworten duerfen keine Tools ausfuehren.
+        $status = $response->body['status'] ?? null;
+        if (isset($response->body['error']) || ($status !== null && $status !== 'completed')) {
+            throw new \RuntimeException('Provider response did not complete successfully.');
         }
     }
 

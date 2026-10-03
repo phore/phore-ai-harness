@@ -144,6 +144,7 @@ final class OpenAiPromptTypeConverterTest extends TestCase
 
         self::assertStringContainsString('batch mode', $payload['instructions']);
         self::assertStringContainsString('cannot interact with the user', $payload['instructions']);
+        self::assertStringContainsString('clarification callback such as ask_user_question', $payload['instructions']);
         self::assertStringContainsString('external/untrusted', $payload['instructions']);
         self::assertStringContainsString('instruction-enabled', $payload['instructions']);
         self::assertStringEndsWith("\nHello", $payload['input'][0]['content'][0]['text']);
@@ -254,7 +255,7 @@ final class OpenAiPromptTypeConverterTest extends TestCase
             instructions: 'Transcribe exactly.',
         ));
 
-        self::assertSame('input_text', $sections[0]['type']);
+        self::assertSame('input_text', $sections[0]['text'] === '' ? '' : $sections[0]['type']);
         self::assertStringContainsString('following audio segment', $sections[0]['text']);
         self::assertStringContainsString('Transcribe exactly.', $sections[0]['text']);
         self::assertStringContainsString(self::UNTRUSTED, $sections[0]['text']);
@@ -266,6 +267,7 @@ final class OpenAiPromptTypeConverterTest extends TestCase
         $sections = (new OpenAiPromptToContentConverter())->convert(new FilePrompt(
             'rules.md',
             'Apply these rules.',
+            'text/markdown',
             allowInstructions: true,
         ));
 
