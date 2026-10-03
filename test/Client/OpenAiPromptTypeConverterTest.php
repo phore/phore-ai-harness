@@ -294,6 +294,7 @@ final class OpenAiPromptTypeConverterTest extends TestCase
             new StructPrompt(OpenAiPromptTypeConverterTestAddress::class),
         );
 
+        self::assertStringContainsString(self::UNTRUSTED, $text);
         self::assertStringContainsString('JSON Schema:', $text);
         self::assertStringNotContainsString('Data:', $text);
     }
