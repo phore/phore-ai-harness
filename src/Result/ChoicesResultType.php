@@ -11,8 +11,10 @@ final readonly class ChoicesResultType
     public array $indices;
 
     /** @param list<int> $indices */
-    public function __construct(array $indices)
-    {
+    public function __construct(
+        public bool $determined,
+        array $indices,
+    ) {
         $this->indices = $indices;
     }
 }

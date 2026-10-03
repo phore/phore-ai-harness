@@ -9,9 +9,10 @@ Beide Wege verwenden dieselben Traits und dieselbe Ausführungslogik.
 Die Beispiele setzen `vendor/autoload.php` und konfigurierte Zugangsdaten
 voraus. Die jeweils zweite Variante ist eine Alternative, kein zusätzlicher
 notwendiger Aufruf. Das ausführbare CLI-Beispiel liegt unter
-[`examples/ai-context.php`](../examples/ai-context.php). Das fokussierte
-`do()`-Beispiel mit Callback, Checkpoint und anschließendem Datei-Editing steht
-unter [`examples/do.php`](../examples/do.php).
+[`examples/01-basic.php`](../examples/01-basic.php). Das fokussierte
+`do()`-Beispiel mit autonomem Callback-Loop steht unter
+[`examples/04-do.php`](../examples/04-do.php). Checkpoint, Rollback und
+State-Export/Import sind bereits im Grundbeispiel enthalten.
 
 ## Arbeitsschritte ohne Textausgabe
 
@@ -96,11 +97,11 @@ $score = $context->score(null);
 Die öffentliche Methodensignatur ist:
 
 ```php
-public function choice(?string $prompt, array $choices, AiOptions|array|string|null $options = null): string|int;
-public function choices(?string $prompt, array $choices, int $min = 0, ?int $max = null, AiOptions|array|string|null $options = null): array;
+public function choice(?string $prompt, array $choices, bool $allowNull = false, AiOptions|array|string|null $options = null): string|int|null;
+public function choices(?string $prompt, array $choices, int $min = 0, ?int $max = null, bool $allowNull = false, AiOptions|array|string|null $options = null): ?array;
 public function yesNo(?string $prompt, bool $allowNull = false, AiOptions|array|string|null $options = null): ?bool;
-public function rank(?string $prompt, array $choices, AiOptions|array|string|null $options = null): array;
-public function score(?string $prompt, AiOptions|array|string|null $options = null): float;
+public function rank(?string $prompt, array $choices, bool $allowNull = false, AiOptions|array|string|null $options = null): ?array;
+public function score(?string $prompt, bool $allowNull = false, AiOptions|array|string|null $options = null): ?float;
 ```
 
 ### Choice-Werte und optionale Beschreibungen
@@ -157,12 +158,24 @@ werden. Für den häufigsten Fall reicht auch direkt der Modellname:
 $tag = $context->choice(null, ['news', 'guide'], 'gpt-5-mini');
 ```
 
-`yesNo()` liefert ohne `allowNull` immer bool und mit `allowNull: true`
-`bool|null`. `rank()` enthält jeden Wert genau einmal. `score()` wird lokal
-auf den Bereich `0.0..1.0` geprüft.
+Alle fünf Simple-Type-Methoden verwenden `allowNull = false`. Meldet das Modell
+explizit, dass der vorhandene Kontext für eine zuverlässige Bestimmung nicht
+ausreicht, wird mit `allowNull: true` `null` zurückgegeben. Beim Default `false`
+wird stattdessen `TaskErrorException` geworfen; ungültige Providerwerte bleiben
+normale Validierungsfehler. Ein bestimmtes leeres Ergebnis von `choices()` ist
+weiterhin `[]` und nicht `null`. `rank()` enthält jeden Wert genau einmal und
+`score()` wird lokal auf `0.0..1.0` geprüft.
 
 Das ausführbare Gegenüberstellungsbeispiel steht unter
-[`examples/simple-types.php`](../examples/simple-types.php).
+[`examples/03-simple-types.php`](../examples/03-simple-types.php).
+
+Die gleichen Operationen gibt es als `phore_ai_choice()`,
+`phore_ai_choices()`, `phore_ai_yes_no()`, `phore_ai_rank()` und
+`phore_ai_score()`. Mit demselben `options['ai_context']`-Key setzen diese
+Helper innerhalb des PHP-Prozesses denselben Conversation-Cursor fort. Für
+Checkpoint/Rollback sowie `exportState()`/`importState()` wird die
+Objekt-API verwendet; siehe
+[`examples/02-basic-functions.php`](../examples/02-basic-functions.php).
 
 ## Text erzeugen und vorhandenen Text bearbeiten
 
@@ -364,8 +377,8 @@ Die Registry lebt nur innerhalb des PHP-Prozesses beziehungsweise Requests
 und wird nicht automatisch zwischen Worker-Prozessen geteilt. Für Session- oder
 Request-Grenzen kann ein Context seinen fortsetzbaren Cursor explizit als JSON
 exportieren und später in einen neu mit demselben Prompt-/Tool-Setup aufgebauten
-Context importieren. Siehe
-[`examples/state-resume.php`](../examples/state-resume.php).
+Context importieren. Der vollständige Ablauf einschließlich Checkpoint und
+State-Export steht in [`examples/01-basic.php`](../examples/01-basic.php).
 
 In langlebigen Workern müssen Registry-IDs pro Auftrag oder Benutzer getrennt
 und nach Abschluss entfernt werden:

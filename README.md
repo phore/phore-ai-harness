@@ -9,7 +9,7 @@ functions for normal use; their existing signatures remain supported.
 Examples require `vendor/autoload.php` and configured credentials. Each direct
 `AiContext` call below is an alternative to the corresponding global call.
 
-For the shortest stateful example, see [`examples/basic.php`](examples/basic.php):
+For the shortest stateful example, see [`examples/01-basic.php`](examples/01-basic.php):
 it configures `AiContext` with an inline options array and then runs several
 prompts in sequence on the same conversation.
 
@@ -32,6 +32,11 @@ model's replacements, not a separately generated copy of the whole result.
 | Preferred helper | Direct `AiContext` equivalent |
 | --- | --- |
 | `phore_ai_do($prompts, $throw, $options)` | `$context->do($prompts, $throw, $options)` |
+| `phore_ai_choice($prompt, $choices, $allowNull, $options)` | `$context->choice($prompt, $choices, $allowNull, $options)` |
+| `phore_ai_choices($prompt, $choices, $min, $max, $allowNull, $options)` | `$context->choices($prompt, $choices, $min, $max, $allowNull, $options)` |
+| `phore_ai_yes_no($prompt, $allowNull, $options)` | `$context->yesNo($prompt, $allowNull, $options)` |
+| `phore_ai_rank($prompt, $choices, $allowNull, $options)` | `$context->rank($prompt, $choices, $allowNull, $options)` |
+| `phore_ai_score($prompt, $allowNull, $options)` | `$context->score($prompt, $allowNull, $options)` |
 | `phore_ai_text($prompts, $options)` | `$context->text($prompts, $input, $options)` |
 | `phore_ai_edit_file($prompts, $paths, $class, $options)` | `$context->file($prompts, $paths, ['output_class' => $class] + $options)` |
 | `phore_ai_struct($prompts, Dto::class, $options)` | `$context->struct($prompts, Dto::class, $options)` |
@@ -46,8 +51,8 @@ redundant `editText()`, `editFile()` or `editStruct()` methods.
 Use `do()` when only the prepared conversation state or tool side effect is
 needed. It returns `true`/`false`; `throw: true` raises `DoException`, or
 a `DoException` subclass can be supplied for a domain-specific failure type.
-See [`examples/do.php`](examples/do.php) for a callback, checkpoint and
-following file edit.
+See [`examples/04-do.php`](examples/04-do.php) for an autonomous callback/tool
+loop. Checkpoints and state export are shown in [`examples/01-basic.php`](examples/01-basic.php).
 
 ## Simple typed decisions
 
@@ -66,15 +71,18 @@ The prompt is always the first argument. Passing `null` asks the harness to
 generate the method's short default prompt. Choice input can be a plain list of
 string/integer values, or a `value => description` map. Descriptions are
 optional source data used to explain when a value fits. `choices()` validates
-`min`/`max`; `yesNo()` can explicitly allow `null`; `rank()` returns
-every choice once; `score()` is constrained to `0.0..1.0`.
+`min`/`max`; every simple-type method accepts `allowNull` (default `false`).
+When the model explicitly reports that the available context is insufficient,
+`allowNull: true` returns `null`; otherwise a `TaskErrorException` is raised.
+Invalid provider values remain exceptions. `rank()` returns every choice once
+and `score()` is constrained to `0.0..1.0`.
 
 The final options argument accepts the normal options array or `AiOptions`,
 and a model name can be passed directly as a string. For `choice()` and
 `choices()`, array options may also contain `selected` to describe the
 current selection before the model re-evaluates it.
 
-See [`examples/simple-types.php`](examples/simple-types.php) for every helper
+See [`examples/03-simple-types.php`](examples/03-simple-types.php) for every helper
 with an explicit prompt and with its generated default prompt.
 
 ## Reuse a context, ask questions, branch and roll back
@@ -155,11 +163,11 @@ model overrides are supported where the provider permits continuation; response
 chaining does not guarantee a cache hit. Cache warming is intentionally not
 implemented.
 
-See the [complete context guide](docs/ai-context.md) for paired examples of
-every operation, prepared prompts/tools, registry lifecycle, checkpoints,
-state export/import, options and error handling. [examples/state-resume.php](examples/state-resume.php)
-shows PHP-session persistence; [examples/ai-context.php](examples/ai-context.php)
-is the broader runnable CLI example and makes real, billable model calls.
+See the [complete context guide](docs/ai-context.md) for the full contracts.
+The numbered example series starts with [`examples/01-basic.php`](examples/01-basic.php)
+for the object API and [`examples/02-basic-functions.php`](examples/02-basic-functions.php)
+for the helper API. Use the object API when checkpoints, rollback,
+`exportState()`/`importState()` or resume across requests are required.
 
 ## Targeted text and multi-file edits
 
@@ -275,8 +283,10 @@ $ai = (new \Phore\AiHarness\PhoreAi())
     ->withModel('gpt-5-mini');
 ```
 
-`debug_log` is supported by `phore_ai_do`, `phore_ai_text`, `phore_ai_struct`,
-`phore_ai_struct_array`, `phore_ai_edit_struct`, `phore_ai_image`,
+`debug_log` is supported by `phore_ai_do`, the simple-type helpers
+`phore_ai_choice`/`phore_ai_choices`/`phore_ai_yes_no`/`phore_ai_rank`/
+`phore_ai_score`, `phore_ai_text`, `phore_ai_struct`, `phore_ai_struct_array`,
+`phore_ai_edit_struct`, `phore_ai_image`,
 `phore_ai_edit_file`, and their `AiContext` methods. It accepts
 `false` (the default), `true` (console output on STDERR), or a
 `Phore\AiHarness\Logging\LoggerInterface` implementation. Invalid values,

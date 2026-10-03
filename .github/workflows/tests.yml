@@ -35,8 +35,9 @@ jobs:
 
       - name: Validate examples
         run: |
-          php -l examples/basic.php
-          php -l examples/simple-types.php
+          for file in examples/*.php; do
+            php -l "$file"
+          done
 
       - name: UnitTests
         run: vendor/bin/phpunit -c phpunit.xml.dist

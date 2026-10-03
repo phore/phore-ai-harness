@@ -20,6 +20,7 @@ use Phore\AiHarness\ResumeOptions;
 use Phore\AiHarness\ResumeStateException;
 use Phore\AiHarness\ToolType\CallbackRoundLimitException;
 use Phore\AiHarness\ToolType\CallbackTool;
+use Phore\AiHarness\ToolType\TaskErrorException;
 use Phore\AiHarness\ToolType\WebAccessTool;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -339,7 +340,7 @@ final class AiContextTest extends TestCase
         self::assertSame(10, $context->choice(
             null,
             [10 => 'Urgent item', 20 => 'Normal item'],
-            'gpt-5-nano',
+            options: 'gpt-5-nano',
         ));
         $request = $this->lastRequest();
         self::assertSame('gpt-5-nano', $request['model']);
@@ -352,7 +353,7 @@ final class AiContextTest extends TestCase
         self::assertSame('news', $context->choice(
             null,
             ['news', 'guide', 'review'],
-            ['selected' => 'guide'],
+            options: ['selected' => 'guide'],
         ));
         self::assertStringContainsString('selected', json_encode($this->lastRequest()['input']));
         self::assertStringContainsString('guide', json_encode($this->lastRequest()['input']));
@@ -398,7 +399,7 @@ final class AiContextTest extends TestCase
         self::assertTrue($context->yesNo('Is the draft ready?'));
         self::assertStringContainsString('Is the draft ready?', json_encode($this->lastRequest()['input']));
 
-        $nullable = $this->context('simple-null');
+        $nullable = $this->context('simple-undetermined');
         self::assertNull($nullable->yesNo(null, allowNull: true));
         self::assertStringContainsString(
             'Answer the current question from the conversation with yes, no, or null when it cannot be decided reliably.',
@@ -421,6 +422,55 @@ final class AiContextTest extends TestCase
         );
     }
 
+
+    public function testAllSimpleTypesSupportExplicitUndeterminedNullOrTaskError(): void
+    {
+        $nullable = $this->context('simple-undetermined');
+
+        self::assertNull($nullable->choice(null, ['news', 'guide'], allowNull: true));
+        self::assertNull($nullable->choices(null, ['news', 'guide'], max: 2, allowNull: true));
+        self::assertNull($nullable->yesNo(null, allowNull: true));
+        self::assertNull($nullable->rank(null, ['news', 'guide'], allowNull: true));
+        self::assertNull($nullable->score(null, allowNull: true));
+
+        $this->expectException(TaskErrorException::class);
+        $this->expectExceptionMessage('Task cannot be completed');
+        $this->context('simple-undetermined')->choice(null, ['news', 'guide']);
+    }
+
+    public function testSimpleTypeGlobalHelpersReuseNamedContext(): void
+    {
+        $options = [
+            'ai_context' => 'simple-functions',
+            'client' => $this->client(),
+        ];
+
+        self::assertSame('news', \phore_ai_choice('Choose one.', ['news', 'guide'], options: $options));
+        $firstResponseId = AiContextRegistry::get('simple-functions')?->getResponseId();
+        self::assertNotNull($firstResponseId);
+
+        self::assertTrue(\phore_ai_yes_no('Is this still the same conversation?', options: [
+            'ai_context' => 'simple-functions',
+        ]));
+        self::assertSame($firstResponseId, $this->lastRequest()['previous_response_id']);
+
+        self::assertSame(
+            ['news', 'review'],
+            \phore_ai_choices(null, ['news', 'guide', 'review'], min: 1, max: 2, options: [
+                'ai_context' => 'simple-functions',
+            ]),
+        );
+        self::assertSame(
+            ['review', 'news', 'guide'],
+            \phore_ai_rank(null, ['news', 'guide', 'review'], options: [
+                'ai_context' => 'simple-functions',
+            ]),
+        );
+        self::assertSame(0.75, \phore_ai_score(null, options: [
+            'ai_context' => 'simple-functions',
+        ]));
+    }
+
     public function testSimpleTypeValidationRejectsInvalidChoicesBoundsAndProviderResults(): void
     {
         foreach ([
@@ -432,7 +482,7 @@ final class AiContextTest extends TestCase
             static fn (AiContext $context) => $context->choices(null, ['news', 'guide'], min: -1),
             static fn (AiContext $context) => $context->choices(null, ['news', 'guide'], min: 2, max: 1),
             static fn (AiContext $context) => $context->choices(null, ['news', 'guide'], max: 3),
-            static fn (AiContext $context) => $context->choice(null, ['news', 'guide'], ['selected' => 'review']),
+            static fn (AiContext $context) => $context->choice(null, ['news', 'guide'], options: ['selected' => 'review']),
             static fn (AiContext $context) => $context->choices(null, ['news', 'guide'], options: ['selected' => 'news']),
         ] as $call) {
             try {
@@ -767,11 +817,17 @@ final class AiContextTest extends TestCase
         self::assertFalse(method_exists(AiContext::class, 'editStruct'));
         self::assertSame(['prompts', 'input', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'text'))->getParameters()));
         self::assertSame(['prompts', 'throw', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'do'))->getParameters()));
-        self::assertSame(['prompt', 'choices', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'choice'))->getParameters()));
-        self::assertSame(['prompt', 'choices', 'min', 'max', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'choices'))->getParameters()));
+        self::assertSame(['prompt', 'choices', 'allowNull', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'choice'))->getParameters()));
+        self::assertSame(['prompt', 'choices', 'min', 'max', 'allowNull', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'choices'))->getParameters()));
         self::assertSame(['prompt', 'allowNull', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'yesNo'))->getParameters()));
-        self::assertSame(['prompt', 'choices', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'rank'))->getParameters()));
-        self::assertSame(['prompt', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'score'))->getParameters()));
+        self::assertSame(['prompt', 'choices', 'allowNull', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'rank'))->getParameters()));
+        self::assertSame(['prompt', 'allowNull', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'score'))->getParameters()));
+
+        self::assertSame(['prompt', 'choices', 'allowNull', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionFunction('phore_ai_choice'))->getParameters()));
+        self::assertSame(['prompt', 'choices', 'min', 'max', 'allowNull', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionFunction('phore_ai_choices'))->getParameters()));
+        self::assertSame(['prompt', 'allowNull', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionFunction('phore_ai_yes_no'))->getParameters()));
+        self::assertSame(['prompt', 'choices', 'allowNull', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionFunction('phore_ai_rank'))->getParameters()));
+        self::assertSame(['prompt', 'allowNull', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionFunction('phore_ai_score'))->getParameters()));
         self::assertSame([], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'exportState'))->getParameters()));
         self::assertSame(['state', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'importState'))->getParameters()));
     }

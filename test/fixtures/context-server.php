@@ -75,15 +75,30 @@ if ($scenario === 'ask' && !$followUp && isset($tools['ask_user_question'])) {
         'data' => $failed ? ['source=fixture', 'reason=missing-evidence'] : [],
     ]);
 } elseif (($format['name'] ?? null) === 'ChoiceResultType') {
-    $text = json_encode(['index' => $scenario === 'simple-invalid' ? 99 : 0]);
+    $text = json_encode([
+        'determined' => $scenario !== 'simple-undetermined',
+        'index' => $scenario === 'simple-invalid' ? 99 : 0,
+    ]);
 } elseif (($format['name'] ?? null) === 'ChoicesResultType') {
-    $text = json_encode(['indices' => [0, 2]]);
+    $text = json_encode([
+        'determined' => $scenario !== 'simple-undetermined',
+        'indices' => [0, 2],
+    ]);
 } elseif (($format['name'] ?? null) === 'YesNoResultType') {
-    $text = json_encode(['value' => $scenario === 'simple-null' ? null : true]);
+    $text = json_encode([
+        'determined' => $scenario !== 'simple-undetermined',
+        'value' => true,
+    ]);
 } elseif (($format['name'] ?? null) === 'RankResultType') {
-    $text = json_encode(['indices' => [2, 0, 1]]);
+    $text = json_encode([
+        'determined' => $scenario !== 'simple-undetermined',
+        'indices' => [2, 0, 1],
+    ]);
 } elseif (($format['name'] ?? null) === 'ScoreResultType') {
-    $text = json_encode(['score' => 0.75]);
+    $text = json_encode([
+        'determined' => $scenario !== 'simple-undetermined',
+        'score' => 0.75,
+    ]);
 } elseif (($format['name'] ?? null) === 'StructPatch') {
     $text = json_encode(['unsupported' => false, 'operations' => [
         ['op' => 'replace', 'path' => '/value', 'value_json' => '"updated"', 'from' => null],

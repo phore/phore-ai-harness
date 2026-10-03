@@ -7,7 +7,9 @@ namespace Phore\AiHarness\Result;
 /** @internal Structured normalized score for AiContext::score(). */
 final readonly class ScoreResultType
 {
-    public function __construct(public float $score)
-    {
+    public function __construct(
+        public bool $determined,
+        public float $score,
+    ) {
     }
 }

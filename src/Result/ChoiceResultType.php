@@ -7,7 +7,9 @@ namespace Phore\AiHarness\Result;
 /** @internal Structured index result for AiContext::choice(). */
 final readonly class ChoiceResultType
 {
-    public function __construct(public int $index)
-    {
+    public function __construct(
+        public bool $determined,
+        public int $index,
+    ) {
     }
 }
