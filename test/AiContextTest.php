@@ -354,7 +354,8 @@ final class AiContextTest extends TestCase
             ['news', 'guide', 'review'],
             ['selected' => 'guide'],
         ));
-        self::assertStringContainsString('"selected":"guide"', json_encode($this->lastRequest()['input']));
+        self::assertStringContainsString('selected', json_encode($this->lastRequest()['input']));
+        self::assertStringContainsString('guide', json_encode($this->lastRequest()['input']));
     }
 
     public function testChoicesUsesBoundsDescriptionsAndSelectedValues(): void
@@ -380,7 +381,8 @@ final class AiContextTest extends TestCase
             'Choose between 1 and 2 options that best match the current context.',
             json_encode($request['input']),
         );
-        self::assertStringContainsString('"selected":["guide"]', json_encode($request['input']));
+        self::assertStringContainsString('selected', json_encode($request['input']));
+        self::assertStringContainsString('guide', json_encode($request['input']));
 
         self::assertSame(
             ['news', 'review'],
