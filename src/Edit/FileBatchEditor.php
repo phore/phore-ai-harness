@@ -108,7 +108,7 @@ final class FileBatchEditor
                     throw new InvalidArgumentException('Replacement result must be UTF-8 text.');
                 }
                 $this->assertSnapshot($path, $target);
-                $unchanged = $target['exists'] && $content === $target['content'];
+                $unchanged = $edits === [] || ($target['exists'] && $content === $target['content']);
                 if (!$unchanged) {
                     $this->persist($path, $content, $target);
                 }

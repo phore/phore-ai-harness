@@ -15,7 +15,6 @@ use Phore\AiHarness\Client\OpenAiClient;
 use Phore\AiHarness\Helper\Toolkit;
 use Phore\AiHarness\OutputFormat\OutputFormat;
 use Phore\AiHarness\ToolType\CallbackTool;
-use Phore\AiHarness\ToolType\ToolType;
 
 /**
  * Explicit, process-local conversation cursor shared by the typed operations.
@@ -50,7 +49,8 @@ final class AiContext
     /**
      * Configure defaults and callbacks without making a provider request.
      * Credentials use the existing default client/Keystore on the first call.
-     * Method options override these defaults for that call only.
+     * Method options override these defaults for that call only; the first
+     * resolved client stays bound for the lifetime of this context.
      *
      * @param array<string, mixed> $options Existing common helper options.
      * @param list<CallbackTool> $callbacks Tools available in every operation.
@@ -78,7 +78,7 @@ final class AiContext
      * @throws InvalidArgumentException For duplicate or reserved names.
      * @throws LogicException While this context is running.
      * @example $context->addCallback(new CallbackTool($ask, 'ask_user_question'));
-     * @see ToolType\CallbackTool
+     * @see \Phore\AiHarness\ToolType\CallbackTool
      */
     public function addCallback(CallbackTool $callback): self
     {
@@ -181,7 +181,8 @@ final class AiContext
             unset($effective['ai_context']);
             $selection = $effective['client'] ?? null;
             if ($this->client !== null) {
-                if ($selection !== null && $selection !== $this->client && $selection !== $this->clientSelection) {
+                $explicitSelection = $options['client'] ?? null;
+                if ($explicitSelection !== null && $explicitSelection !== $this->client && $explicitSelection !== $this->clientSelection) {
                     throw new InvalidArgumentException('Cannot change the client of an initialized AI context; create a new context.');
                 }
                 $effective['client'] = $this->client;

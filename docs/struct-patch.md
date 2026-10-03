@@ -4,12 +4,28 @@ Implements the deterministic core, typed editor, single-batch AI helper and stab
 array view from `proposals/2026-09-04-struct-patch.md` (§§ 4–9, § 11 steps 1–4).
 The existing proposal is retained as the design record.
 
+Prefer the existing global helper; its signature is unchanged:
+
 ```php
 $edited = phore_ai_edit_struct('Rename customer b to Lina.', $customerList, [
     'addressing' => 'stable', // pointer is the default
     'max_operations' => 20,
 ]);
+
+// Direct alternative with the same patch policies:
+$context = new \Phore\AiHarness\AiContext();
+$edited = $context->struct('Rename customer b to Lina.', $customerList, [
+    'addressing' => 'stable',
+    'max_operations' => 20,
+]);
 ```
+
+Object input selects patching; a class name passed to `struct()` selects
+structured generation. The helper accepts `options['ai_context']` as a registry
+ID, an `AiContext` instance or null. Shared context callbacks can clarify the
+task before its final patch is generated. See [AI contexts](ai-context.md) for
+registration, checkpoint/rollback and clone examples. These checkpoints restore
+conversation state, not persisted objects or callback side effects.
 
 The input is never mutated. A new instance is released only after the entire patch,
 transport validation, JSON Schema validation and hydration succeed. Constructors
@@ -23,7 +39,7 @@ optional fields use only defaults/nullability declared by the target schema.
 The generic engine, JSON Pointer, policies and stable-array codec are provided by
 [`phore/json-patch`](https://github.com/phore/phore-json-patch), under the
 `Phore\JsonPatch\` namespace. AI Harness retains typed hydration, schema validation,
-provider output parsing and the single-request helper. The former generic
+provider output parsing and the single-batch helper. The former generic
 `Phore\AiHarness\Patch\` classes have moved; update their imports to the new namespace.
 Composer installs the published [`phore/json-patch`](https://packagist.org/packages/phore/json-patch)
 package through the declared `dev-main` dependency.
@@ -74,6 +90,8 @@ root removal sets `documentExists=false`; its hash uses the domain marker
 | `dry_run` | false | Validate and hydrate a detached candidate, return metadata; never persist. |
 | `return_patch` | false | Helper returns `PatchApplyResult`, including the native patch. |
 | `client`, `model`, `timeout`, `connect_timeout` | existing helper defaults | Existing client configuration. |
+| `reasoning`, `debug_log` | existing helper defaults | Per-call reasoning and optional logging, including cached tokens. |
+| `ai_context` | null | Helpers accept a context ID or instance; absent/null creates an isolated context. |
 
 `StructPatcher::apply()` always returns `PatchApplyResult`; the helper returns the
 new object by default, or the result when `dry_run`/`return_patch` is enabled.
@@ -133,9 +151,13 @@ provider boundary and is not a new JSON Patch dialect.
 
 The prompt contains the current target, target schema, limits, sequential rules
 and data-derived examples (field replacement and combined list operations when
-those shapes exist). Output is one request with one batch. Tool inputs are
-rejected before execution; no callbacks, repair rounds or silent replacement
-fallback run. Unsupported requests fail closed. See the
+those shapes exist). The final output contains one patch batch. Explicit tools
+in the input prompt list remain rejected before execution. Shared `AiContext`
+callbacks may run first, using the same five-round callback budget and retaining
+the output schema in each follow-up request. Without shared callbacks the
+existing single-request path remains unchanged. Invalid final patches are not
+repaired automatically, and no silent replacement fallback runs. Unsupported
+requests fail closed. See the
 [OpenAI Structured Outputs contract](https://developers.openai.com/api/docs/guides/structured-outputs).
 
 Exceptions distinguish validation, failed tests, limits and hash conflicts.
@@ -157,7 +179,8 @@ Generic RFC, pointer, stable-array and policy unit tests live in `phore/json-pat
 including its upstream conformance corpus and additional edge-case regressions.
 Harness tests retain schema failures, nested hydration, constructor failures,
 provider parsing and a single HTTP request through the real client with a local
-fixture response.
+fixture response. `AiContextTest` additionally covers a clarification callback
+before a typed patch and verifies that the original object stays unchanged.
 
 Live tests require a configured API key. The manual eval makes 27 paid requests
 across small/medium/large documents, field/list/no-op tasks and replacement/pointer/
@@ -165,5 +188,6 @@ stable modes. It reports exact state equality, application/schema success,
 unexpected paths, actual usage tokens, request count, latency and errors as JSONL.
 Invalid-input/conflict cases are deterministic unit tests, not model-quality runs.
 No live quality or latency claim is made without recorded measurements. Automatic
-mode selection, repair, agent tools and the other patch families remain deferred
-as specified in § 11 step 5; pointer mode remains the explicit helper default.
+mode selection, patch repair, object-mutating agent tools and other struct-patch
+families remain deferred as specified in § 11 step 5; shared clarification
+callbacks are supported, and pointer mode remains the helper default.

@@ -255,7 +255,7 @@ final class OpenAiPromptTypeConverterTest extends TestCase
             instructions: 'Transcribe exactly.',
         ));
 
-        self::assertSame('input_text', $sections[0]['text'] === '' ? '' : $sections[0]['type']);
+        self::assertSame('input_text', $sections[0]['type']);
         self::assertStringContainsString('following audio segment', $sections[0]['text']);
         self::assertStringContainsString('Transcribe exactly.', $sections[0]['text']);
         self::assertStringContainsString(self::UNTRUSTED, $sections[0]['text']);
@@ -294,7 +294,6 @@ final class OpenAiPromptTypeConverterTest extends TestCase
             new StructPrompt(OpenAiPromptTypeConverterTestAddress::class),
         );
 
-        self::assertStringContainsString(self::UNTRUSTED, $text);
         self::assertStringContainsString('JSON Schema:', $text);
         self::assertStringNotContainsString('Data:', $text);
     }

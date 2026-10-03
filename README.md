@@ -1,5 +1,136 @@
-# phore-project-template
-Template Repository for phore library projects
+# phore-ai-harness
+
+PHP helpers for the OpenAI Responses API, typed results, shared conversation
+contexts and targeted text/file editing. Prefer the global `phore_ai_*`
+functions for normal use; their existing signatures remain supported.
+
+## Quick start: functions first, contexts when needed
+
+Examples require `vendor/autoload.php` and configured credentials. Each direct
+`AiContext` call below is an alternative to the corresponding global call.
+
+```php
+$text = phore_ai_text('Write a short introduction.');
+$edited = phore_ai_text('Correct spelling only.', [
+    'input' => 'Welcome to our practce.',
+]);
+
+// Direct alternative with the new signature: prompts, input, options.
+$context = new \Phore\AiHarness\AiContext();
+$text = $context->text('Write a short introduction.');
+$edited = $context->text('Correct spelling only.', input: 'Welcome to our practce.');
+```
+
+`text()` generates when input is `null` and edits when it is a string, including
+an empty string. Editing returns the complete text assembled locally from the
+model's replacements, not a separately generated copy of the whole result.
+
+| Preferred helper | Direct `AiContext` equivalent |
+| --- | --- |
+| `phore_ai_text($prompts, $options)` | `$context->text($prompts, $input, $options)` |
+| `phore_ai_edit_file($prompts, $paths, $class, $options)` | `$context->file($prompts, $paths, ['output_class' => $class] + $options)` |
+| `phore_ai_struct($prompts, Dto::class, $options)` | `$context->struct($prompts, Dto::class, $options)` |
+| `phore_ai_edit_struct($prompts, $object, $options)` | `$context->struct($prompts, $object, $options)` |
+| `phore_ai_struct_array($prompts, Dto::class, $options)` | `$context->structArray($prompts, Dto::class, $options)` |
+| `phore_ai_image($prompts, $options)` | `$context->image($prompts, $options)` |
+
+The helpers' argument names and return types are preserved. Their bodies only
+resolve a context and delegate to the operation traits. The context has no
+redundant `editText()`, `editFile()` or `editStruct()` methods.
+
+## Reuse a context, ask questions, branch and roll back
+
+All helpers accept `options['ai_context']`: a non-empty registry ID, an
+`AiContext` instance, or `null`. Without it, each call remains isolated.
+A named context is created on first use and reused within the PHP runtime.
+
+```php
+phore_ai_text('Project briefing: a practice website relaunch. Acknowledge.', [
+    'ai_context' => 'website',
+]);
+$title = phore_ai_text('Suggest a title based on the briefing.', [
+    'ai_context' => 'website',
+]);
+
+// Direct alternative; both methods continue this explicit object.
+$context = new \Phore\AiHarness\AiContext();
+$context->text('Project briefing: a practice website relaunch. Acknowledge.');
+$title = $context->text('Suggest a title based on the briefing.');
+```
+
+Register shared `CallbackTool` instances with
+`new AiContext(callbacks: [$askUser])` or `$context->addCallback($askUser)`.
+For example, an `ask_user_question` callback can request clarification from
+an application UI or CLI and return the answer. It is available in text,
+file, structured and image operations, including when the context is passed
+through a helper's `ai_context` option. The application implements the actual
+interaction; the model decides when to call the supplied tool. Duplicate
+names are rejected rather than silently overriding another callback.
+
+```php
+$context->setCheckpoint('briefing');
+$variantA = phore_ai_text('Write a factual version.', ['ai_context' => $context]);
+$context->rollback('briefing');
+$variantB = $context->text('Write a more personal version.');
+
+$context->setCheckpoint(); // Anonymous marker.
+$trial = $context->text('Try another structure.');
+$context->rollback();      // Restore the most recently set marker.
+
+$branch = clone $context;  // Independent conversation cursor and markers.
+$branch->text('Explore a separate alternative.');
+```
+
+Checkpoint names are optional. Reusing a name replaces that marker and makes
+it the newest. Rollback does not consume markers. **It only restores the
+conversation cursor, not written files, callback side effects or incurred
+usage/costs.** Clones still share external client/callback dependencies.
+
+The registry is process-local, not persistent or shared between workers. Use
+separate IDs per job/user and `AiContextRegistry::forget($id)` or `clear()` at
+appropriate lifecycle boundaries. A context cannot run concurrently or
+reentrantly. Per-call model overrides are supported where the provider permits
+continuation; response chaining does not guarantee a cache hit, particularly
+across models. Cache warming is intentionally not implemented.
+
+See the [complete context guide](docs/ai-context.md) for paired examples of
+every operation, shared callbacks, registry lifecycle, checkpoint semantics,
+options and error handling. [examples/ai-context.php](examples/ai-context.php)
+is a runnable CLI example; it makes real, billable model calls when executed.
+
+## Targeted text and multi-file edits
+
+```php
+$summary = phore_ai_edit_file(
+    'Correct spelling in both files.',
+    ['intro.md', 'contact.md'],
+    options: ['ai_context' => 'website'],
+);
+
+// Direct alternative. Input is the required target path or list of paths.
+$summary = (new \Phore\AiHarness\AiContext())->file(
+    'Correct spelling in both files.',
+    ['intro.md', 'contact.md'],
+);
+```
+
+Text and file edits share exact `search`/`replacement` operations. Multiple
+non-overlapping replacements are matched against the same original snapshot.
+A `null` search means a full rewrite and must be the only operation for that
+target. There is no automatic full-rewrite fallback for an ambiguous search.
+
+One `write_files` callback can contain multiple files. A failed edit leaves
+its entire file untouched while other valid files are kept; corrections only
+need to resend failed files. Unresolved results are exposed through
+`FileEditException::$files`. Five callback rounds, including questions and
+corrections, are the total limit per invocation, with or without logging.
+
+Only explicitly supplied UTF-8 text targets may be edited. Missing files can
+be created in existing directories; unreadable files fail instead of being
+mistaken for empty files. Candidates are fully prepared before replacing a
+file, and source changes are checked. This is not a cross-file transaction or
+a substitute for application-level synchronization with external writers.
+Domain validation and linting remain separate application steps.
 
 ## Git Submodules
 
@@ -26,6 +157,11 @@ use Phore\AiHarness\PromptType\PromptFile;
 $result = phore_ai_text(
     new PromptFile(__DIR__ . '/prompts/review.prompt.md')
 );
+
+// Direct alternative:
+$result = (new \Phore\AiHarness\AiContext())->text(
+    new PromptFile(__DIR__ . '/prompts/review.prompt.md')
+);
 ```
 
 `PromptFile` means that the file defines the prompt itself. `FilePrompt` means that the file is attached to an existing prompt as source material. The distinction is semantic; YAML frontmatter is the current `PromptFile` storage format, not the concept represented by the class name.
@@ -44,6 +180,12 @@ $result = phore_ai_text('Explain the status.', [
     'reasoning' => ['effort' => 'medium'],
 ]);
 
+// Direct context alternative:
+$result = (new \Phore\AiHarness\AiContext())->text('Explain the status.', options: [
+    'reasoning' => ['effort' => 'medium'],
+]);
+
+// The existing lower-level facade is also retained.
 $ai = (new \Phore\AiHarness\PhoreAi())
     ->withReasoning(['effort' => 'high']);
 ```
@@ -60,13 +202,19 @@ values depend on the selected model. See the
 ```php
 $result = phore_ai_text('Explain the status.', ['debug_log' => true]);
 
+// Direct context alternative:
+$result = (new \Phore\AiHarness\AiContext())->text('Explain the status.', options: [
+    'debug_log' => true,
+]);
+
 $ai = (new \Phore\AiHarness\PhoreAi())
     ->withLogger(new \Phore\AiHarness\Logging\ConsoleLogger())
     ->withModel('gpt-5-mini');
 ```
 
 `debug_log` is supported by `phore_ai_text`, `phore_ai_struct`,
-`phore_ai_struct_array`, `phore_ai_image`, and `phore_ai_edit_file`. It accepts
+`phore_ai_struct_array`, `phore_ai_edit_struct`, `phore_ai_image`,
+`phore_ai_edit_file`, and their `AiContext` methods. It accepts
 `false` (the default), `true` (console output on STDERR), or a
 `Phore\AiHarness\Logging\LoggerInterface` implementation. Invalid values,
 including `null`, throw `InvalidArgumentException` before a request is sent.
@@ -91,7 +239,8 @@ calls after that limit throw. All other exceptions, including argument decoding/
 `TaskErrorException`, transport/authentication failures, internal PHP errors and
 result-serialization failures, propagate unchanged without retries. Each failed callback counts as one error; one follow-up request
 counts as one retry even if multiple calls failed in that round. With logging
-disabled, the previous non-streaming and immediate-error behavior is preserved.
+disabled, requests remain non-streaming; recoverability, the round cap and
+follow-up instruction/schema retention are identical.
 
 Tool arguments are redacted recursively; invalid argument JSON is omitted.
 Results are logged by byte count, and raw exception messages, request headers
@@ -101,6 +250,12 @@ errors, retries, available token totals and monotonic total/API/tool durations
 in seconds, including failed runs and structured-output hydration. Missing
 usage is `null` (`n/a` in console output); when only some responses report usage,
 totals sum those available values.
+
+The final statistics also include `tokens_cached`, summed from
+`usage.input_tokens_details.cached_tokens`. A reported zero remains `0`;
+missing data remains `null`/`n/a`. Cached tokens are a subset of `tokens_in`,
+not additional tokens. Custom loggers access the same field through
+`$event->statistics?->tokens_cached`.
 
 ## Global usage and estimated cost
 
@@ -119,6 +274,7 @@ printf(
     $stats['inputTokens'], $stats['outputTokens'], $stats['totalTokens'],
     $stats['totalCostUsd'] === null ? 'unknown (partial usage/prices)' : number_format($stats['totalCostUsd'], 6),
 );
+printf("Cached input tokens: %d\n", $stats['cachedInputTokens']);
 print_r($stats['models']); // Same counters and cost fields, keyed by response model.
 ```
 
