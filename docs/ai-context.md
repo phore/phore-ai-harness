@@ -739,3 +739,44 @@ interne Modell-Callback `write_files` verwendet jetzt das strukturierte
 Anwendungen, die interne Tool-Payloads in eigenen Mocks fest verdrahten,
 müssen diese Mocks entsprechend aktualisieren. Unlesbare Dateien werden aus
 Sicherheitsgründen nicht mehr wie neue, leere Dateien behandelt.
+
+
+## Context direkt an Domain-Objekte binden
+
+`AiContextTrait` bindet genau einen `AiContext` an ein beliebiges
+Domain-Objekt. Dadurch stehen dieselben High-Level-Operationen mit dem Prefix
+`ai_` direkt am Objekt zur Verfügung:
+
+```php
+final readonly class Mail
+{
+    use AiContextTrait;
+
+    public function __construct(AiContext $context)
+    {
+        $this->ai_set_context($context);
+    }
+}
+
+$answer = $mail->ai_text('Was ist die aktuelle offene Frage?');
+$ready = $mail->ai_yes_no('Kann diese Mail sicher beantwortet werden?');
+$action = $mail->ai_choice('Welche Aktion passt?', ['reply', 'forward']);
+```
+
+Der Context wird genau einmal gebunden. Das verhindert, dass ein Domain-Objekt
+nach ersten AI-Aufrufen unbemerkt auf einen anderen Conversation-Cursor
+wechselt. Ohne explizite Bindung erstellt der erste `ai_*`-Aufruf lazy einen
+leeren `AiContext`. Alternativ initialisiert `ai_prepare()` einen Context mit
+Prepared Prompts, Tools und Defaults.
+
+Das Trait delegiert `do`, `text`, `file`, `struct`, `structArray`,
+`image`, `choice`, `choices`, `yesNo`, `rank` und `score`.
+Zusätzlich stehen `ai_set_checkpoint()`, `ai_rollback()`,
+`ai_export_state()`, `ai_import_state()` und
+`ai_get_response_id()` zur Verfügung. Der eigentliche Context ist über
+`ai_get_context()` erreichbar.
+
+Das Trait speichert nur die Referenz auf den Context. Daher kann es auch in
+readonly Domain-Objekten verwendet werden: Die Property-Referenz bleibt
+readonly, während der gebundene `AiContext` seinen internen Conversation-State
+weiterentwickelt.

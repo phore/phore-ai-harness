@@ -348,3 +348,15 @@ These are rough token-cost estimates, not invoices: hosted tool fees, separate
 image/audio generation charges, storage, taxes, service tiers and long-context
 surcharges beyond the conservative rates above are excluded. No network pricing lookup or automatic console output
 takes place. Only counters are retained, not prompts or response history.
+
+
+## Bind a context to a domain object
+
+`AiContextTrait` exposes the high-level `AiContext` operations with an
+`ai_` prefix directly on a domain object. Bind a prepared context once with
+`ai_set_context()`, prepare one through `ai_prepare()`, or let the first
+operation lazily create an empty context.
+
+See `examples/09-context-trait.php` for a complete example. The trait also
+forwards checkpoints, state export/import and the provider response ID, so all
+operations on the object keep one shared conversation cursor.
