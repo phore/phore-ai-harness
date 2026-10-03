@@ -58,7 +58,7 @@ final class FunctionsTest extends TestCase
         require dirname(__DIR__) . '/src/functions.php';
 
         foreach ([
-            'phore_ai_text', 'phore_ai_image', 'phore_ai_struct',
+            'phore_ai_text', 'phore_ai_do', 'phore_ai_image', 'phore_ai_struct',
             'phore_ai_struct_array', 'phore_ai_edit_struct', 'phore_ai_edit_file',
             'get_last_ai_request', 'get_last_ai_response',
         ] as $function) {

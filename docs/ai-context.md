@@ -9,7 +9,9 @@ Beide Wege verwenden dieselben Traits und dieselbe Ausführungslogik.
 Die Beispiele setzen `vendor/autoload.php` und konfigurierte Zugangsdaten
 voraus. Die jeweils zweite Variante ist eine Alternative, kein zusätzlicher
 notwendiger Aufruf. Das ausführbare CLI-Beispiel liegt unter
-[`examples/ai-context.php`](../examples/ai-context.php).
+[`examples/ai-context.php`](../examples/ai-context.php). Das fokussierte
+`do()`-Beispiel mit Callback, Checkpoint und anschließendem Datei-Editing steht
+unter [`examples/do.php`](../examples/do.php).
 
 ## Arbeitsschritte ohne Textausgabe
 
@@ -32,11 +34,16 @@ $context->do('Prüfe die gefundenen Fakten auf Widersprüche.');
 $result = $context->text('Fasse die geprüften Fakten kurz zusammen.');
 ```
 
+Die globale Kurzform ist `phore_ai_do($prompts, $throw = false, $options = [])`;
+mit `options['ai_context']` teilt sie denselben Conversation-Cursor wie die
+anderen Helper.
+
 Standardmäßig liefert `do()` `true` bei fachlichem Erfolg und `false` bei
 einem fachlichen Misserfolg. Technische Fehler, ungültige Task-Contracts und
 Callback-Exceptions bleiben normale Exceptions. Mit `throw: true` wird ein
 fachlicher Misserfolg als `DoException` ausgegeben; alternativ kann eine
-Unterklasse angegeben werden, die den Constructor unverändert erbt:
+Unterklasse angegeben werden. `DoException` besitzt dafür einen finalen
+Constructor, sodass jede Unterklasse automatisch denselben Datenvertrag erbt:
 
 ```php
 use Phore\AiHarness\DoException;
@@ -312,8 +319,8 @@ $context = new AiContext(prompts: [
 $text = $context->text('Kläre fehlende Angaben bei Bedarf und schreibe den Text.');
 ```
 
-Context-Tools stehen bei `text()`, `file()`, `struct()`, `structArray()` und
-`image()` zur Verfügung. Bei Objekt-Patches bleiben nur Tools gesperrt, die
+Context-Tools stehen bei `do()`, `text()`, `file()`, `struct()`, `structArray()`
+und `image()` zur Verfügung. Bei Objekt-Patches bleiben nur Tools gesperrt, die
 zusätzlich ausschließlich an diesen einzelnen `struct()`-Aufruf übergeben
 werden. Gleichnamige unterschiedliche `CallbackTool`-Instanzen werden
 abgelehnt. `write_text` und `write_files` sind als Context-Tool-Namen

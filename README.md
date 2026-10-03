@@ -31,6 +31,7 @@ model's replacements, not a separately generated copy of the whole result.
 
 | Preferred helper | Direct `AiContext` equivalent |
 | --- | --- |
+| `phore_ai_do($prompts, $throw, $options)` | `$context->do($prompts, $throw, $options)` |
 | `phore_ai_text($prompts, $options)` | `$context->text($prompts, $input, $options)` |
 | `phore_ai_edit_file($prompts, $paths, $class, $options)` | `$context->file($prompts, $paths, ['output_class' => $class] + $options)` |
 | `phore_ai_struct($prompts, Dto::class, $options)` | `$context->struct($prompts, Dto::class, $options)` |
@@ -41,6 +42,12 @@ model's replacements, not a separately generated copy of the whole result.
 The helpers' argument names and return types are preserved. Their bodies only
 resolve a context and delegate to the operation traits. The context has no
 redundant `editText()`, `editFile()` or `editStruct()` methods.
+
+Use `do()` when only the prepared conversation state or tool side effect is
+needed. It returns `true`/`false`; `throw: true` raises `DoException`, or
+a `DoException` subclass can be supplied for a domain-specific failure type.
+See [`examples/do.php`](examples/do.php) for a callback, checkpoint and
+following file edit.
 
 ## Reuse a context, ask questions, branch and roll back
 
@@ -230,7 +237,7 @@ $ai = (new \Phore\AiHarness\PhoreAi())
     ->withModel('gpt-5-mini');
 ```
 
-`debug_log` is supported by `phore_ai_text`, `phore_ai_struct`,
+`debug_log` is supported by `phore_ai_do`, `phore_ai_text`, `phore_ai_struct`,
 `phore_ai_struct_array`, `phore_ai_edit_struct`, `phore_ai_image`,
 `phore_ai_edit_file`, and their `AiContext` methods. It accepts
 `false` (the default), `true` (console output on STDERR), or a

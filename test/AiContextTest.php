@@ -215,6 +215,32 @@ final class AiContextTest extends TestCase
             ->do(throw: \RuntimeException::class);
     }
 
+    public function testDoCanRunPreparedCallbackAndGlobalHelperKeepsTheCursor(): void
+    {
+        $questions = [];
+        $context = $this->context('ask', [new CallbackTool(
+            static function (string $question) use (&$questions): string {
+                $questions[] = $question;
+                return 'Use the prepared variant.';
+            },
+            'ask_user_question',
+        )]);
+
+        self::assertTrue(phore_ai_do(
+            'Ask once if needed and prepare the verified facts for the next step.',
+            options: ['ai_context' => $context],
+        ));
+        self::assertCount(1, $questions);
+        $prepared = $context->getResponseId();
+        self::assertNotNull($prepared);
+
+        $context->setCheckpoint('prepared');
+        self::assertSame('ready', $context->text('Continue with the prepared facts.'));
+        self::assertSame($prepared, $this->lastRequest()['previous_response_id']);
+        $context->rollback('prepared');
+        self::assertSame($prepared, $context->getResponseId());
+    }
+
     public function testEveryOperationAdvancesOneSharedConversationWithoutLeakingToolsOrSchema(): void
     {
         $context = $this->context();
@@ -520,6 +546,7 @@ final class AiContextTest extends TestCase
     {
         $signatures = [
             'phore_ai_text' => ['prompts', 'options'],
+            'phore_ai_do' => ['prompts', 'throw', 'options'],
             'phore_ai_image' => ['prompts', 'options'],
             'phore_ai_struct' => ['prompts', 'className', 'options'],
             'phore_ai_struct_array' => ['prompts', 'className', 'options'],
@@ -533,5 +560,6 @@ final class AiContextTest extends TestCase
         self::assertFalse(method_exists(AiContext::class, 'editFile'));
         self::assertFalse(method_exists(AiContext::class, 'editStruct'));
         self::assertSame(['prompts', 'input', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'text'))->getParameters()));
+        self::assertSame(['prompts', 'throw', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'do'))->getParameters()));
     }
 }

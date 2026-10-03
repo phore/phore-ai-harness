@@ -230,7 +230,11 @@ final class PhoreAi
             return false;
         }
 
-        throw new $exceptionClass($result->message, $result->details, $result->data);
+        throw new $exceptionClass(
+            $result->message,
+            $result->details === '' ? null : $result->details,
+            $result->data,
+        );
     }
 
     private function runInternal(?RunContext $context = null): string
@@ -623,15 +627,8 @@ final class PhoreAi
         if ($throw === true) {
             return DoException::class;
         }
-        if (!class_exists($throw) || !is_a($throw, DoException::class, true)) {
+        if (!is_a($throw, DoException::class, true)) {
             throw new InvalidArgumentException('Custom do exception must extend ' . DoException::class . '.');
-        }
-
-        $constructor = (new \ReflectionClass($throw))->getConstructor();
-        if ($constructor !== null && $constructor->getDeclaringClass()->getName() !== DoException::class) {
-            throw new InvalidArgumentException(
-                'Custom do exception must inherit the DoException constructor unchanged.'
-            );
         }
 
         return $throw;
