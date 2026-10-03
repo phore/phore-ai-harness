@@ -23,7 +23,7 @@ $tag = $context->choice(
         'guide' => 'Konkrete Anleitung oder Vorgehensweise.',
         'review' => 'Bewertung oder Vergleich.',
     ],
-    options: 'gpt-5-mini',
+    options: ['model' => 'gpt-5-mini'],
 );
 // returns: 'guide'
 

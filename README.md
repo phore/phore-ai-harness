@@ -9,9 +9,10 @@ functions for normal use; their existing signatures remain supported.
 Examples require `vendor/autoload.php` and configured credentials. Each direct
 `AiContext` call below is an alternative to the corresponding global call.
 
-For the shortest stateful example, see [`examples/01-basic.php`](examples/01-basic.php):
-it configures `AiContext` with an inline options array and then runs several
-prompts in sequence on the same conversation.
+Start with [`examples/01-basic-functions.php`](examples/01-basic-functions.php):
+it shows the global helpers first, without a prepared `AiContext` or shared
+options variable. [`examples/02-context.php`](examples/02-context.php) then
+adds prepared prompts/tools, checkpoints and resumable state.
 
 ```php
 $text = phore_ai_text('Write a short introduction.');
@@ -51,8 +52,10 @@ redundant `editText()`, `editFile()` or `editStruct()` methods.
 Use `do()` when only the prepared conversation state or tool side effect is
 needed. It returns `true`/`false`; `throw: true` raises `DoException`, or
 a `DoException` subclass can be supplied for a domain-specific failure type.
-See [`examples/04-do.php`](examples/04-do.php) for an autonomous callback/tool
-loop. Checkpoints and state export are shown in [`examples/01-basic.php`](examples/01-basic.php).
+See [`examples/04-do.php`](examples/04-do.php) for one preparatory callback
+inside `do()`, followed by questions against the prepared conversation state.
+Checkpoints and state export are shown in
+[`examples/02-context.php`](examples/02-context.php).
 
 ## Simple typed decisions
 
@@ -164,10 +167,12 @@ chaining does not guarantee a cache hit. Cache warming is intentionally not
 implemented.
 
 See the [complete context guide](docs/ai-context.md) for the full contracts.
-The numbered example series starts with [`examples/01-basic.php`](examples/01-basic.php)
-for the object API and [`examples/02-basic-functions.php`](examples/02-basic-functions.php)
-for the helper API. Use the object API when checkpoints, rollback,
-`exportState()`/`importState()` or resume across requests are required.
+The numbered series starts with
+[`examples/01-basic-functions.php`](examples/01-basic-functions.php) for the
+helper API and continues with
+[`examples/02-context.php`](examples/02-context.php) for the object API.
+Use the object API when checkpoints, rollback, `exportState()`/`importState()`
+or resume across requests are required.
 
 ## Targeted text and multi-file edits
 

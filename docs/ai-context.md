@@ -7,12 +7,12 @@ Arbeitsschritte erhalten sie `options['ai_context']`. Alternativ kannst du
 Beide Wege verwenden dieselben Traits und dieselbe Ausführungslogik.
 
 Die Beispiele setzen `vendor/autoload.php` und konfigurierte Zugangsdaten
-voraus. Die jeweils zweite Variante ist eine Alternative, kein zusätzlicher
-notwendiger Aufruf. Das ausführbare CLI-Beispiel liegt unter
-[`examples/01-basic.php`](../examples/01-basic.php). Das fokussierte
-`do()`-Beispiel mit autonomem Callback-Loop steht unter
-[`examples/04-do.php`](../examples/04-do.php). Checkpoint, Rollback und
-State-Export/Import sind bereits im Grundbeispiel enthalten.
+voraus. Der Einstieg beginnt bewusst mit den globalen Helpern unter
+[`examples/01-basic-functions.php`](../examples/01-basic-functions.php).
+[`examples/02-context.php`](../examples/02-context.php) führt danach den
+expliziten `AiContext` mit Checkpoint, Rollback und State-Export/Import ein.
+Das fokussierte `do()`-Beispiel steht unter
+[`examples/04-do.php`](../examples/04-do.php).
 
 ## Arbeitsschritte ohne Textausgabe
 
@@ -175,7 +175,7 @@ Die gleichen Operationen gibt es als `phore_ai_choice()`,
 Helper innerhalb des PHP-Prozesses denselben Conversation-Cursor fort. Für
 Checkpoint/Rollback sowie `exportState()`/`importState()` wird die
 Objekt-API verwendet; siehe
-[`examples/02-basic-functions.php`](../examples/02-basic-functions.php).
+[`examples/01-basic-functions.php`](../examples/01-basic-functions.php).
 
 ## Text erzeugen und vorhandenen Text bearbeiten
 
@@ -378,7 +378,7 @@ und wird nicht automatisch zwischen Worker-Prozessen geteilt. Für Session- oder
 Request-Grenzen kann ein Context seinen fortsetzbaren Cursor explizit als JSON
 exportieren und später in einen neu mit demselben Prompt-/Tool-Setup aufgebauten
 Context importieren. Der vollständige Ablauf einschließlich Checkpoint und
-State-Export steht in [`examples/01-basic.php`](../examples/01-basic.php).
+State-Export steht in [`examples/02-context.php`](../examples/02-context.php).
 
 In langlebigen Workern müssen Registry-IDs pro Auftrag oder Benutzer getrennt
 und nach Abschluss entfernt werden:

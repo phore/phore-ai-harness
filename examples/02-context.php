@@ -8,6 +8,8 @@ use Phore\AiHarness\ToolType\WebAccessTool;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
 
+// For the smallest helper-first introduction, see 01-basic-functions.php.
+
 $prompts = [
     new PromptFile(__DIR__ . '/prompts/research.prompt.md'),
     new WebAccessTool(),

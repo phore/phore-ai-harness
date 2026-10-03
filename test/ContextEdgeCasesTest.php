@@ -77,7 +77,7 @@ final class ContextEdgeCasesTest extends TestCase
             self::markTestSkipped('proc_open is required for PHP syntax checking.');
         }
         $process = proc_open(
-            [PHP_BINARY, '-l', dirname(__DIR__) . '/examples/01-basic.php'],
+            [PHP_BINARY, '-l', dirname(__DIR__) . '/examples/01-basic-functions.php'],
             [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
             $pipes,
         );
