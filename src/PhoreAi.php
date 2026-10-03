@@ -112,6 +112,18 @@ final class PhoreAi
     private array $tools = [];
 
     private ?OutputFormat $outputFormat = null;
+    private ?string $previousResponseId = null;
+    private ?string $lastResponseId = null;
+
+    public function withPreviousResponseId(?string $responseId): self
+    {
+        return clone($this, ['previousResponseId' => $responseId, 'lastResponseId' => null]);
+    }
+
+    public function getLastResponseId(): ?string
+    {
+        return $this->lastResponseId;
+    }
 
     public function with(PromptType|ToolType ...$items): self
     {
@@ -153,6 +165,9 @@ final class PhoreAi
     private function runInternal(?RunContext $context = null): string
     {
         $request = (new OpenAiPromptTypeConverter())->toAiRequest($this->model, $this->prompts);
+        if ($this->previousResponseId !== null) {
+            $request = clone($request, ['previousResponseId' => $this->previousResponseId]);
+        }
         if ($this->tools !== []) {
             $request = $request->withTools(...$this->tools);
         }
@@ -160,6 +175,7 @@ final class PhoreAi
 
         $response = $this->sendRequest($request, $context);
         $response = $this->resolveCallbackToolCalls($request, $response, $context);
+        $this->lastResponseId = $response->getId();
 
         return $response->getOutputText();
     }
