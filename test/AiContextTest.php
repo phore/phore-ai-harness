@@ -9,6 +9,7 @@ use Phore\AiHarness\AiOptions;
 use Phore\AiHarness\Client\AiRequestException;
 use Phore\AiHarness\Client\OpenAiClient;
 use Phore\AiHarness\Context\AiContextRegistry;
+use Phore\AiHarness\DoException;
 use Phore\AiHarness\Edit\FileEditException;
 use Phore\AiHarness\Logging\ConsoleLogger;
 use Phore\AiHarness\Logging\LogEvent;
@@ -26,6 +27,10 @@ final readonly class ContextValue
     public function __construct(public string $value)
     {
     }
+}
+
+final class ContextDoException extends DoException
+{
 }
 
 final class ContextRecordingLogger implements LoggerInterface
@@ -156,6 +161,58 @@ final class AiContextTest extends TestCase
         self::assertSame($second, $this->lastRequest()['previous_response_id']);
         phore_ai_text('Isolated', ['client' => $this->client()]);
         self::assertArrayNotHasKey('previous_response_id', $this->lastRequest());
+    }
+
+    public function testDoAdvancesTheSharedConversationAndReturnsBoolean(): void
+    {
+        $context = $this->context();
+
+        self::assertTrue($context->do('Prepare the source.'));
+        $first = $context->getResponseId();
+
+        self::assertTrue($context->do('Verify the source.'));
+        self::assertSame($first, $this->lastRequest()['previous_response_id']);
+        $second = $context->getResponseId();
+
+        self::assertSame('ready', $context->text('Summarize the verified source.'));
+        self::assertSame($second, $this->lastRequest()['previous_response_id']);
+    }
+
+    public function testCoreDoCanReturnFalseOrThrowTypedFailure(): void
+    {
+        $success = (new PhoreAi($this->client()))
+            ->with(new TextPrompt('Verify source.', allowInstructions: true))
+            ->do();
+        self::assertTrue($success);
+
+        $failure = (new PhoreAi($this->client('do-failure')))
+            ->with(new TextPrompt('Verify source.', allowInstructions: true));
+        self::assertFalse($failure->do());
+
+        try {
+            $failure->do(throw: true);
+            self::fail('Expected DoException was not thrown.');
+        } catch (DoException $error) {
+            self::assertSame('Source verification failed.', $error->getMessage());
+            self::assertSame('The fixture did not find the required evidence.', $error->details);
+            self::assertSame(['source=fixture', 'reason=missing-evidence'], $error->data);
+        }
+
+        $custom = (new PhoreAi($this->client('do-failure')))
+            ->with(new TextPrompt('Verify source.', allowInstructions: true));
+
+        $this->expectException(ContextDoException::class);
+        $custom->do(throw: ContextDoException::class);
+    }
+
+    public function testCoreDoRejectsUnrelatedExceptionClassBeforeProviderCall(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Custom do exception must extend');
+
+        (new PhoreAi($this->client()))
+            ->with(new TextPrompt('Verify source.', allowInstructions: true))
+            ->do(throw: \RuntimeException::class);
     }
 
     public function testEveryOperationAdvancesOneSharedConversationWithoutLeakingToolsOrSchema(): void

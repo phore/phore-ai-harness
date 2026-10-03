@@ -11,6 +11,59 @@ voraus. Die jeweils zweite Variante ist eine Alternative, kein zusätzlicher
 notwendiger Aufruf. Das ausführbare CLI-Beispiel liegt unter
 [`examples/ai-context.php`](../examples/ai-context.php).
 
+## Arbeitsschritte ohne Textausgabe
+
+`do()` führt einen Arbeitsschritt im selben Conversation-Kontext aus, behält
+Tools, Reasoning, Logging und den neuen Response-Cursor, verwirft aber die
+eigentliche Textantwort. Dadurch können mehrere Vorarbeiten direkt vor einer
+späteren Ausgabe stehen:
+
+```php
+use Phore\AiHarness\AiContext;
+use Phore\AiHarness\ToolType\WebAccessTool;
+
+$context = new AiContext(
+    prompts: [new WebAccessTool()],
+    options: ['model' => 'gpt-5-mini'],
+);
+
+$context->do('Recherchiere die aktuellen Fakten zu Thema X.');
+$context->do('Prüfe die gefundenen Fakten auf Widersprüche.');
+$result = $context->text('Fasse die geprüften Fakten kurz zusammen.');
+```
+
+Standardmäßig liefert `do()` `true` bei fachlichem Erfolg und `false` bei
+einem fachlichen Misserfolg. Technische Fehler, ungültige Task-Contracts und
+Callback-Exceptions bleiben normale Exceptions. Mit `throw: true` wird ein
+fachlicher Misserfolg als `DoException` ausgegeben; alternativ kann eine
+Unterklasse angegeben werden, die den Constructor unverändert erbt:
+
+```php
+use Phore\AiHarness\DoException;
+
+final class VerificationFailed extends DoException
+{
+}
+
+$context->do('Verifiziere die Quelle.', throw: true);
+$context->do('Verifiziere die Quelle.', throw: VerificationFailed::class);
+```
+
+Die Exception enthält die vom Modell strukturiert gelieferten Felder
+`message`, `details` und `data`. Größere Begründungen oder relevante
+Textausschnitte gehören in `details`; `data` enthält kurze diagnostische
+Strings. Auf der niedrigeren `PhoreAi`-Fassade wird der Prompt wie gewohnt
+vorher mit `with()` gesetzt:
+
+```php
+$ok = (new \Phore\AiHarness\PhoreAi())
+    ->with(new \Phore\AiHarness\PromptType\TextPrompt(
+        'Prüfe die Quelle.',
+        allowInstructions: true,
+    ))
+    ->do();
+```
+
 ## Text erzeugen und vorhandenen Text bearbeiten
 
 Die globale Funktion behält `($prompts, $options)`. Bestehender Text wird über

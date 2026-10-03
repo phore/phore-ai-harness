@@ -7,6 +7,7 @@ namespace Phore\AiHarness;
 use InvalidArgumentException;
 use LogicException;
 use Phore\AiHarness\Client\OpenAiClient;
+use Phore\AiHarness\Context\Traits\DoTrait;
 use Phore\AiHarness\Context\Traits\FileTrait;
 use Phore\AiHarness\Context\Traits\ImageTrait;
 use Phore\AiHarness\Context\Traits\StructArrayTrait;
@@ -36,6 +37,7 @@ use Phore\AiHarness\ToolType\ToolType;
  */
 final class AiContext
 {
+    use DoTrait;
     use TextTrait;
     use FileTrait;
     use StructTrait;

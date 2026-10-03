@@ -23,6 +23,8 @@ use Phore\AiHarness\OutputFormat\StructOutput;
 use Phore\AiHarness\OutputFormat\StructPatchOutput;
 use Phore\AiHarness\OutputFormat\TextOutput;
 use Phore\AiHarness\PromptType\PromptType;
+use Phore\AiHarness\PromptType\SystemPrompt;
+use Phore\AiHarness\Result\DoResultType;
 use Phore\AiHarness\Result\ImageResultType;
 use Phore\AiHarness\ToolType\CallbackRoundLimitException;
 use Phore\AiHarness\ToolType\CallbackTool;
@@ -176,6 +178,59 @@ final class PhoreAi
     public function run(): string
     {
         return $this->executeRun(fn (?RunContext $context) => $this->runInternal($context));
+    }
+
+    /**
+     * Execute the configured task for its side effects and conversation state.
+     *
+     * The final model response is a structured success/failure report instead of
+     * user-facing text. Tools and callback rounds behave exactly like run(). A
+     * false result is a fachlicher Misserfolg of an otherwise valid task;
+     * transport errors, task-contract errors and callback exceptions still
+     * propagate unchanged.
+     *
+     * When $throw is true, failures raise DoException. A custom class must extend
+     * DoException and inherit its constructor unchanged so message, details and
+     * diagnostic data can be populated predictably.
+     *
+     * @param bool|class-string<DoException> $throw Return false on task failure,
+     *     throw DoException when true, or throw the supplied subclass.
+     * @return bool True only when the model reports the requested task completed.
+     * @throws DoException For a reported task failure when throwing is enabled.
+     * @throws InvalidArgumentException For an invalid custom exception class.
+     * @example $ok = $ai->with(new TextPrompt('Verify the source.', allowInstructions: true))->do();
+     * @example $ai->with(new TextPrompt('Verify the source.', allowInstructions: true))->do(throw: true);
+     * @see run()
+     * @see DoResultType
+     */
+    public function do(bool|string $throw = false): bool
+    {
+        $exceptionClass = $this->resolveDoExceptionClass($throw);
+        $instance = clone($this, [
+            'prompts' => [
+                ...$this->prompts,
+                new SystemPrompt(
+                    'Execute the requested task completely. The final structured result reports whether the task itself succeeded. '
+                    . 'Set success=true only when the requested work was completed. Set success=false for an ordinary fachlicher '
+                    . 'Misserfolg after a valid attempt. Put a concise summary in message, substantial diagnostics or relevant text '
+                    . 'excerpts in details, and optional short machine-readable diagnostic strings in data. Technical failures and '
+                    . 'invalid or incomplete task contracts must still use the existing error mechanisms instead of being hidden as false.'
+                ),
+            ],
+        ]);
+
+        /** @var DoResultType $result */
+        $result = $instance->runCasted(DoResultType::class);
+        $this->lastResponseId = $instance->lastResponseId;
+
+        if ($result->success) {
+            return true;
+        }
+        if ($exceptionClass === null) {
+            return false;
+        }
+
+        throw new $exceptionClass($result->message, $result->details, $result->data);
     }
 
     private function runInternal(?RunContext $context = null): string
@@ -554,6 +609,32 @@ final class PhoreAi
         }
 
         return is_string($result) ? $result : Toolkit::jsonEncode($result);
+    }
+
+    /**
+     * @param bool|class-string<DoException> $throw
+     * @return class-string<DoException>|null
+     */
+    private function resolveDoExceptionClass(bool|string $throw): ?string
+    {
+        if ($throw === false) {
+            return null;
+        }
+        if ($throw === true) {
+            return DoException::class;
+        }
+        if (!class_exists($throw) || !is_a($throw, DoException::class, true)) {
+            throw new InvalidArgumentException('Custom do exception must extend ' . DoException::class . '.');
+        }
+
+        $constructor = (new \ReflectionClass($throw))->getConstructor();
+        if ($constructor !== null && $constructor->getDeclaringClass()->getName() !== DoException::class) {
+            throw new InvalidArgumentException(
+                'Custom do exception must inherit the DoException constructor unchanged.'
+            );
+        }
+
+        return $throw;
     }
 
     private function recoverableToolOutput(RecoverableToolException $exception): string

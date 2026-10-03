@@ -66,6 +66,14 @@ if ($scenario === 'ask' && !$followUp && isset($tools['ask_user_question'])) {
     }
     $output[] = ['type' => 'image_generation_call', 'result' => base64_encode('fixture-image')];
     $text = '';
+} elseif (($format['name'] ?? null) === 'DoResultType') {
+    $failed = $scenario === 'do-failure';
+    $text = json_encode([
+        'success' => !$failed,
+        'message' => $failed ? 'Source verification failed.' : 'Task completed.',
+        'details' => $failed ? 'The fixture did not find the required evidence.' : '',
+        'data' => $failed ? ['source=fixture', 'reason=missing-evidence'] : [],
+    ]);
 } elseif (($format['name'] ?? null) === 'StructPatch') {
     $text = json_encode(['unsupported' => false, 'operations' => [
         ['op' => 'replace', 'path' => '/value', 'value_json' => '"updated"', 'from' => null],
