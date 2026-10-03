@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Phore\AiHarness;
 
 use InvalidArgumentException;
+use JsonException;
 use LogicException;
 use Phore\AiHarness\Client\OpenAiClient;
 use Phore\AiHarness\Context\Traits\DoTrait;
@@ -37,6 +38,9 @@ use Phore\AiHarness\ToolType\ToolType;
  */
 final class AiContext
 {
+    private const STATE_VERSION = 1;
+    private const STATE_PROVIDER = 'open_ai';
+
     use DoTrait;
     use TextTrait;
     use FileTrait;
@@ -143,6 +147,91 @@ final class AiContext
     public function getResponseId(): ?string
     {
         return $this->responseId;
+    }
+
+    /**
+     * Export the resumable conversation cursor as a compact JSON string.
+     *
+     * The export intentionally contains no prompt, tool, client or model
+     * configuration. The application rebuilds those from code before import.
+     * A setup hash protects against resuming with changed prepared prompts/tools.
+     * Checkpoints are included because they are provider response cursors too.
+     *
+     * @return string Versioned JSON containing export time, provider, setup hash and cursor state.
+     * @throws LogicException While an operation is running.
+     * @throws JsonException If the state cannot be encoded.
+     * @example $_SESSION['ai_state'] = $context->exportState();
+     * @see importState()
+     * @see ResumeOptions
+     */
+    public function exportState(): string
+    {
+        $this->assertIdle();
+
+        return Toolkit::jsonEncode([
+            'version' => self::STATE_VERSION,
+            'exportedAt' => gmdate('Y-m-d\\TH:i:s\\Z'),
+            'provider' => self::STATE_PROVIDER,
+            'setupHash' => $this->setupHash(),
+            'state' => [
+                'responseId' => $this->responseId,
+                'checkpoints' => $this->checkpoints,
+            ],
+        ]);
+    }
+
+    /**
+     * Restore a previously exported conversation cursor into this context.
+     *
+     * The constructor prompt/tool setup must already be rebuilt by application
+     * code. Provider and setup hash are verified before any cursor is applied.
+     * The default mismatch policy throws ResumeStateException; ResumeOptions can
+     * instead discard the imported cursor and keep this context at a blank root.
+     * This method performs no provider request, so an expired remote response is
+     * detected only by the next AI call and its provider exception propagates.
+     *
+     * @param string $state JSON returned by exportState().
+     * @param ResumeOptions|array{on_mismatch?: string} $options Resume mismatch policy.
+     * @return $this
+     * @throws ResumeStateException For malformed state or an incompatible state when configured to throw.
+     * @throws InvalidArgumentException For invalid resume options.
+     * @throws LogicException While an operation is running.
+     * @example $context->importState($_SESSION['ai_state']);
+     * @example $context->importState($state, new ResumeOptions(onMismatch: ResumeOptions::ON_MISMATCH_RESTART));
+     * @see exportState()
+     * @see ResumeOptions
+     */
+    public function importState(string $state, ResumeOptions|array $options = []): self
+    {
+        $this->assertIdle();
+        $resumeOptions = ResumeOptions::fromArray($options);
+        $decoded = $this->decodeExportedState($state);
+
+        // Format/provider/setup differences cannot safely reuse the provider cursor.
+        if ($decoded['version'] !== self::STATE_VERSION) {
+            return $this->handleResumeMismatch(
+                $resumeOptions,
+                'Unsupported AI context state version: ' . $decoded['version'] . '.',
+            );
+        }
+        if ($decoded['provider'] !== self::STATE_PROVIDER) {
+            return $this->handleResumeMismatch(
+                $resumeOptions,
+                'AI context state provider mismatch: expected '
+                    . self::STATE_PROVIDER . ', got ' . $decoded['provider'] . '.',
+            );
+        }
+        if (!hash_equals($this->setupHash(), $decoded['setupHash'])) {
+            return $this->handleResumeMismatch(
+                $resumeOptions,
+                'AI context state setup mismatch; prepared prompts or tools changed.',
+            );
+        }
+
+        $this->responseId = $decoded['state']['responseId'];
+        $this->checkpoints = $decoded['state']['checkpoints'];
+
+        return $this;
     }
 
     /**
@@ -273,6 +362,120 @@ final class AiContext
     private function hasContextTool(string $className): bool
     {
         return Toolkit::hasTool($this->prompts, $className);
+    }
+
+    /**
+     * @return array{
+     *   version: int,
+     *   exportedAt: string,
+     *   provider: string,
+     *   setupHash: string,
+     *   state: array{
+     *     responseId: ?string,
+     *     checkpoints: list<array{name: ?string, responseId: ?string}>
+     *   }
+     * }
+     */
+    private function decodeExportedState(string $state): array
+    {
+        try {
+            $decoded = json_decode($state, true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException $error) {
+            throw new ResumeStateException('Invalid AI context state JSON.', 0, $error);
+        }
+
+        if (!is_array($decoded) || array_is_list($decoded)) {
+            throw new ResumeStateException('AI context state must be a JSON object.');
+        }
+        foreach (['version', 'exportedAt', 'provider', 'setupHash', 'state'] as $key) {
+            if (!array_key_exists($key, $decoded)) {
+                throw new ResumeStateException('AI context state is missing field: ' . $key . '.');
+            }
+        }
+        if (!is_int($decoded['version'])) {
+            throw new ResumeStateException('AI context state version must be an integer.');
+        }
+        if (!is_string($decoded['exportedAt']) || trim($decoded['exportedAt']) === '') {
+            throw new ResumeStateException('AI context state exportedAt must be a non-empty string.');
+        }
+        if (!is_string($decoded['provider']) || trim($decoded['provider']) === '') {
+            throw new ResumeStateException('AI context state provider must be a non-empty string.');
+        }
+        if (!is_string($decoded['setupHash']) || preg_match('/^[a-f0-9]{64}$/', $decoded['setupHash']) !== 1) {
+            throw new ResumeStateException('AI context state setupHash must be a SHA-256 hash.');
+        }
+        if (!is_array($decoded['state']) || array_is_list($decoded['state'])) {
+            throw new ResumeStateException('AI context state payload must be a JSON object.');
+        }
+
+        $payload = $decoded['state'];
+        if (!array_key_exists('responseId', $payload) || !array_key_exists('checkpoints', $payload)) {
+            throw new ResumeStateException('AI context state payload requires responseId and checkpoints.');
+        }
+        if ($payload['responseId'] !== null && (!is_string($payload['responseId']) || trim($payload['responseId']) === '')) {
+            throw new ResumeStateException('AI context state responseId must be a non-empty string or null.');
+        }
+        if (!is_array($payload['checkpoints']) || !array_is_list($payload['checkpoints'])) {
+            throw new ResumeStateException('AI context state checkpoints must be a list.');
+        }
+
+        $checkpoints = [];
+        foreach ($payload['checkpoints'] as $checkpoint) {
+            if (
+                !is_array($checkpoint)
+                || !array_key_exists('name', $checkpoint)
+                || !array_key_exists('responseId', $checkpoint)
+            ) {
+                throw new ResumeStateException('AI context state contains an invalid checkpoint.');
+            }
+            $name = $checkpoint['name'];
+            $responseId = $checkpoint['responseId'];
+            if ($name !== null && (!is_string($name) || trim($name) === '')) {
+                throw new ResumeStateException('AI context checkpoint name must be a non-empty string or null.');
+            }
+            if ($responseId !== null && (!is_string($responseId) || trim($responseId) === '')) {
+                throw new ResumeStateException('AI context checkpoint responseId must be a non-empty string or null.');
+            }
+            $checkpoints[] = ['name' => $name, 'responseId' => $responseId];
+        }
+
+        return [
+            'version' => $decoded['version'],
+            'exportedAt' => $decoded['exportedAt'],
+            'provider' => $decoded['provider'],
+            'setupHash' => $decoded['setupHash'],
+            'state' => [
+                'responseId' => $payload['responseId'],
+                'checkpoints' => $checkpoints,
+            ],
+        ];
+    }
+
+    private function setupHash(): string
+    {
+        $items = [];
+        foreach ($this->prompts as $item) {
+            $items[] = [
+                'class' => $item::class,
+                'config' => $item instanceof ToolType
+                    ? $item->toArray(self::STATE_PROVIDER)
+                    : $item->toArray(),
+            ];
+        }
+
+        return hash('sha256', Toolkit::jsonEncode($items));
+    }
+
+    private function handleResumeMismatch(ResumeOptions $options, string $message): self
+    {
+        if ($options->onMismatch === ResumeOptions::ON_MISMATCH_RESTART) {
+            $this->responseId = null;
+            $this->checkpoints = [];
+
+            return $this;
+        }
+
+        throw new ResumeStateException($message);
     }
 
     private function assertIdle(): void

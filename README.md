@@ -111,17 +111,27 @@ it the newest. Rollback does not consume markers. **It only restores the
 conversation cursor, not written files, tool side effects or incurred
 usage/costs.** Clones still share external client/tool dependencies.
 
-The registry is process-local, not persistent or shared between workers. Use
-separate IDs per job/user and `AiContextRegistry::forget($id)` or `clear()` at
-appropriate lifecycle boundaries. A context cannot run concurrently or
-reentrantly. Per-call model overrides are supported where the provider permits
-continuation; response chaining does not guarantee a cache hit, particularly
-across models. Cache warming is intentionally not implemented.
+The registry is process-local and is not shared between workers. For a PHP
+session or later request, persist `$context->exportState()` and import that JSON
+into a newly constructed context with the same prepared prompts/tools. The
+export stores only provider/cursor metadata and checkpoints, not prompt/tool
+content. Provider and setup hash mismatches throw `ResumeStateException` by
+default; `ResumeOptions::ON_MISMATCH_RESTART` deliberately starts blank.
+
+The exported response IDs still depend on provider-side retention. This lifetime
+is provider-specific; OpenAI documents at least roughly 30 days of application
+state retention for stored Responses by default. If the remote cursor has
+expired, the next provider call fails normally because import does not perform a
+remote preflight. A context cannot run concurrently or reentrantly. Per-call
+model overrides are supported where the provider permits continuation; response
+chaining does not guarantee a cache hit. Cache warming is intentionally not
+implemented.
 
 See the [complete context guide](docs/ai-context.md) for paired examples of
-every operation, prepared prompts/tools, registry lifecycle, checkpoint
-semantics, options and error handling. [examples/ai-context.php](examples/ai-context.php)
-is a runnable CLI example; it makes real, billable model calls when executed.
+every operation, prepared prompts/tools, registry lifecycle, checkpoints,
+state export/import, options and error handling. [examples/state-resume.php](examples/state-resume.php)
+shows PHP-session persistence; [examples/ai-context.php](examples/ai-context.php)
+is the broader runnable CLI example and makes real, billable model calls.
 
 ## Targeted text and multi-file edits
 

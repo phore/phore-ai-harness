@@ -16,6 +16,8 @@ use Phore\AiHarness\Logging\LogEvent;
 use Phore\AiHarness\Logging\LoggerInterface;
 use Phore\AiHarness\PhoreAi;
 use Phore\AiHarness\PromptType\TextPrompt;
+use Phore\AiHarness\ResumeOptions;
+use Phore\AiHarness\ResumeStateException;
 use Phore\AiHarness\ToolType\CallbackRoundLimitException;
 use Phore\AiHarness\ToolType\CallbackTool;
 use Phore\AiHarness\ToolType\WebAccessTool;
@@ -240,6 +242,90 @@ final class AiContextTest extends TestCase
         self::assertNotSame($prepared, $context->getResponseId());
         $context->rollback('prepared');
         self::assertSame($prepared, $context->getResponseId());
+    }
+
+    public function testExportAndImportStateRestoresCursorAndCheckpointsWithoutSerializingSetup(): void
+    {
+        $setup = ['Stable session prompt.', new WebAccessTool()];
+        $context = $this->context(prompts: $setup);
+        $context->text('Start.');
+        $checkpointResponse = $context->getResponseId();
+        self::assertNotNull($checkpointResponse);
+        $context->setCheckpoint('prepared');
+        $context->text('Continue.');
+        $latestResponse = $context->getResponseId();
+
+        $json = $context->exportState();
+        $export = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame(1, $export['version']);
+        self::assertSame('open_ai', $export['provider']);
+        self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', $export['setupHash']);
+        self::assertNotEmpty($export['exportedAt']);
+        self::assertSame($latestResponse, $export['state']['responseId']);
+        self::assertSame(
+            [['name' => 'prepared', 'responseId' => $checkpointResponse]],
+            $export['state']['checkpoints'],
+        );
+        self::assertStringNotContainsString('Stable session prompt.', $json);
+        self::assertArrayNotHasKey('prompts', $export);
+
+        $restored = $this->context(prompts: ['Stable session prompt.', new WebAccessTool()]);
+        self::assertSame($restored, $restored->importState($json));
+        self::assertSame($latestResponse, $restored->getResponseId());
+        $restored->rollback('prepared');
+        self::assertSame($checkpointResponse, $restored->getResponseId());
+    }
+
+    public function testImportStateRejectsChangedSetupAndProviderByDefault(): void
+    {
+        $state = (new AiContext(prompts: [new WebAccessTool()]))->exportState();
+
+        try {
+            (new AiContext(prompts: ['Changed setup.']))->importState($state);
+            self::fail('Expected setup mismatch.');
+        } catch (ResumeStateException $error) {
+            self::assertStringContainsString('setup mismatch', $error->getMessage());
+        }
+
+        $decoded = json_decode($state, true, 512, JSON_THROW_ON_ERROR);
+        $decoded['provider'] = 'other_provider';
+
+        $this->expectException(ResumeStateException::class);
+        $this->expectExceptionMessage('provider mismatch');
+        (new AiContext(prompts: [new WebAccessTool()]))->importState(json_encode($decoded, JSON_THROW_ON_ERROR));
+    }
+
+    public function testImportStateCanRestartBlankOnMismatch(): void
+    {
+        $exported = (new AiContext(prompts: ['Original setup.']))->exportState();
+        $context = $this->context(prompts: ['Changed setup.']);
+        $context->text('Existing state.');
+        $context->setCheckpoint('existing');
+        self::assertNotNull($context->getResponseId());
+
+        $result = $context->importState(
+            $exported,
+            new ResumeOptions(onMismatch: ResumeOptions::ON_MISMATCH_RESTART),
+        );
+
+        self::assertSame($context, $result);
+        self::assertNull($context->getResponseId());
+
+        $this->expectException(LogicException::class);
+        $context->rollback('existing');
+    }
+
+    public function testImportStateRejectsMalformedStateAndResumeOptionsValidateKeys(): void
+    {
+        try {
+            (new AiContext())->importState('{broken');
+            self::fail('Expected malformed state error.');
+        } catch (ResumeStateException $error) {
+            self::assertStringContainsString('Invalid AI context state JSON', $error->getMessage());
+        }
+
+        $this->expectException(InvalidArgumentException::class);
+        ResumeOptions::fromArray(['unknown' => true]);
     }
 
     public function testEveryOperationAdvancesOneSharedConversationWithoutLeakingToolsOrSchema(): void
@@ -562,5 +648,7 @@ final class AiContextTest extends TestCase
         self::assertFalse(method_exists(AiContext::class, 'editStruct'));
         self::assertSame(['prompts', 'input', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'text'))->getParameters()));
         self::assertSame(['prompts', 'throw', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'do'))->getParameters()));
+        self::assertSame([], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'exportState'))->getParameters()));
+        self::assertSame(['state', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'importState'))->getParameters()));
     }
 }

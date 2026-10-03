@@ -267,10 +267,15 @@ dagegen bei jedem Request erneut angehängt, damit Instructions und Tools aktiv
 bleiben. Ein Rollback auf den leeren Ausgangspunkt lädt die vorbereiteten Daten
 beim nächsten Request erneut.
 
-Die Registry lebt nur innerhalb des PHP-Prozesses beziehungsweise Requests.
-Sie ist kein persistenter Session-Speicher und wird nicht automatisch zwischen
-Worker-Prozessen geteilt. In langlebigen Workern müssen IDs pro Auftrag oder
-Benutzer getrennt und nach Abschluss entfernt werden:
+Die Registry lebt nur innerhalb des PHP-Prozesses beziehungsweise Requests
+und wird nicht automatisch zwischen Worker-Prozessen geteilt. Für Session- oder
+Request-Grenzen kann ein Context seinen fortsetzbaren Cursor explizit als JSON
+exportieren und später in einen neu mit demselben Prompt-/Tool-Setup aufgebauten
+Context importieren. Siehe
+[`examples/state-resume.php`](../examples/state-resume.php).
+
+In langlebigen Workern müssen Registry-IDs pro Auftrag oder Benutzer getrennt
+und nach Abschluss entfernt werden:
 
 ```php
 use Phore\AiHarness\Context\AiContextRegistry;
@@ -383,6 +388,48 @@ Dateien, gesendete Nachrichten oder andere Tool-Nebenwirkungen werden
 nicht rückgängig gemacht. Ebenso bleiben vorbereiteter Prompt-/Tool-Stack,
 Konfiguration und angefallene Token-/Kostenstatistiken erhalten. Ein
 Datei-Rollback oder eine fachliche Transaktion gehört in die Anwendung.
+
+## State zwischen Sessions exportieren und importieren
+
+`exportState()` serialisiert nur den fortsetzbaren Conversation-Cursor und
+die Checkpoints plus Metadaten (`version`, `exportedAt`, `provider`,
+`setupHash`). Prompts, Tools, Client und Modell bleiben im Anwendungscode und
+werden beim nächsten Request wie gewohnt neu konstruiert.
+
+```php
+$state = $context->exportState();
+$_SESSION['ai_context_state'] = $state;
+
+$next = new \Phore\AiHarness\AiContext(
+    prompts: $samePromptsAndTools,
+    options: ['model' => 'gpt-5-mini'],
+);
+$next->importState($_SESSION['ai_context_state']);
+```
+
+Der Setup-Hash wird aus den vorbereiteten Prompt-/Tool-Verträgen gebildet.
+Ändert sich dieses Setup oder der Provider, wirft `importState()` standardmäßig
+`ResumeStateException`. Optional kann bewusst blank neu gestartet werden:
+
+```php
+$next->importState(
+    $state,
+    new \Phore\AiHarness\ResumeOptions(
+        onMismatch: \Phore\AiHarness\ResumeOptions::ON_MISMATCH_RESTART,
+    ),
+);
+```
+
+Für `CallbackTool`-Closures, die über Session-Grenzen resumiert werden sollen,
+ist ein expliziter stabiler Tool-Name sinnvoll; automatisch aus einer Closure
+abgeleitete Namen sind nicht als persistente Identität gedacht.
+
+Der JSON-State enthält keinen vollständigen Gesprächsinhalt, sondern nur
+Provider-IDs. Deren Lebensdauer ist providerabhängig. OpenAI dokumentiert für
+gespeicherte Responses standardmäßig mindestens ungefähr 30 Tage
+Application-State-Retention. Danach beziehungsweise wenn der Provider den
+Response-Cursor nicht mehr kennt, schlägt erst der nächste AI-Aufruf mit der
+normalen Provider-Exception fehl; `importState()` macht keinen Remote-Preflight.
 
 ## Unabhängige Zweige durch Klonen
 
