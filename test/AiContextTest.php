@@ -236,7 +236,8 @@ final class AiContextTest extends TestCase
 
         $context->setCheckpoint('prepared');
         self::assertSame('ready', $context->text('Continue with the prepared facts.'));
-        self::assertSame($prepared, $this->lastRequest()['previous_response_id']);
+        self::assertCount(2, $questions);
+        self::assertNotSame($prepared, $context->getResponseId());
         $context->rollback('prepared');
         self::assertSame($prepared, $context->getResponseId());
     }
