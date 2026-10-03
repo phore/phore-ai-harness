@@ -70,7 +70,10 @@ $config = \Phore\AiHarness\AiOptions::fromArray([
 ]);
 
 $context = new \Phore\AiHarness\AiContext(
-    prompts: [$skillPrompt, new WebAccessTool(), $askUserTool],
+    prompts: [
+        new \Phore\AiHarness\PromptType\PromptFile(__DIR__ . '/review.prompt.md'),
+        new \Phore\AiHarness\ToolType\WebAccessTool(),
+    ],
     options: $config,
 );
 ```
@@ -105,8 +108,8 @@ continuation; response chaining does not guarantee a cache hit, particularly
 across models. Cache warming is intentionally not implemented.
 
 See the [complete context guide](docs/ai-context.md) for paired examples of
-every operation, prepared prompts/tools, registry lifecycle, checkpoint semantics,
-options and error handling. [examples/ai-context.php](examples/ai-context.php)
+every operation, prepared prompts/tools, registry lifecycle, checkpoint
+semantics, options and error handling. [examples/ai-context.php](examples/ai-context.php)
 is a runnable CLI example; it makes real, billable model calls when executed.
 
 ## Targeted text and multi-file edits

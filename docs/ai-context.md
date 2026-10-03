@@ -201,7 +201,11 @@ $intro = phore_ai_text('Schreibe jetzt die Einleitung.', [
 ]);
 ```
 
-Vorbereitete Daten-Prompts werden beim ersten Root-Request eingebracht und liegen danach in der Response-Historie. `SystemPrompt` und `ToolType` werden dagegen bei jedem Request erneut angehängt, damit Instructions und Tools aktiv bleiben. Ein Rollback auf den leeren Ausgangspunkt lädt die vorbereiteten Daten beim nächsten Request erneut.
+Vorbereitete Daten-Prompts werden beim ersten Root-Request eingebracht und
+liegen danach in der Response-Historie. `SystemPrompt` und `ToolType` werden
+dagegen bei jedem Request erneut angehängt, damit Instructions und Tools aktiv
+bleiben. Ein Rollback auf den leeren Ausgangspunkt lädt die vorbereiteten Daten
+beim nächsten Request erneut.
 
 Die Registry lebt nur innerhalb des PHP-Prozesses beziehungsweise Requests.
 Sie ist kein persistenter Session-Speicher und wird nicht automatisch zwischen
@@ -234,7 +238,15 @@ use Phore\AiHarness\ToolType\CallbackTool;
 use Phore\AiHarness\ToolType\WebAccessTool;
 
 $askUser = new CallbackTool(
-    static fn (string $question): string => askUser($question),
+    static function (string $question): string {
+        fwrite(STDERR, $question . PHP_EOL . '> ');
+        $answer = fgets(STDIN);
+        if ($answer === false) {
+            throw new RuntimeException('Keine Benutzerantwort verfügbar.');
+        }
+
+        return trim($answer);
+    },
     name: 'ask_user_question',
 );
 
@@ -329,7 +341,8 @@ $branch->text('Verfeinere nur Variante B.');
 
 Der Klon übernimmt den aktuellen Gesprächsstand, den vorbereiteten
 Prompt-/Tool-Stack und die Checkpoints. Prompt- und Tool-Objekte sowie der
-Client werden dabei nicht tief kopiert. Eine Closure, die veränderlichen Anwendungszustand
+Client werden dabei nicht tief kopiert. Eine Closure, die veränderlichen
+Anwendungszustand
 referenziert, teilt diesen Zustand daher weiterhin. Dateien sind ebenfalls
 nicht branch-isoliert.
 
@@ -500,7 +513,8 @@ Provider-Referenzen:
 ## Aufbau und Kompatibilität
 
 `AiContext` verwaltet nur Kontextzustand, vorbereitete Prompts/Tools,
-Konfiguration und die Ausführungskoordination. Die Operationen liegen in separaten Dateien
+Konfiguration und die Ausführungskoordination. Die Operationen liegen in
+separaten Dateien
 unter `src/Context/Traits/`: `TextTrait`, `FileTrait`, `StructTrait`,
 `StructArrayTrait` und `ImageTrait`. Die globalen Funktionen lösen lediglich
 den Kontext auf und reichen ihre bisherigen Argumente weiter.
