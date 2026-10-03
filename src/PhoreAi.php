@@ -24,6 +24,7 @@ use Phore\AiHarness\OutputFormat\StructPatchOutput;
 use Phore\AiHarness\OutputFormat\TextOutput;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\Result\ImageResultType;
+use Phore\AiHarness\ToolType\CallbackRoundLimitException;
 use Phore\AiHarness\ToolType\CallbackTool;
 use Phore\AiHarness\ToolType\ImageGenerationTool;
 use Phore\AiHarness\ToolType\RecoverableToolException;
@@ -115,11 +116,26 @@ final class PhoreAi
     private ?string $previousResponseId = null;
     private ?string $lastResponseId = null;
 
+    /**
+     * Clone the request facade with a conversation parent, or null for a root.
+     * The response must belong to the configured provider/project. This does
+     * not guarantee cached input and does not modify the original facade.
+     *
+     * @example $request = $ai->withPreviousResponseId($responseId);
+     * @see AiContext
+     */
     public function withPreviousResponseId(?string $responseId): self
     {
         return clone($this, ['previousResponseId' => $responseId, 'lastResponseId' => null]);
     }
 
+    /**
+     * Return the last completed callback loop's response ID for this facade.
+     * Reset at each run; null means no resumable completion was produced.
+     *
+     * @example $responseId = $ai->getLastResponseId();
+     * @see withPreviousResponseId()
+     */
     public function getLastResponseId(): ?string
     {
         return $this->lastResponseId;
@@ -195,14 +211,16 @@ final class PhoreAi
         }
 
         $request = (new OpenAiPromptTypeConverter())->toAiRequest($instance->model, $instance->prompts);
+        if ($this->previousResponseId !== null) {
+            $request = clone($request, ['previousResponseId' => $this->previousResponseId]);
+        }
         if ($instance->tools !== []) {
             $request = $request->withTools(...$instance->tools);
         }
 
         $response = $instance->sendRequest($request, $context, false);
-        if ($context !== null) {
-            $response = $instance->resolveCallbackToolCalls($request, $response, $context);
-        }
+        $response = $instance->resolveCallbackToolCalls($request, $response, $context);
+        $this->lastResponseId = $response->getId();
         return $instance->openAiClient->buildImageResponse($response, $contentType);
     }
 
@@ -230,10 +248,9 @@ final class PhoreAi
             jsonSchemaOptions: new JsonSchemaGeneratorOptions(JsonSchemaCompatibility::OpenAiStructuredOutput),
         );
 
-        $output = (clone($this, [
-            'outputFormat' => $outputFormat,
-        ]))->runInternal($context);
-
+        $instance = clone($this, ['outputFormat' => $outputFormat]);
+        $output = $instance->runInternal($context);
+        $this->lastResponseId = $instance->lastResponseId;
         $data = Toolkit::decodeJsonOutput($output);
 
         /** @var T $object */
@@ -270,6 +287,9 @@ final class PhoreAi
             ->toArray();
 
         $request = (new OpenAiPromptTypeConverter())->toAiRequest($this->model, $this->prompts);
+        if ($this->previousResponseId !== null) {
+            $request = clone($request, ['previousResponseId' => $this->previousResponseId]);
+        }
         if ($this->tools !== []) {
             $request = $request->withTools(...$this->tools);
         }
@@ -292,6 +312,7 @@ final class PhoreAi
 
         $response = $this->sendRequest($request, $context);
         $response = $this->resolveCallbackToolCalls($request, $response, $context);
+        $this->lastResponseId = $response->getId();
         $data = Toolkit::decodeJsonOutputValue($response->getOutputText());
         $items = is_array($data) && array_is_list($data) ? $data : (is_array($data) ? ($data['items'] ?? null) : null);
 
@@ -320,48 +341,46 @@ final class PhoreAi
             return $response;
         }
 
+        // Das Limit und die Fortsetzungsregeln gelten unabhaengig vom Logging.
         for ($iteration = 0; $iteration < self::MAX_CALLBACK_ROUNDS; $iteration++) {
+            if (!$this->hasCallbackCalls($response, $callbackTools)) {
+                return $response;
+            }
+            $responseId = $response->getId();
+            if ($responseId === null) {
+                // Ohne Response-ID duerfen keine nicht fortsetzbaren Seiteneffekte starten.
+                throw new \RuntimeException('Callback response is missing its response ID.');
+            }
             $outputs = $this->callbackToolCallOutputs($response, $callbackTools, $context);
             if ($outputs === []) {
                 return $response;
             }
 
-            $responseId = $response->getId();
-            if ($responseId === null) {
-                if ($context !== null) {
-                    throw new \RuntimeException('Callback response is missing its response ID.');
-                }
-                return $response;
-            }
-
-            $nextRequest = new AiRequest(
-                model: $this->model,
-                input: $outputs,
-                previousResponseId: $responseId,
-                tools: $request->tools,
-            );
-            if ($context !== null) {
-                // Keep instructions and structured-output constraints on every debug follow-up.
-                $nextRequest = $request->withFollowUp($outputs, $responseId);
-                if ($context->retryPending) {
-                    $context->retries++;
-                    $context->retryPending = false;
-                }
+            // Instructions, Tools und Output-Schema muessen in jeder Runde erhalten bleiben.
+            $nextRequest = $request->withFollowUp($outputs, $responseId);
+            if ($context !== null && $context->retryPending) {
+                $context->retries++;
+                $context->retryPending = false;
             }
             $response = $this->sendRequest($nextRequest, $context);
         }
 
-        if ($context !== null) {
-            foreach ($response->body['output'] ?? [] as $item) {
-                if (is_array($item) && ($item['type'] ?? null) === 'function_call' && isset($callbackTools[$item['name'] ?? ''])) {
-                    $error = new \RuntimeException('Callback round limit (' . self::MAX_CALLBACK_ROUNDS . ') reached with unresolved tool calls.');
-                    $context->error($error, ['limit' => self::MAX_CALLBACK_ROUNDS], 'Callback round limit reached; unresolved tool calls remain.');
-                    throw $error;
-                }
+        if ($this->hasCallbackCalls($response, $callbackTools)) {
+            $error = new CallbackRoundLimitException('Callback round limit (' . self::MAX_CALLBACK_ROUNDS . ') reached with unresolved tool calls.');
+            $context?->error($error, ['limit' => self::MAX_CALLBACK_ROUNDS], 'Callback round limit reached; unresolved tool calls remain.');
+            throw $error;
+        }
+        return $response;
+    }
+
+    private function hasCallbackCalls(AiResponse $response, array $callbackTools): bool
+    {
+        foreach ($response->body['output'] ?? [] as $item) {
+            if (is_array($item) && ($item['type'] ?? null) === 'function_call' && isset($callbackTools[$item['name'] ?? ''])) {
+                return true;
             }
         }
-
-        return $response;
+        return false;
     }
 
     /**
@@ -417,6 +436,7 @@ final class PhoreAi
 
     private function executeRun(callable $run): mixed
     {
+        $this->lastResponseId = null;
         $context = $this->logger === null ? null : new RunContext($this->logger, $this->model);
         $status = 'failed';
         try {
@@ -526,7 +546,7 @@ final class PhoreAi
 
     private function recoverableToolOutput(RecoverableToolException $exception): string
     {
-        return Toolkit::jsonEncode([
+        $output = [
             'ok' => false,
             'error' => [
                 'type' => 'recoverable_tool_error',
@@ -534,7 +554,11 @@ final class PhoreAi
                 'retryable' => true,
             ],
             'instruction' => 'Correct the tool input or choose another approach, then continue.',
-        ]);
+        ];
+        if ($exception->result !== null) {
+            $output['result'] = $exception->result;
+        }
+        return Toolkit::jsonEncode($output);
     }
 
     /**

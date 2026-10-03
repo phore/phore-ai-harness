@@ -47,16 +47,12 @@ if ($toolScenario && ($round === 0 || $scenario === 'limit')) {
     $text = ($request['stream'] ?? false) ? 'stream' : 'json';
 } elseif ($scenario === 'file') {
     if ($round === 0) {
-        $filenames = [];
-        foreach ($request['input'] as $message) {
-            foreach ($message['content'] ?? [] as $part) {
-                if (($part['type'] ?? '') === 'input_file') {
-                    $filenames[] = $part['filename'];
-                }
-            }
-        }
-        $output[] = ['type' => 'function_call', 'name' => 'write_files', 'call_id' => 'file_0',
-            'arguments' => json_encode(['filenames' => $filenames, 'contents' => array_fill(0, count($filenames), 'updated')])];
+        $output[] = [
+            'type' => 'function_call', 'name' => 'write_files', 'call_id' => 'file_0',
+            'arguments' => json_encode(['files' => [
+                ['filename' => 'targetFile1', 'edits' => [['search' => null, 'replacement' => 'updated']]],
+            ]]),
+        ];
         $text = '';
     }
 }

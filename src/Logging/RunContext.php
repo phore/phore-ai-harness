@@ -16,7 +16,7 @@ final class RunContext
     public float $durationApi = 0;
     public float $durationTools = 0;
     public bool $retryPending = false;
-    private array $tokens = ['input_tokens' => null, 'output_tokens' => null, 'total_tokens' => null];
+    private array $tokens = ['input_tokens' => null, 'output_tokens' => null, 'total_tokens' => null, 'cached_tokens' => null];
     private readonly int $started;
     private readonly string $id;
     private bool $finished = false;
@@ -66,8 +66,14 @@ final class RunContext
     public function addResponse(AiResponse $response): void
     {
         foreach ($this->tokens as $key => $total) {
-            $value = $response->body['usage'][$key] ?? null;
+            $value = $key === 'cached_tokens'
+                ? ($response->body['usage']['input_tokens_details']['cached_tokens'] ?? null)
+                : ($response->body['usage'][$key] ?? null);
             if (is_int($value)) {
+                if ($key === 'cached_tokens') {
+                    $input = $response->body['usage']['input_tokens'] ?? null;
+                    $value = max(0, is_int($input) ? min($value, $input) : $value);
+                }
                 $this->tokens[$key] = ($total ?? 0) + $value;
             }
         }
@@ -97,6 +103,7 @@ final class RunContext
             $status, $this->requests, $this->toolCalls, $this->errors, $this->retries,
             $this->tokens['input_tokens'], $this->tokens['output_tokens'], $this->tokens['total_tokens'],
             (hrtime(true) - $this->started) / 1e9, $this->durationApi, $this->durationTools,
+            $this->tokens['cached_tokens'],
         ));
     }
 }
