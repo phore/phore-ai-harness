@@ -11,6 +11,7 @@ use Phore\AiHarness\Client\OpenAiClient;
 use Phore\AiHarness\Context\Traits\DoTrait;
 use Phore\AiHarness\Context\Traits\FileTrait;
 use Phore\AiHarness\Context\Traits\ImageTrait;
+use Phore\AiHarness\Context\Traits\SimpleTypesTrait;
 use Phore\AiHarness\Context\Traits\StructArrayTrait;
 use Phore\AiHarness\Context\Traits\StructTrait;
 use Phore\AiHarness\Context\Traits\TextTrait;
@@ -47,6 +48,7 @@ final class AiContext
     use StructTrait;
     use StructArrayTrait;
     use ImageTrait;
+    use SimpleTypesTrait;
 
     /** @var list<PromptType|ToolType> */
     private array $prompts;

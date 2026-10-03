@@ -328,6 +328,123 @@ final class AiContextTest extends TestCase
         ResumeOptions::fromArray(['unknown' => true]);
     }
 
+
+    public function testChoiceSupportsSimpleAndDescribedValuesDefaultPromptAndModelShortcut(): void
+    {
+        $context = $this->context();
+
+        self::assertSame('news', $context->choice('Choose the best tag.', ['news', 'guide', 'review']));
+        self::assertStringContainsString('Choose the best tag.', json_encode($this->lastRequest()['input']));
+
+        self::assertSame(10, $context->choice(
+            null,
+            [10 => 'Urgent item', 20 => 'Normal item'],
+            'gpt-5-nano',
+        ));
+        $request = $this->lastRequest();
+        self::assertSame('gpt-5-nano', $request['model']);
+        self::assertStringContainsString(
+            'Choose exactly one option that best matches the current context.',
+            json_encode($request['input']),
+        );
+        self::assertStringContainsString('Urgent item', json_encode($request['input']));
+
+        self::assertSame('news', $context->choice(
+            null,
+            ['news', 'guide', 'review'],
+            ['selected' => 'guide'],
+        ));
+        self::assertStringContainsString('"selected":"guide"', json_encode($this->lastRequest()['input']));
+    }
+
+    public function testChoicesUsesBoundsDescriptionsAndSelectedValues(): void
+    {
+        $context = $this->context();
+
+        self::assertSame(
+            ['news', 'review'],
+            $context->choices(
+                null,
+                [
+                    'news' => 'Current development',
+                    'guide' => 'Instructional content',
+                    'review' => 'Evaluation or comparison',
+                ],
+                min: 1,
+                max: 2,
+                options: ['selected' => ['guide']],
+            ),
+        );
+        $request = $this->lastRequest();
+        self::assertStringContainsString(
+            'Choose between 1 and 2 options that best match the current context.',
+            json_encode($request['input']),
+        );
+        self::assertStringContainsString('"selected":["guide"]', json_encode($request['input']));
+
+        self::assertSame(
+            ['news', 'review'],
+            $context->choices('Choose editorial tags.', ['news', 'guide', 'review'], min: 1, max: 2),
+        );
+        self::assertStringContainsString('Choose editorial tags.', json_encode($this->lastRequest()['input']));
+    }
+
+    public function testYesNoRankAndScoreReturnSimpleTypesAndUseDefaultPrompts(): void
+    {
+        $context = $this->context();
+
+        self::assertTrue($context->yesNo('Is the draft ready?'));
+        self::assertStringContainsString('Is the draft ready?', json_encode($this->lastRequest()['input']));
+
+        $nullable = $this->context('simple-null');
+        self::assertNull($nullable->yesNo(null, allowNull: true));
+        self::assertStringContainsString(
+            'Answer the current question from the conversation with yes, no, or null when it cannot be decided reliably.',
+            json_encode($this->lastRequest()['input']),
+        );
+
+        self::assertSame(
+            ['review', 'news', 'guide'],
+            $context->rank(null, ['news', 'guide', 'review']),
+        );
+        self::assertStringContainsString(
+            'Rank all options from best match to worst match for the current context.',
+            json_encode($this->lastRequest()['input']),
+        );
+
+        self::assertSame(0.75, $context->score(null));
+        self::assertStringContainsString(
+            'Score how well the current context matches the task on a scale from 0.0 to 1.0.',
+            json_encode($this->lastRequest()['input']),
+        );
+    }
+
+    public function testSimpleTypeValidationRejectsInvalidChoicesBoundsAndProviderResults(): void
+    {
+        foreach ([
+            static fn (AiContext $context) => $context->choice(null, []),
+            static fn (AiContext $context) => $context->choice(null, ['ok', true]),
+            static fn (AiContext $context) => $context->choice(null, ['news' => 42]),
+            static fn (AiContext $context) => $context->choice(null, ['news', 'news']),
+            static fn (AiContext $context) => $context->choice('', ['news']),
+            static fn (AiContext $context) => $context->choices(null, ['news', 'guide'], min: -1),
+            static fn (AiContext $context) => $context->choices(null, ['news', 'guide'], min: 2, max: 1),
+            static fn (AiContext $context) => $context->choices(null, ['news', 'guide'], max: 3),
+            static fn (AiContext $context) => $context->choice(null, ['news', 'guide'], ['selected' => 'review']),
+            static fn (AiContext $context) => $context->choices(null, ['news', 'guide'], options: ['selected' => 'news']),
+        ] as $call) {
+            try {
+                $call($this->context());
+                self::fail('Expected invalid simple type input.');
+            } catch (\InvalidArgumentException) {
+            }
+        }
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('choice index outside');
+        $this->context('simple-invalid')->choice(null, ['news', 'guide']);
+    }
+
     public function testEveryOperationAdvancesOneSharedConversationWithoutLeakingToolsOrSchema(): void
     {
         $context = $this->context();
@@ -648,6 +765,11 @@ final class AiContextTest extends TestCase
         self::assertFalse(method_exists(AiContext::class, 'editStruct'));
         self::assertSame(['prompts', 'input', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'text'))->getParameters()));
         self::assertSame(['prompts', 'throw', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'do'))->getParameters()));
+        self::assertSame(['prompt', 'choices', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'choice'))->getParameters()));
+        self::assertSame(['prompt', 'choices', 'min', 'max', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'choices'))->getParameters()));
+        self::assertSame(['prompt', 'allowNull', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'yesNo'))->getParameters()));
+        self::assertSame(['prompt', 'choices', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'rank'))->getParameters()));
+        self::assertSame(['prompt', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'score'))->getParameters()));
         self::assertSame([], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'exportState'))->getParameters()));
         self::assertSame(['state', 'options'], array_map(static fn (\ReflectionParameter $parameter): string => $parameter->name, (new \ReflectionMethod(AiContext::class, 'importState'))->getParameters()));
     }
