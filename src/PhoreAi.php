@@ -23,7 +23,10 @@ use Phore\AiHarness\OutputFormat\StructOutput;
 use Phore\AiHarness\OutputFormat\StructPatchOutput;
 use Phore\AiHarness\OutputFormat\TextOutput;
 use Phore\AiHarness\PromptType\PromptType;
+use Phore\AiHarness\PromptType\SystemPrompt;
+use Phore\AiHarness\Result\DoResultType;
 use Phore\AiHarness\Result\ImageResultType;
+use Phore\AiHarness\ToolType\CallbackRoundLimitException;
 use Phore\AiHarness\ToolType\CallbackTool;
 use Phore\AiHarness\ToolType\ImageGenerationTool;
 use Phore\AiHarness\ToolType\RecoverableToolException;
@@ -115,11 +118,26 @@ final class PhoreAi
     private ?string $previousResponseId = null;
     private ?string $lastResponseId = null;
 
+    /**
+     * Clone the request facade with a conversation parent, or null for a root.
+     * The response must belong to the configured provider/project. This does
+     * not guarantee cached input and does not modify the original facade.
+     *
+     * @example $request = $ai->withPreviousResponseId($responseId);
+     * @see AiContext
+     */
     public function withPreviousResponseId(?string $responseId): self
     {
         return clone($this, ['previousResponseId' => $responseId, 'lastResponseId' => null]);
     }
 
+    /**
+     * Return the last completed callback loop's response ID for this facade.
+     * Reset at each run; null means no resumable completion was produced.
+     *
+     * @example $responseId = $ai->getLastResponseId();
+     * @see withPreviousResponseId()
+     */
     public function getLastResponseId(): ?string
     {
         return $this->lastResponseId;
@@ -162,11 +180,68 @@ final class PhoreAi
         return $this->executeRun(fn (?RunContext $context) => $this->runInternal($context));
     }
 
+    /**
+     * Execute the configured task for its side effects and conversation state.
+     *
+     * The final model response is a structured success/failure report instead of
+     * user-facing text. Tools and callback rounds behave exactly like run(). A
+     * false result is a fachlicher Misserfolg of an otherwise valid task;
+     * transport errors, task-contract errors and callback exceptions still
+     * propagate unchanged.
+     *
+     * When $throw is true, failures raise DoException. A custom class must extend
+     * DoException and inherit its constructor unchanged so message, details and
+     * diagnostic data can be populated predictably.
+     *
+     * @param bool|class-string<DoException> $throw Return false on task failure,
+     *     throw DoException when true, or throw the supplied subclass.
+     * @return bool True only when the model reports the requested task completed.
+     * @throws DoException For a reported task failure when throwing is enabled.
+     * @throws InvalidArgumentException For an invalid custom exception class.
+     * @example $ok = $ai->with(new TextPrompt('Verify the source.', allowInstructions: true))->do();
+     * @example $ai->with(new TextPrompt('Verify the source.', allowInstructions: true))->do(throw: true);
+     * @see run()
+     * @see DoResultType
+     */
+    public function do(bool|string $throw = false): bool
+    {
+        $exceptionClass = $this->resolveDoExceptionClass($throw);
+        $instance = clone($this, [
+            'prompts' => [
+                ...$this->prompts,
+                new SystemPrompt(
+                    'Execute the requested task completely. The final structured result reports whether the task itself succeeded. '
+                    . 'Set success=true only when the requested work was completed. Set success=false for an ordinary fachlicher '
+                    . 'Misserfolg after a valid attempt. Put a concise summary in message, substantial diagnostics or relevant text '
+                    . 'excerpts in details, and optional short machine-readable diagnostic strings in data. Technical failures and '
+                    . 'invalid or incomplete task contracts must still use the existing error mechanisms instead of being hidden as false.'
+                ),
+            ],
+        ]);
+
+        /** @var DoResultType $result */
+        $result = $instance->runCasted(DoResultType::class);
+        $this->lastResponseId = $instance->lastResponseId;
+
+        if ($result->success) {
+            return true;
+        }
+        if ($exceptionClass === null) {
+            return false;
+        }
+
+        throw new $exceptionClass(
+            $result->message,
+            $result->details === '' ? null : $result->details,
+            $result->data,
+        );
+    }
+
     private function runInternal(?RunContext $context = null): string
     {
         $request = (new OpenAiPromptTypeConverter())->toAiRequest($this->model, $this->prompts);
         if ($this->previousResponseId !== null) {
-            $request = clone($request, ['previousResponseId' => $this->previousResponseId]);
+            $request = $request->withFollowUp($request->input, $this->previousResponseId);
         }
         if ($this->tools !== []) {
             $request = $request->withTools(...$this->tools);
@@ -195,14 +270,16 @@ final class PhoreAi
         }
 
         $request = (new OpenAiPromptTypeConverter())->toAiRequest($instance->model, $instance->prompts);
+        if ($this->previousResponseId !== null) {
+            $request = $request->withFollowUp($request->input, $this->previousResponseId);
+        }
         if ($instance->tools !== []) {
             $request = $request->withTools(...$instance->tools);
         }
 
         $response = $instance->sendRequest($request, $context, false);
-        if ($context !== null) {
-            $response = $instance->resolveCallbackToolCalls($request, $response, $context);
-        }
+        $response = $instance->resolveCallbackToolCalls($request, $response, $context);
+        $this->lastResponseId = $response->getId();
         return $instance->openAiClient->buildImageResponse($response, $contentType);
     }
 
@@ -230,10 +307,9 @@ final class PhoreAi
             jsonSchemaOptions: new JsonSchemaGeneratorOptions(JsonSchemaCompatibility::OpenAiStructuredOutput),
         );
 
-        $output = (clone($this, [
-            'outputFormat' => $outputFormat,
-        ]))->runInternal($context);
-
+        $instance = clone($this, ['outputFormat' => $outputFormat]);
+        $output = $instance->runInternal($context);
+        $this->lastResponseId = $instance->lastResponseId;
         $data = Toolkit::decodeJsonOutput($output);
 
         /** @var T $object */
@@ -270,6 +346,9 @@ final class PhoreAi
             ->toArray();
 
         $request = (new OpenAiPromptTypeConverter())->toAiRequest($this->model, $this->prompts);
+        if ($this->previousResponseId !== null) {
+            $request = $request->withFollowUp($request->input, $this->previousResponseId);
+        }
         if ($this->tools !== []) {
             $request = $request->withTools(...$this->tools);
         }
@@ -292,6 +371,7 @@ final class PhoreAi
 
         $response = $this->sendRequest($request, $context);
         $response = $this->resolveCallbackToolCalls($request, $response, $context);
+        $this->lastResponseId = $response->getId();
         $data = Toolkit::decodeJsonOutputValue($response->getOutputText());
         $items = is_array($data) && array_is_list($data) ? $data : (is_array($data) ? ($data['items'] ?? null) : null);
 
@@ -320,48 +400,46 @@ final class PhoreAi
             return $response;
         }
 
+        // Das Limit und die Fortsetzungsregeln gelten unabhaengig vom Logging.
         for ($iteration = 0; $iteration < self::MAX_CALLBACK_ROUNDS; $iteration++) {
-            $outputs = $this->callbackToolCallOutputs($response, $callbackTools, $context);
-            if ($outputs === []) {
+            if (!$this->hasCallbackCalls($response, $callbackTools)) {
                 return $response;
             }
-
             $responseId = $response->getId();
             if ($responseId === null) {
-                if ($context !== null) {
-                    throw new \RuntimeException('Callback response is missing its response ID.');
-                }
-                return $response;
+                // Ohne Response-ID duerfen keine nicht fortsetzbaren Seiteneffekte starten.
+                throw new \RuntimeException('Callback response is missing its response ID.');
+            }
+            $outputs = $this->callbackToolCallOutputs($response, $callbackTools, $context);
+            if ($outputs === []) {
+                throw new \RuntimeException('Callback response contains malformed tool calls.');
             }
 
-            $nextRequest = new AiRequest(
-                model: $this->model,
-                input: $outputs,
-                previousResponseId: $responseId,
-                tools: $request->tools,
-            );
-            if ($context !== null) {
-                // Keep instructions and structured-output constraints on every debug follow-up.
-                $nextRequest = $request->withFollowUp($outputs, $responseId);
-                if ($context->retryPending) {
-                    $context->retries++;
-                    $context->retryPending = false;
-                }
+            // Instructions, Tools und Output-Schema muessen in jeder Runde erhalten bleiben.
+            $nextRequest = $request->withFollowUp($outputs, $responseId);
+            if ($context !== null && $context->retryPending) {
+                $context->retries++;
+                $context->retryPending = false;
             }
             $response = $this->sendRequest($nextRequest, $context);
         }
 
-        if ($context !== null) {
-            foreach ($response->body['output'] ?? [] as $item) {
-                if (is_array($item) && ($item['type'] ?? null) === 'function_call' && isset($callbackTools[$item['name'] ?? ''])) {
-                    $error = new \RuntimeException('Callback round limit (' . self::MAX_CALLBACK_ROUNDS . ') reached with unresolved tool calls.');
-                    $context->error($error, ['limit' => self::MAX_CALLBACK_ROUNDS], 'Callback round limit reached; unresolved tool calls remain.');
-                    throw $error;
-                }
+        if ($this->hasCallbackCalls($response, $callbackTools)) {
+            $error = new CallbackRoundLimitException('Callback round limit (' . self::MAX_CALLBACK_ROUNDS . ') reached with unresolved tool calls.');
+            $context?->error($error, ['limit' => self::MAX_CALLBACK_ROUNDS], 'Callback round limit reached; unresolved tool calls remain.');
+            throw $error;
+        }
+        return $response;
+    }
+
+    private function hasCallbackCalls(AiResponse $response, array $callbackTools): bool
+    {
+        foreach ($response->body['output'] ?? [] as $item) {
+            if (is_array($item) && ($item['type'] ?? null) === 'function_call' && isset($callbackTools[$item['name'] ?? ''])) {
+                return true;
             }
         }
-
-        return $response;
+        return false;
     }
 
     /**
@@ -417,6 +495,7 @@ final class PhoreAi
 
     private function executeRun(callable $run): mixed
     {
+        $this->lastResponseId = null;
         $context = $this->logger === null ? null : new RunContext($this->logger, $this->model);
         $status = 'failed';
         try {
@@ -439,7 +518,9 @@ final class PhoreAi
         }
 
         if ($context === null) {
-            return $this->openAiClient->createResponse($request);
+            $response = $this->openAiClient->createResponse($request);
+            $this->assertCompletedResponse($response);
+            return $response;
         }
         // Image generation has no compatible text streaming contract.
         $stream = $stream && !$this->hasTool(ImageGenerationTool::class);
@@ -458,10 +539,20 @@ final class PhoreAi
                 })
                 : $this->openAiClient->createResponse($request);
             $context->addResponse($response);
+            $this->assertCompletedResponse($response);
             return $response;
         } finally {
             $context->durationApi += (hrtime(true) - $started) / 1e9;
             $context->flushText();
+        }
+    }
+
+    private function assertCompletedResponse(AiResponse $response): void
+    {
+        // HTTP 200 allein reicht nicht: partielle Antworten duerfen keine Tools ausfuehren.
+        $status = $response->body['status'] ?? null;
+        if (isset($response->body['error']) || ($status !== null && $status !== 'completed')) {
+            throw new \RuntimeException('Provider response did not complete successfully.');
         }
     }
 
@@ -524,9 +615,28 @@ final class PhoreAi
         return is_string($result) ? $result : Toolkit::jsonEncode($result);
     }
 
+    /**
+     * @param bool|class-string<DoException> $throw
+     * @return class-string<DoException>|null
+     */
+    private function resolveDoExceptionClass(bool|string $throw): ?string
+    {
+        if ($throw === false) {
+            return null;
+        }
+        if ($throw === true) {
+            return DoException::class;
+        }
+        if (!is_a($throw, DoException::class, true)) {
+            throw new InvalidArgumentException('Custom do exception must extend ' . DoException::class . '.');
+        }
+
+        return $throw;
+    }
+
     private function recoverableToolOutput(RecoverableToolException $exception): string
     {
-        return Toolkit::jsonEncode([
+        $output = [
             'ok' => false,
             'error' => [
                 'type' => 'recoverable_tool_error',
@@ -534,7 +644,11 @@ final class PhoreAi
                 'retryable' => true,
             ],
             'instruction' => 'Correct the tool input or choose another approach, then continue.',
-        ]);
+        ];
+        if ($exception->result !== null) {
+            $output['result'] = $exception->result;
+        }
+        return Toolkit::jsonEncode($output);
     }
 
     /**

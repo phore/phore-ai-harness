@@ -58,7 +58,7 @@ final class FunctionsTest extends TestCase
         require dirname(__DIR__) . '/src/functions.php';
 
         foreach ([
-            'phore_ai_text', 'phore_ai_image', 'phore_ai_struct',
+            'phore_ai_text', 'phore_ai_do', 'phore_ai_image', 'phore_ai_struct',
             'phore_ai_struct_array', 'phore_ai_edit_struct', 'phore_ai_edit_file',
             'get_last_ai_request', 'get_last_ai_response',
         ] as $function) {
@@ -96,14 +96,15 @@ final class FunctionsTest extends TestCase
             self::assertNotNull($request);
             self::assertCount(1, $request->tools ?? []);
             self::assertSame('write_files', $request->tools[0]['name'] ?? null);
-            self::assertSame('string', $request->tools[0]['parameters']['properties']['filenames']['items']['type'] ?? null);
-            self::assertSame('string', $request->tools[0]['parameters']['properties']['contents']['items']['type'] ?? null);
-            self::assertSame($firstFile, $request->input[0]['content'][2]['filename'] ?? null);
-            self::assertStringContainsString(base64_encode('First original'), $request->input[0]['content'][2]['file_data'] ?? '');
-            self::assertSame($secondFile, $request->input[0]['content'][4]['filename'] ?? null);
-            self::assertStringContainsString(base64_encode('Second original'), $request->input[0]['content'][4]['file_data'] ?? '');
+            $parameters = json_encode($request->tools[0]['parameters'], JSON_THROW_ON_ERROR);
+            self::assertStringContainsString('"files"', $parameters);
+            self::assertStringContainsString('"search"', $parameters);
+            self::assertStringContainsString('"replacement"', $parameters);
+            self::assertSame('input_text', $request->input[0]['content'][2]['type'] ?? null);
+            self::assertStringContainsString('First original', $request->input[0]['content'][2]['text'] ?? '');
+            self::assertSame('input_text', $request->input[0]['content'][4]['type'] ?? null);
+            self::assertStringContainsString('Second original', $request->input[0]['content'][4]['text'] ?? '');
             self::assertStringNotContainsString('get_file_content', $request->instructions ?? '');
-            self::assertStringNotContainsString('batch mode', $request->instructions ?? '');
             self::assertStringContainsString('targetFileN aliases', $request->instructions ?? '');
         } finally {
             @unlink($firstFile);
@@ -128,7 +129,8 @@ final class FunctionsTest extends TestCase
         } catch (AiRequestException) {
             $request = get_last_ai_request();
             self::assertNotNull($request);
-            self::assertSame('data:text/plain;base64,', $request->input[0]['content'][2]['file_data'] ?? null);
+            self::assertSame('input_text', $request->input[0]['content'][2]['type'] ?? null);
+            self::assertSame('File: ' . basename($fileName) . "\n\n", $request->input[0]['content'][2]['text'] ?? null);
             self::assertFileDoesNotExist($fileName);
         }
     }

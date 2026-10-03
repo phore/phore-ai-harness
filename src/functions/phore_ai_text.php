@@ -2,56 +2,29 @@
 
 declare(strict_types=1);
 
+use Phore\AiHarness\AiContext;
 use Phore\AiHarness\Client\OpenAiClient;
-use Phore\AiHarness\Helper\Toolkit;
+use Phore\AiHarness\Context\AiContextRegistry;
 use Phore\AiHarness\Logging\LoggerInterface;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\ToolType\ToolType;
 
 /**
- * Run prompts and optional tools and return the final plain-text response.
- * Tool callbacks may execute during the request loop.
+ * Generate text, or edit options['input'], through a temporary or shared context.
+ * The legacy ($prompts, $options) signature and string return are unchanged.
+ * Input null/absent generates; a supplied string, including '', is edited via
+ * exact replacement batches and returned as the complete locally assembled text.
+ * Shared context callbacks and per-call tools may run during either mode.
  *
- * Options (all optional):
- * - client: OpenAiClient instance, an "openai:<apikey>" DSN, or null (default)
- *   to resolve credentials through the Keystore/default client.
- * - model: Model name; default "gpt-5-mini".
- * - reasoning: Responses API settings; default ['effort' => 'low']; null omits it.
- * - timeout: Total request timeout in seconds, at least 1; default 600.
- * - connect_timeout: Connection timeout in seconds, at least 1; default 10.
- *   Both timeout options apply only when constructing a client; a supplied
- *   OpenAiClient instance keeps its own timeout settings.
- * - debug_log: false (default) disables logging; true writes ConsoleLogger output
- *   to STDERR; a LoggerInterface instance receives events and statistics.
- *   Debug mode streams text/structured responses and enables bounded retries
- *   for explicitly recoverable tool errors; image generation remains non-streaming.
- *
- * Example (after requiring vendor/autoload.php and configuring credentials):
- * <code>
- * $text = phore_ai_text('Explain dependency injection in two sentences.', [
- *     'model' => 'gpt-5-mini',
- *     'timeout' => 120,
- *     'debug_log' => true,
- * ]);
- * echo $text;
- * </code>
- *
- * @param string|PromptType|ToolType|array<int, string|PromptType|ToolType> $prompts Prompt text, prompt/tool instance, or ordered collection; strings become TextPrompt instances.
- * @param array{
- *     client?: OpenAiClient|string|null,
- *     model?: string,
- *     reasoning?: array<string, mixed>|null,
- *     timeout?: positive-int,
- *     connect_timeout?: positive-int,
- *     debug_log?: bool|LoggerInterface
- * } $options Optional settings; omitted keys use the defaults described above.
- * @return string Final response text.
- * @throws InvalidArgumentException For invalid prompts, options or client configuration.
- * @throws \Phore\AiHarness\Client\AiRequestException If the provider request fails.
+ * @param string|PromptType|ToolType|array<int, string|PromptType|ToolType> $prompts Instructions/sources; strings are instruction-enabled.
+ * @param array{ai_context?: AiContext|string|null, input?: string|null, client?: OpenAiClient|string|null, model?: string, reasoning?: array|null, timeout?: int, connect_timeout?: int, debug_log?: bool|LoggerInterface} $options Common options; see docs/ai-context.md. Without ai_context each call is isolated.
+ * @return string Generated or edited text, never the edit callback's commentary.
+ * @throws InvalidArgumentException For invalid context selectors or options.
+ * @throws RuntimeException For provider/tool failure or an unfinished edit.
+ * @example $text = phore_ai_text('Correct spelling.', ['input' => $draft, 'ai_context' => 'default']);
+ * @see AiContext::text()
  */
 function phore_ai_text(string|PromptType|ToolType|array $prompts, array $options = []): string
 {
-    return Toolkit::createAi($options)
-        ->with(...Toolkit::normalizePromptItems($prompts))
-        ->run();
+    return AiContextRegistry::resolve($options)->text($prompts, $options['input'] ?? null, $options);
 }

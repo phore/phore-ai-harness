@@ -144,6 +144,7 @@ final class OpenAiPromptTypeConverterTest extends TestCase
 
         self::assertStringContainsString('batch mode', $payload['instructions']);
         self::assertStringContainsString('cannot interact with the user', $payload['instructions']);
+        self::assertStringContainsString('clarification tool such as ask_user_question', $payload['instructions']);
         self::assertStringContainsString('external/untrusted', $payload['instructions']);
         self::assertStringContainsString('instruction-enabled', $payload['instructions']);
         self::assertStringEndsWith("\nHello", $payload['input'][0]['content'][0]['text']);
@@ -266,6 +267,7 @@ final class OpenAiPromptTypeConverterTest extends TestCase
         $sections = (new OpenAiPromptToContentConverter())->convert(new FilePrompt(
             'rules.md',
             'Apply these rules.',
+            'text/markdown',
             allowInstructions: true,
         ));
 
