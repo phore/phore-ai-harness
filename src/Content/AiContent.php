@@ -37,9 +37,33 @@ abstract readonly class AiContent implements PromptType
 
     abstract public function toPromptType(): PromptType;
 
-    public function type(): string { return 'content'; }
+    /**
+     * Return the same immutable content bound to another AI context.
+     *
+     * Passing null deliberately detaches the content from its current conversation
+     * and creates a fresh context containing only this content. Passing an existing
+     * context clones that idle context and appends this content as prepared source.
+     *
+     * @param AiContext|null $context Existing idle context or null for a fresh context.
+     * @return static New content instance; the original object stays unchanged.
+     * @throws \LogicException When the supplied context has already started.
+     * @example $detached = $image->withContext();
+     * @see AiContext::withPrepared()
+     */
+    public function withContext(?AiContext $context = null): static
+    {
+        return $this->recreate($this->rawData, $context);
+    }
 
-    public function size(): int { return strlen($this->rawData); }
+    public function type(): string
+    {
+        return 'content';
+    }
+
+    public function size(): int
+    {
+        return strlen($this->rawData);
+    }
 
     public function toArray(): array
     {
@@ -53,12 +77,23 @@ abstract readonly class AiContent implements PromptType
         ], static fn (mixed $value): bool => $value !== null);
     }
 
+    /**
+     * Recreate this concrete immutable content object with raw data and context.
+     *
+     * @param string $rawData Raw content for the new instance.
+     * @param AiContext|null $context Context to bind, or null for a fresh context.
+     * @return static New concrete content object.
+     * @see withContext()
+     */
+    abstract protected function recreate(string $rawData, ?AiContext $context = null): static;
+
     protected static function readFile(string $path): array
     {
         $data = @file_get_contents($path);
         if ($data === false) {
             throw new RuntimeException('Could not read AI content file: ' . $path);
         }
+
         return [$data, self::normalizeFileName($path)];
     }
 
@@ -67,10 +102,12 @@ abstract readonly class AiContent implements PromptType
         if (!is_resource($stream)) {
             throw new InvalidArgumentException('AI content stream must be a resource.');
         }
+
         $data = stream_get_contents($stream);
         if ($data === false) {
             throw new RuntimeException('Could not read AI content stream.');
         }
+
         return $data;
     }
 
@@ -79,10 +116,12 @@ abstract readonly class AiContent implements PromptType
         if ($fileName === null) {
             return null;
         }
+
         $fileName = trim($fileName);
         if ($fileName === '') {
             throw new InvalidArgumentException('AI content file name must not be empty.');
         }
+
         return basename(str_replace('\\', '/', $fileName));
     }
 
@@ -91,10 +130,12 @@ abstract readonly class AiContent implements PromptType
         if ($value === null) {
             return null;
         }
+
         $value = trim($value);
         if ($value === '') {
             throw new InvalidArgumentException('AI content ' . $label . ' must not be empty.');
         }
+
         return $value;
     }
 }

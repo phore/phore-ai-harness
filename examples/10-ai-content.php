@@ -1,38 +1,54 @@
 <?php
 
-declare(strict_types=1);
-
-use Phore\AiHarness\Content\AiCode;
 use Phore\AiHarness\Content\AiDocument;
-use Phore\AiHarness\Content\AiImage;
+use Phore\AiHarness\Content\AiDocumentFactory;
+use Phore\AiHarness\Content\AiText;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
 
-// Raw mail attachment: no temporary file required.
+// Preferred entry point: the factory selects the concrete AiDocument subtype.
 $attachmentBytes = file_get_contents(__DIR__ . '/fixtures/example.pdf');
-$cv = AiDocument::fromRaw(
+$factory = new AiDocumentFactory();
+$document = $factory->fromRaw(
     rawData: $attachmentBytes,
     fileName: 'lebenslauf.pdf',
     description: 'Application document received by email.',
 );
 
-$isCv = $cv->ai_yes_no('Is this document a CV?');
-$text = $cv->extractText();
+$isCv = $document->ai_yes_no('Is this document a CV?');
 
-// Streams are accepted as well.
-$imageStream = fopen(__DIR__ . '/fixtures/example.png', 'rb');
-$image = AiImage::fromStream(
-    stream: $imageStream,
-    fileName: 'bewerberfoto.png',
-    description: 'Applicant photo.',
-);
-$webInput = $image->resizedToFit(1600, 1600);
+// Plain text is still an AiDocument and can be edited immutably.
+$text = AiText::fromRaw('A short draft.');
+$editedText = $text->edit('Make this more precise.');
 
-// Code carries language/version metadata.
-$code = AiCode::fromRaw(
-    rawData: '<?php echo "hello";',
-    language: 'php',
-    version: '8.5',
-    fileName: 'Action.php',
+// withContext(null) deliberately detaches content from its previous conversation.
+$detached = $editedText->withContext();
+
+// Applications may register their own AiDocument subtype.
+final readonly class CustomNote extends AiDocument
+{
+    public function __construct(
+        string $rawData,
+        ?string $fileName = null,
+        ?string $description = null,
+        ?\Phore\AiHarness\AiContext $context = null,
+    ) {
+        parent::__construct($rawData, $fileName, 'text/plain', $description, $context);
+    }
+}
+
+$factory->register(
+    'application/x-note',
+    fn (
+        string $rawData,
+        ?string $fileName,
+        string $contentType,
+        ?string $description,
+        ?\Phore\AiHarness\AiContext $context,
+    ): AiDocument => new CustomNote($rawData, $fileName, $description, $context),
+    extensions: ['note'],
 );
-$summary = $code->ai_text('Summarize what this code does in three bullets.');
+
+$custom = $factory->fromRaw('Remember this.', fileName: 'memo.note');
+
+var_dump($isCv, (string) $editedText, $detached instanceof AiDocument, $custom::class);
