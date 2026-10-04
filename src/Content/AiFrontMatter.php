@@ -56,10 +56,10 @@ final readonly class AiFrontMatter extends AiMarkdown
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
-        ClassSchema|string|null $headerSchema = null,
         ?string $id = null,
         array $aliases = [],
         string $instructions = '',
+        ClassSchema|string|null $headerSchema = null,
     ): static {
         return new static(
             $rawData,
@@ -85,10 +85,10 @@ final readonly class AiFrontMatter extends AiMarkdown
         string $path,
         ?string $description = null,
         ?AiContext $context = null,
-        ClassSchema|string|null $headerSchema = null,
         ?string $id = null,
         array $aliases = [],
         string $instructions = '',
+        ClassSchema|string|null $headerSchema = null,
     ): static {
         [$data, $fileName] = self::readFile($path);
 
@@ -116,10 +116,10 @@ final readonly class AiFrontMatter extends AiMarkdown
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
-        ClassSchema|string|null $headerSchema = null,
         ?string $id = null,
         array $aliases = [],
         string $instructions = '',
+        ClassSchema|string|null $headerSchema = null,
     ): static {
         return new static(
             self::readStream($stream),
