@@ -176,7 +176,7 @@ final class AiDocumentFactory
                 $description,
                 $context,
             ),
-            default => AiDocument::fromRaw($rawData, $fileName, $contentType, $description, $context),
+            default => new AiDocument($rawData, $fileName, $contentType, $description, $context),
         };
     }
 }
