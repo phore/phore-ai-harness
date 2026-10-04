@@ -29,7 +29,7 @@ $matching = $context->queryContent('Which content is part of the applicant CV?')
 $selected = $matching->all();
 
 // Plain text is still an AiDocument and can be edited immutably.
-$text = AiText::fromRaw('A short draft.');
+$text = AiText::fromFile('/path/to/draft.txt');
 $editedText = $text->edit('Make this more precise.');
 
 // withContext(null) deliberately detaches content from its previous conversation.

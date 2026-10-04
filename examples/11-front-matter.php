@@ -1,6 +1,7 @@
 <?php
 
 use Phore\AiHarness\Content\AiFrontMatter;
+
 require dirname(__DIR__) . '/vendor/autoload.php';
 
 final class ArticleHeader
