@@ -18,8 +18,20 @@ readonly class AiText extends AiDocument
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ) {
-        parent::__construct($rawData, $fileName, 'text/plain', $description, $context);
+        parent::__construct(
+            $rawData,
+            $fileName,
+            'text/plain',
+            $description,
+            $context,
+            $id,
+            $aliases,
+            $instructions,
+        );
     }
 
     public static function fromRaw(
@@ -27,18 +39,40 @@ readonly class AiText extends AiDocument
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ): static {
-        return new static($rawData, $fileName, $description, $context);
+        return new static(
+            $rawData,
+            $fileName,
+            $description,
+            $context,
+            $id,
+            $aliases,
+            $instructions,
+        );
     }
 
     public static function fromFile(
         string $path,
         ?string $description = null,
         ?AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ): static {
         [$data, $fileName] = self::readFile($path);
 
-        return new static($data, $fileName, $description, $context);
+        return new static(
+            $data,
+            $fileName,
+            $description,
+            $context,
+            $id,
+            $aliases,
+            $instructions,
+        );
     }
 
     public static function fromStream(
@@ -46,8 +80,19 @@ readonly class AiText extends AiDocument
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ): static {
-        return new static(self::readStream($stream), $fileName, $description, $context);
+        return new static(
+            self::readStream($stream),
+            $fileName,
+            $description,
+            $context,
+            $id,
+            $aliases,
+            $instructions,
+        );
     }
 
     /**
@@ -71,7 +116,8 @@ readonly class AiText extends AiDocument
             $this->fileName ?? 'content.txt',
             $this->rawData,
             $this->contentType,
-            instructions: $this->description,
+            alias: $this->id,
+            instructions: $this->promptInstructions(),
             type: 'text',
             allowInstructions: false,
         );
@@ -82,8 +128,19 @@ readonly class AiText extends AiDocument
         return $this->rawData;
     }
 
-    protected function recreate(string $rawData, ?AiContext $context = null): static
-    {
-        return new static($rawData, $this->fileName, $this->description, $context);
+    protected function recreate(
+        string $rawData,
+        ?AiContext $context = null,
+        ?string $id = null,
+    ): static {
+        return new static(
+            $rawData,
+            $this->fileName,
+            $this->description,
+            $context,
+            $id,
+            $this->aliases,
+            $this->instructions,
+        );
     }
 }

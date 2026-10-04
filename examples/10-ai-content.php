@@ -13,9 +13,23 @@ $document = $factory->fromRaw(
     rawData: $attachmentBytes,
     fileName: 'lebenslauf.pdf',
     description: 'Application document received by email.',
+    id: 'cv',
+    aliases: ['resume', 'application attachment'],
+    instructions: 'Use this as the applicant-provided CV.',
 );
 
 $isCv = $document->ai_yes_no('Is this document a CV?');
+
+$coverLetter = $factory->fromRaw(
+    rawData: 'Dear team, ...',
+    fileName: 'cover-letter.txt',
+    id: 'cover-letter',
+    aliases: ['letter'],
+);
+
+$context = new \Phore\AiHarness\AiContext(prompts: [$document, $coverLetter]);
+$matching = $context->queryContent('Which content is part of the applicant CV?');
+$selected = $matching->all();
 
 // Plain text is still an AiDocument and can be edited immutably.
 $text = AiText::fromRaw('A short draft.');
@@ -33,6 +47,9 @@ final readonly class CustomNote extends AiDocument
         \Phore\AiHarness\Content\ContentType|string|null $contentType = null,
         ?string $description = null,
         ?\Phore\AiHarness\AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ) {
         parent::__construct(
             $rawData,
@@ -40,6 +57,9 @@ final readonly class CustomNote extends AiDocument
             $contentType ?? 'application/x-note',
             $description,
             $context,
+            $id,
+            $aliases,
+            $instructions,
         );
     }
 }
@@ -52,10 +72,28 @@ $factory->register(
         string $contentType,
         ?string $description,
         ?\Phore\AiHarness\AiContext $context,
-    ): AiDocument => new CustomNote($rawData, $fileName, $contentType, $description, $context),
+        ?string $id,
+        array $aliases,
+        string $instructions,
+    ): AiDocument => new CustomNote(
+        $rawData,
+        $fileName,
+        $contentType,
+        $description,
+        $context,
+        $id,
+        $aliases,
+        $instructions,
+    ),
     extensions: ['note'],
 );
 
 $custom = $factory->fromRaw('Remember this.', fileName: 'memo.note');
 
-var_dump($isCv, (string) $editedText, $detached instanceof AiDocument, $custom::class);
+var_dump(
+    $isCv,
+    array_map(static fn (AiDocument $item): string => $item->getId(), $selected),
+    (string) $editedText,
+    $detached instanceof AiDocument,
+    $custom::class,
+);

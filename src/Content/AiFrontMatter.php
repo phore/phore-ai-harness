@@ -20,6 +20,9 @@ final readonly class AiFrontMatter extends AiMarkdown
         ?string $description = null,
         ?AiContext $context = null,
         public ?ClassSchema $headerSchema = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ) {
         [$header, $body] = self::parseFrontMatter($rawData);
         if ($headerSchema !== null) {
@@ -28,7 +31,104 @@ final readonly class AiFrontMatter extends AiMarkdown
 
         $this->header = $header;
         $this->body = AiMarkdown::fromRaw($body, $fileName, $description);
-        parent::__construct($rawData, $fileName ?? 'content.md', $description, $context);
+        parent::__construct(
+            $rawData,
+            $fileName ?? 'content.md',
+            $description,
+            $context,
+            $id,
+            $aliases,
+            $instructions,
+        );
+    }
+
+    /**
+     * Create a front-matter document from raw Markdown.
+     *
+     * @return static
+     * @example $page = AiFrontMatter::fromRaw($markdown, headerSchema: $schema);
+     * @see AiDocumentFactory::fromRaw()
+     */
+    public static function fromRaw(
+        string $rawData,
+        ?string $fileName = null,
+        ?string $description = null,
+        ?AiContext $context = null,
+        ?ClassSchema $headerSchema = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
+    ): static {
+        return new static(
+            $rawData,
+            $fileName,
+            $description,
+            $context,
+            $headerSchema,
+            $id,
+            $aliases,
+            $instructions,
+        );
+    }
+
+    /**
+     * Load a front-matter document from a readable Markdown file.
+     *
+     * @return static
+     * @throws \RuntimeException When the file cannot be read.
+     * @example $page = AiFrontMatter::fromFile('/tmp/page.md', headerSchema: $schema);
+     * @see fromRaw()
+     */
+    public static function fromFile(
+        string $path,
+        ?string $description = null,
+        ?AiContext $context = null,
+        ?ClassSchema $headerSchema = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
+    ): static {
+        [$data, $fileName] = self::readFile($path);
+
+        return new static(
+            $data,
+            $fileName,
+            $description,
+            $context,
+            $headerSchema,
+            $id,
+            $aliases,
+            $instructions,
+        );
+    }
+
+    /**
+     * Create a front-matter document from a readable stream.
+     *
+     * @return static
+     * @example $page = AiFrontMatter::fromStream($stream, fileName: 'page.md');
+     * @see fromRaw()
+     */
+    public static function fromStream(
+        mixed $stream,
+        ?string $fileName = null,
+        ?string $description = null,
+        ?AiContext $context = null,
+        ?ClassSchema $headerSchema = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
+    ): static {
+        return new static(
+            self::readStream($stream),
+            $fileName,
+            $description,
+            $context,
+            $headerSchema,
+            $id,
+            $aliases,
+            $instructions,
+        );
     }
 
     public function headerEdit(string $instruction): self
@@ -54,6 +154,9 @@ final readonly class AiFrontMatter extends AiMarkdown
             $this->description,
             $this->ai_get_context(),
             $this->headerSchema,
+            null,
+            $this->aliases,
+            $this->instructions,
         );
     }
 
@@ -67,6 +170,9 @@ final readonly class AiFrontMatter extends AiMarkdown
             $this->description,
             $this->ai_get_context(),
             $this->headerSchema,
+            null,
+            $this->aliases,
+            $this->instructions,
         );
     }
 
@@ -83,6 +189,9 @@ final readonly class AiFrontMatter extends AiMarkdown
             $this->description,
             $this->ai_get_context(),
             $this->headerSchema,
+            null,
+            $this->aliases,
+            $this->instructions,
         );
     }
 
@@ -97,14 +206,20 @@ final readonly class AiFrontMatter extends AiMarkdown
         return preg_match('/^---\\R.*?\\R---(?:\\R|$)/s', $rawData) === 1;
     }
 
-    protected function recreate(string $rawData, ?AiContext $context = null): static
-    {
+    protected function recreate(
+        string $rawData,
+        ?AiContext $context = null,
+        ?string $id = null,
+    ): static {
         return new self(
             $rawData,
             $this->fileName,
             $this->description,
             $context,
             $this->headerSchema,
+            $id,
+            $this->aliases,
+            $this->instructions,
         );
     }
 

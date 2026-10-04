@@ -21,6 +21,9 @@ final readonly class AiImage extends AiDocument
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ) {
         $info = @getimagesizefromstring($rawData);
         if ($info === false || !isset($info[0], $info[1], $info['mime'])) {
@@ -29,7 +32,16 @@ final readonly class AiImage extends AiDocument
 
         $this->width = (int) $info[0];
         $this->height = (int) $info[1];
-        parent::__construct($rawData, $fileName, ContentType::fromMimeType((string) $info['mime']), $description, $context);
+        parent::__construct(
+            $rawData,
+            $fileName,
+            ContentType::fromMimeType((string) $info['mime']),
+            $description,
+            $context,
+            $id,
+            $aliases,
+            $instructions,
+        );
     }
 
     public static function fromRaw(
@@ -37,18 +49,24 @@ final readonly class AiImage extends AiDocument
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ): self {
-        return new self($rawData, $fileName, $description, $context);
+        return new self($rawData, $fileName, $description, $context, $id, $aliases, $instructions);
     }
 
     public static function fromFile(
         string $path,
         ?string $description = null,
         ?AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ): self {
         [$data, $fileName] = self::readFile($path);
 
-        return new self($data, $fileName, $description, $context);
+        return new self($data, $fileName, $description, $context, $id, $aliases, $instructions);
     }
 
     public static function fromStream(
@@ -56,8 +74,19 @@ final readonly class AiImage extends AiDocument
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ): self {
-        return new self(self::readStream($stream), $fileName, $description, $context);
+        return new self(
+            self::readStream($stream),
+            $fileName,
+            $description,
+            $context,
+            $id,
+            $aliases,
+            $instructions,
+        );
     }
 
     public function toPromptType(): PromptType
@@ -66,7 +95,8 @@ final readonly class AiImage extends AiDocument
             (new DataUrl($this->rawData, $this->contentType))->toString(),
             $this->fileName,
             $this->contentType,
-            instructions: $this->description,
+            alias: $this->id,
+            instructions: $this->promptInstructions(),
             allowInstructions: false,
         );
     }
@@ -126,7 +156,15 @@ final readonly class AiImage extends AiDocument
             throw new RuntimeException('Could not encode resized image.');
         }
 
-        return new self($data, $this->fileName, $this->description, $this->ai_get_context());
+        return new self(
+            $data,
+            $this->fileName,
+            $this->description,
+            $this->ai_get_context(),
+            null,
+            $this->aliases,
+            $this->instructions,
+        );
     }
 
     public function toArray(): array
@@ -138,8 +176,19 @@ final readonly class AiImage extends AiDocument
         ];
     }
 
-    protected function recreate(string $rawData, ?AiContext $context = null): static
-    {
-        return new self($rawData, $this->fileName, $this->description, $context);
+    protected function recreate(
+        string $rawData,
+        ?AiContext $context = null,
+        ?string $id = null,
+    ): static {
+        return new self(
+            $rawData,
+            $this->fileName,
+            $this->description,
+            $context,
+            $id,
+            $this->aliases,
+            $this->instructions,
+        );
     }
 }

@@ -22,6 +22,9 @@ readonly class AiDocument extends AiContent
         ContentType|string|null $contentType = null,
         ?string $description = null,
         ?AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ) {
         if ($contentType instanceof ContentType) {
             $resolved = $contentType->mimeType();
@@ -39,7 +42,15 @@ readonly class AiDocument extends AiContent
         }
 
         $this->contentType = $resolved;
-        parent::__construct($rawData, $fileName, $description, $context);
+        parent::__construct(
+            $rawData,
+            $fileName,
+            $description,
+            $context,
+            $id,
+            $aliases,
+            $instructions,
+        );
     }
 
     public function toPromptType(): PromptType
@@ -56,7 +67,8 @@ readonly class AiDocument extends AiContent
             $fileName,
             $this->rawData,
             $this->contentType,
-            instructions: $this->description,
+            alias: $this->id,
+            instructions: $this->promptInstructions(),
             allowInstructions: false,
         );
     }
@@ -75,8 +87,20 @@ readonly class AiDocument extends AiContent
         ));
     }
 
-    protected function recreate(string $rawData, ?AiContext $context = null): static
-    {
-        return new static($rawData, $this->fileName, $this->contentType, $this->description, $context);
+    protected function recreate(
+        string $rawData,
+        ?AiContext $context = null,
+        ?string $id = null,
+    ): static {
+        return new static(
+            $rawData,
+            $this->fileName,
+            $this->contentType,
+            $this->description,
+            $context,
+            $id,
+            $this->aliases,
+            $this->instructions,
+        );
     }
 }

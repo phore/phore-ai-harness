@@ -46,6 +46,38 @@ $note = $factory->fromFile('/tmp/customer.note');
 
 Registered factories must return an `AiDocument`.
 
+## IDs, aliases and content queries
+
+Every `AiContent` has a unique immutable ID. Pass `id:` when an application
+already has a stable identifier; otherwise the harness generates one. Aliases
+are optional human-friendly names and may intentionally occur on several
+content objects. `instructions` are document-specific handling notes and
+default to an empty string.
+
+```php
+$cv = $factory->fromRaw(
+    $bytes,
+    fileName: 'cv.pdf',
+    id: 'cv',
+    aliases: ['resume', 'application'],
+    instructions: 'Treat as applicant-provided source material.',
+);
+
+$context = new AiContext(prompts: [$cv, $photo, $coverLetter]);
+$matches = $context->queryContent('Which items are relevant to the CV?');
+
+$all = $matches->all();
+$first = $matches->first();
+$same = $context->getContentById('cv');
+```
+
+`queryContent()` lets the model select only from IDs registered in the
+context, validates the returned IDs locally and returns an
+`AiContentResultSet`. The result set supports `all()`, `first()`,
+`getById()`, another `query()`, and `withContext()` to continue the subset
+on a fresh or supplied conversation branch. IDs must be unique inside one
+context; aliases do not have to be unique.
+
 ## Text and Markdown
 
 `AiText` is the generic string-backed document. `AiMarkdown` specializes it

@@ -15,8 +15,20 @@ readonly class AiMarkdown extends AiText
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ) {
-        AiDocument::__construct($rawData, $fileName, 'text/markdown', $description, $context);
+        AiDocument::__construct(
+            $rawData,
+            $fileName,
+            'text/markdown',
+            $description,
+            $context,
+            $id,
+            $aliases,
+            $instructions,
+        );
     }
 
     public static function fromRaw(
@@ -24,18 +36,40 @@ readonly class AiMarkdown extends AiText
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ): static {
-        return new static($rawData, $fileName, $description, $context);
+        return new static(
+            $rawData,
+            $fileName,
+            $description,
+            $context,
+            $id,
+            $aliases,
+            $instructions,
+        );
     }
 
     public static function fromFile(
         string $path,
         ?string $description = null,
         ?AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ): static {
         [$data, $fileName] = self::readFile($path);
 
-        return new static($data, $fileName, $description, $context);
+        return new static(
+            $data,
+            $fileName,
+            $description,
+            $context,
+            $id,
+            $aliases,
+            $instructions,
+        );
     }
 
     public static function fromStream(
@@ -43,8 +77,19 @@ readonly class AiMarkdown extends AiText
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ): static {
-        return new static(self::readStream($stream), $fileName, $description, $context);
+        return new static(
+            self::readStream($stream),
+            $fileName,
+            $description,
+            $context,
+            $id,
+            $aliases,
+            $instructions,
+        );
     }
 
     public function toPromptType(): PromptType
@@ -53,14 +98,26 @@ readonly class AiMarkdown extends AiText
             $this->fileName ?? 'content.md',
             $this->rawData,
             'text/markdown',
-            instructions: $this->description,
+            alias: $this->id,
+            instructions: $this->promptInstructions(),
             type: 'markdown',
             allowInstructions: false,
         );
     }
 
-    protected function recreate(string $rawData, ?AiContext $context = null): static
-    {
-        return new static($rawData, $this->fileName, $this->description, $context);
+    protected function recreate(
+        string $rawData,
+        ?AiContext $context = null,
+        ?string $id = null,
+    ): static {
+        return new static(
+            $rawData,
+            $this->fileName,
+            $this->description,
+            $context,
+            $id,
+            $this->aliases,
+            $this->instructions,
+        );
     }
 }

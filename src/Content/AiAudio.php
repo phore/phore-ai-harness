@@ -19,6 +19,9 @@ final readonly class AiAudio extends AiDocument
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ) {
         $format = strtolower(trim($format));
         if ($format === '') {
@@ -33,7 +36,16 @@ final readonly class AiAudio extends AiDocument
             'ogg' => 'audio/ogg',
             default => throw new InvalidArgumentException('Unsupported AI audio format: ' . $format),
         };
-        parent::__construct($rawData, $fileName, $contentType, $description, $context);
+        parent::__construct(
+            $rawData,
+            $fileName,
+            $contentType,
+            $description,
+            $context,
+            $id,
+            $aliases,
+            $instructions,
+        );
     }
 
     public static function fromRaw(
@@ -42,19 +54,43 @@ final readonly class AiAudio extends AiDocument
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ): self {
-        return new self($rawData, $format, $fileName, $description, $context);
+        return new self(
+            $rawData,
+            $format,
+            $fileName,
+            $description,
+            $context,
+            $id,
+            $aliases,
+            $instructions,
+        );
     }
 
     public static function fromFile(
         string $path,
         ?string $description = null,
         ?AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ): self {
         [$data, $fileName] = self::readFile($path);
         $format = ContentType::fromFileName($fileName)->extension();
 
-        return new self($data, $format, $fileName, $description, $context);
+        return new self(
+            $data,
+            $format,
+            $fileName,
+            $description,
+            $context,
+            $id,
+            $aliases,
+            $instructions,
+        );
     }
 
     public static function fromStream(
@@ -63,8 +99,20 @@ final readonly class AiAudio extends AiDocument
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ): self {
-        return new self(self::readStream($stream), $format, $fileName, $description, $context);
+        return new self(
+            self::readStream($stream),
+            $format,
+            $fileName,
+            $description,
+            $context,
+            $id,
+            $aliases,
+            $instructions,
+        );
     }
 
     public function toPromptType(): PromptType
@@ -73,7 +121,8 @@ final readonly class AiAudio extends AiDocument
             base64_encode($this->rawData),
             $this->format,
             $this->fileName,
-            instructions: $this->description,
+            alias: $this->id,
+            instructions: $this->promptInstructions(),
             allowInstructions: false,
         );
     }
@@ -83,8 +132,20 @@ final readonly class AiAudio extends AiDocument
         return parent::toArray() + ['format' => $this->format];
     }
 
-    protected function recreate(string $rawData, ?AiContext $context = null): static
-    {
-        return new self($rawData, $this->format, $this->fileName, $this->description, $context);
+    protected function recreate(
+        string $rawData,
+        ?AiContext $context = null,
+        ?string $id = null,
+    ): static {
+        return new self(
+            $rawData,
+            $this->format,
+            $this->fileName,
+            $this->description,
+            $context,
+            $id,
+            $this->aliases,
+            $this->instructions,
+        );
     }
 }

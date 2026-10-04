@@ -390,6 +390,12 @@ types through `register()`. Markdown with conventional YAML front matter is
 recognized automatically; an optional `headerSchema` adds field descriptions
 and validation for structured header edits.
 
+Each content object also has a unique immutable ID, optional non-unique
+aliases and optional document-specific instructions. Use
+`$context->getContentById()` for exact lookup and `$context->queryContent()`
+for AI-assisted selection. Queries return an `AiContentResultSet` that can be
+refined again or rebound to a fresh context.
+
 All document objects are immutable. `withContext($context)` returns a copy on
 a cloned conversation branch and can also attach content to an already started
 context for its next request. `withContext(null)` deliberately detaches the

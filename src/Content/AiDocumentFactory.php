@@ -14,7 +14,7 @@ use Phore\Schema\Schema\ClassSchema;
 final class AiDocumentFactory
 {
     /**
-     * @var array<string, callable(string, ?string, string, ?string, ?AiContext): AiDocument>
+     * @var array<string, callable(string, ?string, string, ?string, ?AiContext, ?string, array, string): AiDocument>
      */
     private array $factories = [];
 
@@ -30,7 +30,7 @@ final class AiDocumentFactory
      * extensions let fromFile() and fromRaw(fileName: ...) resolve custom MIME types.
      *
      * @param string $contentType MIME type handled by the callback.
-     * @param callable(string, ?string, string, ?string, ?AiContext): AiDocument $factory Factory callback.
+     * @param callable(string, ?string, string, ?string, ?AiContext, ?string, array, string): AiDocument $factory Factory callback.
      * @param list<string> $extensions Optional filename extensions without dots.
      * @return $this Same factory instance for fluent setup.
      * @example $factory->register('application/x-note', fn ($raw, $name, $type, $description, $context) => new CustomNote($raw, $name, $description, $context), ['note']);
@@ -72,6 +72,9 @@ final class AiDocumentFactory
         ?string $description = null,
         ?AiContext $context = null,
         ?ClassSchema $headerSchema = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ): AiDocument {
         $rawData = @file_get_contents($path);
         if ($rawData === false) {
@@ -88,6 +91,9 @@ final class AiDocumentFactory
             $description,
             $context,
             $headerSchema,
+            $id,
+            $aliases,
+            $instructions,
         );
     }
 
@@ -114,6 +120,9 @@ final class AiDocumentFactory
         ?string $description = null,
         ?AiContext $context = null,
         ?ClassSchema $headerSchema = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ): AiDocument {
         $mimeType = $this->resolveContentType($contentType, $fileName);
 
@@ -124,6 +133,9 @@ final class AiDocumentFactory
             $description,
             $context,
             $headerSchema,
+            $id,
+            $aliases,
+            $instructions,
         );
     }
 
@@ -160,6 +172,9 @@ final class AiDocumentFactory
         ?string $description,
         ?AiContext $context,
         ?ClassSchema $headerSchema,
+        ?string $id,
+        array $aliases,
+        string $instructions,
     ): AiDocument {
         if (isset($this->factories[$contentType])) {
             $document = ($this->factories[$contentType])(
@@ -168,6 +183,9 @@ final class AiDocumentFactory
                 $contentType,
                 $description,
                 $context,
+                $id,
+                $aliases,
+                $instructions,
             );
             if (!$document instanceof AiDocument) {
                 throw new InvalidArgumentException('Registered AI document factory must return AiDocument.');
@@ -184,18 +202,57 @@ final class AiDocumentFactory
                     $description,
                     $context,
                     $headerSchema,
+                    $id,
+                    $aliases,
+                    $instructions,
                 )
-                : AiMarkdown::fromRaw($rawData, $fileName, $description, $context),
-            $contentType === 'text/plain' => AiText::fromRaw($rawData, $fileName, $description, $context),
-            str_starts_with($contentType, 'image/') => AiImage::fromRaw($rawData, $fileName, $description, $context),
+                : AiMarkdown::fromRaw(
+                    $rawData,
+                    $fileName,
+                    $description,
+                    $context,
+                    $id,
+                    $aliases,
+                    $instructions,
+                ),
+            $contentType === 'text/plain' => AiText::fromRaw(
+                $rawData,
+                $fileName,
+                $description,
+                $context,
+                $id,
+                $aliases,
+                $instructions,
+            ),
+            str_starts_with($contentType, 'image/') => AiImage::fromRaw(
+                $rawData,
+                $fileName,
+                $description,
+                $context,
+                $id,
+                $aliases,
+                $instructions,
+            ),
             str_starts_with($contentType, 'audio/') => AiAudio::fromRaw(
                 $rawData,
                 ContentType::fromMimeType($contentType)->extension(),
                 $fileName,
                 $description,
                 $context,
+                $id,
+                $aliases,
+                $instructions,
             ),
-            default => new AiDocument($rawData, $fileName, $contentType, $description, $context),
+            default => new AiDocument(
+                $rawData,
+                $fileName,
+                $contentType,
+                $description,
+                $context,
+                $id,
+                $aliases,
+                $instructions,
+            ),
         };
     }
 }

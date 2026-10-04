@@ -21,6 +21,9 @@ final readonly class AiCode extends AiDocument
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ) {
         $language = trim($language);
         if ($language === '') {
@@ -29,7 +32,16 @@ final readonly class AiCode extends AiDocument
 
         $this->language = $language;
         $this->version = self::normalizeOptionalText($version, 'code version');
-        parent::__construct($rawData, $fileName, 'text/plain', $description, $context);
+        parent::__construct(
+            $rawData,
+            $fileName,
+            'text/plain',
+            $description,
+            $context,
+            $id,
+            $aliases,
+            $instructions,
+        );
     }
 
     public static function fromRaw(
@@ -39,8 +51,21 @@ final readonly class AiCode extends AiDocument
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ): self {
-        return new self($rawData, $language, $version, $fileName, $description, $context);
+        return new self(
+            $rawData,
+            $language,
+            $version,
+            $fileName,
+            $description,
+            $context,
+            $id,
+            $aliases,
+            $instructions,
+        );
     }
 
     public static function fromFile(
@@ -49,10 +74,23 @@ final readonly class AiCode extends AiDocument
         ?string $version = null,
         ?string $description = null,
         ?AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ): self {
         [$data, $fileName] = self::readFile($path);
 
-        return new self($data, $language, $version, $fileName, $description, $context);
+        return new self(
+            $data,
+            $language,
+            $version,
+            $fileName,
+            $description,
+            $context,
+            $id,
+            $aliases,
+            $instructions,
+        );
     }
 
     public static function fromStream(
@@ -62,8 +100,21 @@ final readonly class AiCode extends AiDocument
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ): self {
-        return new self(self::readStream($stream), $language, $version, $fileName, $description, $context);
+        return new self(
+            self::readStream($stream),
+            $language,
+            $version,
+            $fileName,
+            $description,
+            $context,
+            $id,
+            $aliases,
+            $instructions,
+        );
     }
 
     public function toPromptType(): PromptType
@@ -80,7 +131,8 @@ final readonly class AiCode extends AiDocument
             $this->fileName ?? ('code.' . strtolower($this->language)),
             $this->rawData,
             'text/plain',
-            instructions: $meta,
+            alias: $this->id,
+            instructions: trim($meta . "\n" . ($this->promptInstructions() ?? '')),
             type: $this->language,
             allowInstructions: false,
         );
@@ -91,8 +143,11 @@ final readonly class AiCode extends AiDocument
         return parent::toArray() + ['language' => $this->language, 'version' => $this->version];
     }
 
-    protected function recreate(string $rawData, ?AiContext $context = null): static
-    {
+    protected function recreate(
+        string $rawData,
+        ?AiContext $context = null,
+        ?string $id = null,
+    ): static {
         return new self(
             $rawData,
             $this->language,
@@ -100,6 +155,9 @@ final readonly class AiCode extends AiDocument
             $this->fileName,
             $this->description,
             $context,
+            $id,
+            $this->aliases,
+            $this->instructions,
         );
     }
 }

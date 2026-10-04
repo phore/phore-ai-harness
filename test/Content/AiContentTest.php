@@ -11,6 +11,7 @@ use Phore\AiHarness\Content\AiCode;
 use Phore\AiHarness\Content\AiDocument;
 use Phore\AiHarness\Content\AiDocumentFactory;
 use Phore\AiHarness\Content\AiFrontMatter;
+use Phore\AiHarness\Content\AiContentResultSet;
 use Phore\AiHarness\Content\AiImage;
 use Phore\AiHarness\Content\AiMarkdown;
 use Phore\AiHarness\Content\AiText;
@@ -26,8 +27,20 @@ final readonly class CustomDocument extends AiDocument
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
+        ?string $id = null,
+        array $aliases = [],
+        string $instructions = '',
     ) {
-        parent::__construct($rawData, $fileName, 'text/plain', $description, $context);
+        parent::__construct(
+            $rawData,
+            $fileName,
+            'text/plain',
+            $description,
+            $context,
+            $id,
+            $aliases,
+            $instructions,
+        );
     }
 }
 
@@ -72,8 +85,16 @@ final class AiContentTest extends TestCase
         $factory = new AiDocumentFactory();
         $factory->register(
             'application/x-custom',
-            fn ($raw, $name, $type, $description, $context) =>
-                new CustomDocument($raw, $name, $description, $context),
+            fn ($raw, $name, $type, $description, $context, $id, $aliases, $instructions) =>
+                new CustomDocument(
+                    $raw,
+                    $name,
+                    $description,
+                    $context,
+                    $id,
+                    $aliases,
+                    $instructions,
+                ),
             ['custom'],
         );
 
@@ -81,6 +102,67 @@ final class AiContentTest extends TestCase
             CustomDocument::class,
             $factory->fromRaw('custom data', fileName: 'item.custom'),
         );
+    }
+
+    public function testContentIdentityAliasesAndInstructions(): void
+    {
+        $document = AiText::fromRaw(
+            'hello',
+            id: 'mail-body',
+            aliases: ['body', 'message'],
+            instructions: 'Use as the authoritative message body.',
+        );
+
+        self::assertSame('mail-body', $document->getId());
+        self::assertSame(['body', 'message'], $document->getAliases());
+        self::assertSame(
+            'Use as the authoritative message body.',
+            $document->getInstructions(),
+        );
+    }
+
+    public function testContentIdIsGeneratedWhenOmitted(): void
+    {
+        $document = AiText::fromRaw('hello');
+
+        self::assertMatchesRegularExpression(
+            '/^content_[a-f0-9]{16}$/',
+            $document->getId(),
+        );
+    }
+
+    public function testContextRejectsDuplicateContentIds(): void
+    {
+        $first = AiText::fromRaw('first', id: 'same');
+        $second = AiText::fromRaw('second', id: 'same');
+
+        $this->expectException(InvalidArgumentException::class);
+        new AiContext(prompts: [$first, $second]);
+    }
+
+    public function testContextCanResolveContentById(): void
+    {
+        $first = AiText::fromRaw('first', id: 'first');
+        $second = AiText::fromRaw('second', id: 'second');
+        $context = new AiContext(prompts: [$first, $second]);
+
+        self::assertSame($second, $context->getContentById('second'));
+        self::assertNull($context->getContentById('missing'));
+    }
+
+    public function testContentResultSetExposesSelectedItems(): void
+    {
+        $first = AiText::fromRaw('first', id: 'first');
+        $second = AiText::fromRaw('second', id: 'second');
+        $set = new AiContentResultSet(
+            [$first, $second],
+            new AiContext(prompts: [$first, $second]),
+        );
+
+        self::assertCount(2, $set);
+        self::assertSame($first, $set->first());
+        self::assertSame($second, $set->getById('second'));
+        self::assertSame([$first, $second], $set->all());
     }
 
     public function testWithContextCreatesNewObjectAndCanDetach(): void
