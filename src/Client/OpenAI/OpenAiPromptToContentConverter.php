@@ -105,7 +105,7 @@ final readonly class OpenAiPromptToContentConverter
                 "Unsupported OpenAI file format for '%s': MIME type '%s'. Allowed MIME types: %s",
                 $prompt->fileName,
                 $prompt->contentType,
-                implode(', ', self::SUPPORTED_FILE_CONTENT_TYPES),
+                implode(', ', ContentType::fileMimeTypes()),
             ));
         }
 
