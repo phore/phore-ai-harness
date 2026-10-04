@@ -6,6 +6,7 @@ namespace Phore\AiHarness\Client\OpenAI;
 
 use InvalidArgumentException;
 use JsonException;
+use Phore\AiHarness\Content\AiContent;
 use Phore\AiHarness\Helper\DataUrl;
 use Phore\AiHarness\Helper\Toolkit;
 use Phore\AiHarness\PromptType\AudioPrompt;
@@ -89,6 +90,7 @@ final readonly class OpenAiPromptToContentConverter
     private function convertPromptToSections(PromptType $prompt): array
     {
         return match (true) {
+            $prompt instanceof AiContent => $this->convert($prompt->toPromptType()),
             $prompt instanceof PromptFile => $this->convert($prompt->segments()),
             $prompt instanceof TextPrompt => [[
                 'type' => 'input_text',
@@ -181,6 +183,7 @@ final readonly class OpenAiPromptToContentConverter
         }
 
         return match (true) {
+            $prompt instanceof AiContent => $this->convertPromptToText($prompt->toPromptType()),
             $prompt instanceof TextPrompt => $this->convertTextPrompt($prompt),
             $prompt instanceof FilePrompt => $this->segmentMetadataText($prompt, 'file')
                 . "File: {$prompt->fileName}\n```\n{$prompt->content}\n```",

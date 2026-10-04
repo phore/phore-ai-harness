@@ -8,6 +8,7 @@ use InvalidArgumentException;
 use JsonException;
 use Phore\AiHarness\Client\AiRequest;
 use Phore\AiHarness\Helper\Toolkit;
+use Phore\AiHarness\PromptType\AiInstruction;
 use Phore\AiHarness\PromptType\DefaultSystemPrompt;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\PromptType\SystemPrompt;
@@ -47,20 +48,15 @@ final readonly class OpenAiPromptTypeConverter
         $contentPrompts = [];
 
         foreach ($this->normalizePrompts($prompts) as $prompt) {
-            if ($prompt->type() === 'system') {
-                if ($prompt instanceof SystemPrompt) {
-                    $instructions[] = $prompt->text;
-                    continue;
-                }
-
-                $array = $prompt->toArray();
-                if (isset($array['text']) && is_string($array['text'])) {
-                    $instructions[] = $array['text'];
-                    continue;
-                }
-
-                $instructions[] = $this->contentConverter->convertPromptToText($prompt);
+            if ($prompt instanceof SystemPrompt || $prompt instanceof AiInstruction) {
+                $instructions[] = $prompt->text;
                 continue;
+            }
+
+            if ($prompt->type() === 'system') {
+                throw new InvalidArgumentException(
+                    'Only SystemPrompt and AiInstruction may use the provider instruction channel.'
+                );
             }
 
             $contentPrompts[] = $prompt;

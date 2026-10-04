@@ -152,6 +152,28 @@ final class AiContext
     }
 
     /**
+     * Clone a fresh context and append prepared prompts/tools.
+     *
+     * Prepared source material cannot be added after the provider conversation
+     * started, because root content is not resent with previous_response_id.
+     */
+    public function withPrepared(string|PromptType|ToolType|array $prompts): self
+    {
+        $this->assertIdle();
+        if ($this->responseId !== null) {
+            throw new LogicException('Cannot add prepared content after the AI context has started.');
+        }
+
+        $clone = clone $this;
+        $clone->prompts = $clone->normalizeContextItems([
+            ...$clone->prompts,
+            ...Toolkit::normalizePromptItems($prompts),
+        ]);
+
+        return $clone;
+    }
+
+    /**
      * Export the resumable conversation cursor as a compact JSON string.
      *
      * The export intentionally contains no prompt, tool, client or model
