@@ -217,7 +217,7 @@ final class AiContext
                 $parts[] = 'instructions=' . $content->instructions;
             }
 
-            $choices[$content->id] = implode('; ', $parts);
+            $choices['content:' . $content->id] = implode('; ', $parts);
         }
 
         $ids = $this->choices(
@@ -229,8 +229,13 @@ final class AiContext
         );
 
         $matched = [];
-        foreach ($ids ?? [] as $id) {
-            if (!is_string($id) || !isset($this->contentById[$id])) {
+        foreach ($ids ?? [] as $choiceId) {
+            if (!is_string($choiceId) || !str_starts_with($choiceId, 'content:')) {
+                throw new \RuntimeException('AI content query returned an invalid content selection.');
+            }
+
+            $id = substr($choiceId, strlen('content:'));
+            if (!isset($this->contentById[$id])) {
                 throw new \RuntimeException('AI content query returned an unknown content ID.');
             }
 

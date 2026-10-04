@@ -76,7 +76,9 @@ context, validates the returned IDs locally and returns an
 `AiContentResultSet`. The result set supports `all()`, `first()`,
 `getById()`, another `query()`, and `withContext()` to continue the subset
 on a fresh or supplied conversation branch. IDs must be unique inside one
-context; aliases do not have to be unique.
+context; aliases do not have to be unique. When a context is exported and
+rebuilt later, provide stable explicit IDs so the reconstructed setup hash and
+content references remain stable.
 
 ## Text and Markdown
 

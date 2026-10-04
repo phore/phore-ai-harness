@@ -123,10 +123,6 @@ final readonly class AiCode extends AiDocument
         if ($this->version !== null) {
             $meta .= '; version: ' . $this->version;
         }
-        if ($this->description !== null) {
-            $meta .= '. ' . $this->description;
-        }
-
         return new FilePrompt(
             $this->fileName ?? ('code.' . strtolower($this->language)),
             $this->rawData,
