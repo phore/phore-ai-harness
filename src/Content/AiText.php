@@ -62,7 +62,7 @@ readonly class AiText extends AiDocument
     {
         $edited = $this->ai_text($instruction, input: $this->rawData);
 
-        return $this->recreate($edited);
+        return $this->recreate($edited, $this->ai_get_context());
     }
 
     public function toPromptType(): PromptType

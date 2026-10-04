@@ -6,6 +6,7 @@ namespace Phore\AiHarness\Content;
 
 use InvalidArgumentException;
 use Phore\AiHarness\AiContext;
+use Phore\Schema\Schema\ClassSchema;
 
 /**
  * Preferred creation entry point for AiDocument instances.
@@ -59,7 +60,7 @@ final class AiDocumentFactory
      *
      * @param string $path Readable source file.
      * @param string|null $description Trusted application metadata.
-     * @param AiContext|null $context Optional idle AI context.
+     * @param AiContext|null $context Optional AI context to clone and bind.
      * @return AiDocument Specialized document selected from the filename extension.
      * @throws \RuntimeException When the file cannot be read.
      * @throws InvalidArgumentException When the extension is unsupported.
@@ -70,6 +71,7 @@ final class AiDocumentFactory
         string $path,
         ?string $description = null,
         ?AiContext $context = null,
+        ?ClassSchema $headerSchema = null,
     ): AiDocument {
         $rawData = @file_get_contents($path);
         if ($rawData === false) {
@@ -79,7 +81,14 @@ final class AiDocumentFactory
         $fileName = basename(str_replace('\\', '/', $path));
         $contentType = $this->resolveContentType(null, $fileName);
 
-        return $this->create($rawData, $fileName, $contentType, $description, $context);
+        return $this->create(
+            $rawData,
+            $fileName,
+            $contentType,
+            $description,
+            $context,
+            $headerSchema,
+        );
     }
 
     /**
@@ -92,7 +101,7 @@ final class AiDocumentFactory
      * @param ContentType|string|null $contentType Explicit content type.
      * @param string|null $fileName Optional filename used for type detection.
      * @param string|null $description Trusted application metadata.
-     * @param AiContext|null $context Optional idle AI context.
+     * @param AiContext|null $context Optional AI context to clone and bind.
      * @return AiDocument Specialized document instance.
      * @throws InvalidArgumentException When neither type nor resolvable filename is available.
      * @example $document = (new AiDocumentFactory())->fromRaw($bytes, fileName: 'attachment.pdf');
@@ -104,10 +113,18 @@ final class AiDocumentFactory
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
+        ?ClassSchema $headerSchema = null,
     ): AiDocument {
         $mimeType = $this->resolveContentType($contentType, $fileName);
 
-        return $this->create($rawData, $fileName, $mimeType, $description, $context);
+        return $this->create(
+            $rawData,
+            $fileName,
+            $mimeType,
+            $description,
+            $context,
+            $headerSchema,
+        );
     }
 
     private function resolveContentType(ContentType|string|null $contentType, ?string $fileName): string
@@ -142,6 +159,7 @@ final class AiDocumentFactory
         string $contentType,
         ?string $description,
         ?AiContext $context,
+        ?ClassSchema $headerSchema,
     ): AiDocument {
         if (isset($this->factories[$contentType])) {
             $document = ($this->factories[$contentType])(
@@ -159,20 +177,21 @@ final class AiDocumentFactory
         }
 
         return match (true) {
-            $contentType === 'text/markdown' => AiMarkdown::fromRaw($rawData, $fileName, $description, $context),
+            $contentType === 'text/markdown' => AiFrontMatter::hasFrontMatter($rawData)
+                ? new AiFrontMatter(
+                    $rawData,
+                    $fileName,
+                    $description,
+                    $context,
+                    $headerSchema,
+                )
+                : AiMarkdown::fromRaw($rawData, $fileName, $description, $context),
             $contentType === 'text/plain' => AiText::fromRaw($rawData, $fileName, $description, $context),
             str_starts_with($contentType, 'image/') => AiImage::fromRaw($rawData, $fileName, $description, $context),
             str_starts_with($contentType, 'audio/') => AiAudio::fromRaw(
                 $rawData,
                 ContentType::fromMimeType($contentType)->extension(),
                 $fileName,
-                $description,
-                $context,
-            ),
-            str_starts_with($contentType, 'video/') => AiVideo::fromRaw(
-                $rawData,
-                $fileName,
-                $contentType,
                 $description,
                 $context,
             ),

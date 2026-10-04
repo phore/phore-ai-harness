@@ -32,7 +32,7 @@ abstract readonly class AiContent implements PromptType
         $this->description = self::normalizeOptionalText($description, 'description');
         $this->ai_set_context($context === null
             ? new AiContext(prompts: [$this])
-            : $context->withPrepared([$this]));
+            : $context->withSource([$this]));
     }
 
     abstract public function toPromptType(): PromptType;
@@ -42,13 +42,14 @@ abstract readonly class AiContent implements PromptType
      *
      * Passing null deliberately detaches the content from its current conversation
      * and creates a fresh context containing only this content. Passing an existing
-     * context clones that idle context and appends this content as prepared source.
+     * context clones that context and attaches this content to the branch. This
+     * also works for an already started conversation; the content is sent once
+     * with the next request on the cloned branch.
      *
-     * @param AiContext|null $context Existing idle context or null for a fresh context.
+     * @param AiContext|null $context Existing context or null for a fresh context.
      * @return static New content instance; the original object stays unchanged.
-     * @throws \LogicException When the supplied context has already started.
      * @example $detached = $image->withContext();
-     * @see AiContext::withPrepared()
+     * @see AiContext::withSource()
      */
     public function withContext(?AiContext $context = null): static
     {

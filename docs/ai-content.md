@@ -50,17 +50,20 @@ Registered factories must return an `AiDocument`.
 
 `AiText` is the generic string-backed document. `AiMarkdown` specializes it
 for Markdown. Both expose immutable `edit()` operations. `withContext()`
-returns the same content as a new object: passing an existing idle `AiContext`
-uses that context, while passing `null` creates a fresh context and therefore
-detaches the document from its previous conversation.
+returns the same content as a new object: passing an existing `AiContext`
+clones that conversation branch and attaches the document for the next request,
+including when the context has already started. Passing `null` creates a fresh
+context and deliberately detaches the document from its previous conversation.
 
 ## Front matter
 
 `AiFrontMatter` combines a structured YAML header with an `AiMarkdown` body.
 `headerEdit()` edits only metadata, `bodyEdit()` only Markdown content, and
-`edit()` may change both. An optional `Phore\Schema\Schema\ClassSchema`
-provides the JSON Schema including field descriptions to the AI and validates
-every generated header with `Phore\Schema\Validator\Validator`.
+`edit()` may change both. `AiDocumentFactory` detects conventional YAML front
+matter automatically for Markdown input. An optional
+`Phore\Schema\Schema\ClassSchema` can be passed as `headerSchema`; it provides
+the JSON Schema including field descriptions to the AI and validates every
+generated header with `Phore\Schema\Validator\Validator`.
 
 ## Instruction boundary
 

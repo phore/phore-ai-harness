@@ -52,6 +52,8 @@ final class AiContext
 
     /** @var list<PromptType|ToolType> */
     private array $prompts;
+    /** @var list<PromptType|ToolType> */
+    private array $pendingPrompts = [];
     private AiOptions $defaults;
     private ?OpenAiClient $client = null;
     private mixed $clientSelection = null;
@@ -169,6 +171,40 @@ final class AiContext
             ...$clone->prompts,
             ...Toolkit::normalizePromptItems($prompts),
         ]);
+
+        return $clone;
+    }
+
+    /**
+     * Clone this context and attach source material without mutating the original.
+     *
+     * Fresh contexts receive the source as prepared root content. Started
+     * contexts queue it for the next request exactly once, so immutable content
+     * can be rebound to an existing conversation branch.
+     *
+     * @param string|PromptType|ToolType|array $prompts Source items to attach.
+     * @return self Cloned context branch.
+     * @throws LogicException While an operation is running.
+     * @example $branch = $context->withSource($document);
+     * @see withPrepared()
+     */
+    public function withSource(string|PromptType|ToolType|array $prompts): self
+    {
+        $this->assertIdle();
+        $items = $this->normalizeContextItems(Toolkit::normalizePromptItems($prompts));
+        $clone = clone $this;
+
+        if ($clone->responseId === null) {
+            $clone->prompts = $clone->normalizeContextItems([
+                ...$clone->prompts,
+                ...$items,
+            ]);
+        } else {
+            $clone->pendingPrompts = $clone->normalizeContextItems([
+                ...$clone->pendingPrompts,
+                ...$items,
+            ]);
+        }
 
         return $clone;
     }
@@ -317,6 +353,7 @@ final class AiContext
             // Auch bei anschliessenden lokalen Decode-Fehlern bleibt dieser erhalten.
             if ($ai !== null && $ai->getLastResponseId() !== null) {
                 $this->responseId = $ai->getLastResponseId();
+                $this->pendingPrompts = [];
             }
             $this->running = false;
         }
@@ -366,7 +403,7 @@ final class AiContext
 
         $callbacks = [];
         $merged = [];
-        foreach ([...$contextItems, ...$items] as $item) {
+        foreach ([...$contextItems, ...$this->pendingPrompts, ...$items] as $item) {
             if ($item instanceof CallbackTool) {
                 $name = $item->name();
                 if (isset($callbacks[$name])) {

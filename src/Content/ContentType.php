@@ -9,33 +9,77 @@ use InvalidArgumentException;
 /**
  * Supported OpenAI-facing MIME type with deterministic file-extension mapping.
  *
- * The table is intentionally small and explicit. It represents content types
- * handled by the harness instead of trying to be a general-purpose MIME database.
+ * The table intentionally mirrors formats handled by the OpenAI adapters in
+ * this package instead of acting as a general-purpose MIME database.
  */
 final readonly class ContentType
 {
-    /**
-     * @var array<string, list<string>>
-     */
+    /** @var array<string, list<string>> */
     private const MIME_TO_EXTENSIONS = [
-        'application/pdf' => ['pdf'],
         'application/json' => ['json'],
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => ['docx'],
+        'application/msword' => ['doc'],
+        'application/pdf' => ['pdf'],
+        'application/typescript' => ['ts'],
+        'application/vnd.ms-excel' => ['xls'],
+        'application/vnd.ms-powerpoint' => ['ppt'],
         'application/vnd.openxmlformats-officedocument.presentationml.presentation' => ['pptx'],
         'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' => ['xlsx'],
-        'text/plain' => ['txt'],
-        'text/markdown' => ['md', 'markdown'],
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => ['docx'],
+        'application/xml' => ['xml'],
+        'application/x-sh' => ['sh'],
         'text/csv' => ['csv'],
+        'text/css' => ['css'],
+        'text/html' => ['html', 'htm'],
+        'text/javascript' => ['js'],
+        'text/markdown' => ['md', 'markdown'],
+        'text/plain' => ['txt'],
+        'text/x-c' => ['c'],
+        'text/x-c++' => ['cpp', 'cc'],
+        'text/x-csharp' => ['cs'],
+        'text/x-golang' => ['go'],
+        'text/x-java-source' => ['java'],
+        'text/x-php' => ['php'],
+        'text/x-python' => ['py'],
+        'text/x-ruby' => ['rb'],
+        'text/x-tex' => ['tex'],
+        'text/yaml' => ['yaml', 'yml'],
         'image/png' => ['png'],
         'image/jpeg' => ['jpg', 'jpeg'],
         'image/gif' => ['gif'],
         'image/webp' => ['webp'],
         'audio/mpeg' => ['mp3'],
         'audio/wav' => ['wav'],
-        'audio/mp4' => ['m4a'],
-        'audio/ogg' => ['ogg'],
-        'video/mp4' => ['mp4'],
-        'video/webm' => ['webm'],
+    ];
+
+    /** @var list<string> */
+    private const FILE_MIME_TYPES = [
+        'application/json',
+        'application/msword',
+        'application/pdf',
+        'application/typescript',
+        'application/vnd.ms-excel',
+        'application/vnd.ms-powerpoint',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'application/xml',
+        'application/x-sh',
+        'text/csv',
+        'text/css',
+        'text/html',
+        'text/javascript',
+        'text/markdown',
+        'text/plain',
+        'text/x-c',
+        'text/x-c++',
+        'text/x-csharp',
+        'text/x-golang',
+        'text/x-java-source',
+        'text/x-php',
+        'text/x-python',
+        'text/x-ruby',
+        'text/x-tex',
+        'text/yaml',
     ];
 
     private function __construct(private string $mimeType)
@@ -45,8 +89,6 @@ final readonly class ContentType
     /**
      * Resolve a supported MIME type.
      *
-     * @param string $mimeType MIME type such as application/pdf.
-     * @return self Normalized supported content type.
      * @throws InvalidArgumentException When the MIME type is not supported.
      * @example ContentType::fromMimeType('application/pdf')->extension();
      * @see fromExtension()
@@ -64,8 +106,6 @@ final readonly class ContentType
     /**
      * Resolve a supported MIME type from a file extension.
      *
-     * @param string $extension Extension with or without a leading dot.
-     * @return self Matching supported content type.
      * @throws InvalidArgumentException When no supported mapping exists.
      * @example ContentType::fromExtension('.pdf')->mimeType();
      * @see fromFileName()
@@ -85,8 +125,6 @@ final readonly class ContentType
     /**
      * Resolve a supported MIME type from a file name.
      *
-     * @param string $fileName File name containing a supported extension.
-     * @return self Matching supported content type.
      * @throws InvalidArgumentException When the file has no supported extension.
      * @example ContentType::fromFileName('attachment.pdf');
      * @see fromExtension()
@@ -104,8 +142,6 @@ final readonly class ContentType
     /**
      * Check whether a MIME type is part of the explicit harness mapping.
      *
-     * @param string $mimeType MIME type to check.
-     * @return bool True when the type can be resolved by this class.
      * @example if (ContentType::isSupported('application/pdf')) { ... }
      * @see fromMimeType()
      */
@@ -115,36 +151,28 @@ final readonly class ContentType
     }
 
     /**
-     * Return the normalized MIME type.
+     * Return MIME types accepted by the OpenAI input_file adapter.
      *
-     * @return string MIME type.
-     * @example $type->mimeType();
-     * @see extension()
+     * @return list<string>
+     * @example $types = ContentType::fileMimeTypes();
+     * @see \Phore\AiHarness\Client\OpenAI\OpenAiPromptToContentConverter
      */
+    public static function fileMimeTypes(): array
+    {
+        return self::FILE_MIME_TYPES;
+    }
+
     public function mimeType(): string
     {
         return $this->mimeType;
     }
 
-    /**
-     * Return the preferred extension for this MIME type.
-     *
-     * @return string Preferred extension without a dot.
-     * @example $type->extension();
-     * @see extensions()
-     */
     public function extension(): string
     {
         return self::MIME_TO_EXTENSIONS[$this->mimeType][0];
     }
 
-    /**
-     * Return every known extension for this MIME type.
-     *
-     * @return list<string> Extensions without leading dots.
-     * @example ContentType::fromMimeType('image/jpeg')->extensions();
-     * @see extension()
-     */
+    /** @return list<string> */
     public function extensions(): array
     {
         return self::MIME_TO_EXTENSIONS[$this->mimeType];

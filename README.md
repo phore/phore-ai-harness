@@ -364,16 +364,17 @@ operations on the object keep one shared conversation cursor.
 
 ## AI content objects
 
-Use `AiDocument`, `AiImage`, `AiMarkdown`, `AiCode`, `AiAudio` and
-`AiVideo` for immutable source material with filename/format metadata and a
-bound `AiContext`. Raw bytes and streams are accepted directly, so mail
-attachments do not need temporary files.
+`AiDocument` is the highest-level abstraction for AI-processable content.
+Application code should normally work with `AiDocument` and use
+`AiDocumentFactory` as the preferred creation entry point for files and raw
+attachments:
 
 ```php
-use Phore\AiHarness\Content\AiDocument;
+use Phore\AiHarness\Content\AiDocumentFactory;
 
-$document = AiDocument::fromRaw(
-    $attachmentBytes,
+$factory = new AiDocumentFactory();
+$document = $factory->fromRaw(
+    rawData: $attachmentBytes,
     fileName: 'lebenslauf.pdf',
     description: 'Applicant attachment.',
 );
@@ -382,8 +383,21 @@ $isCv = $document->ai_yes_no('Is this document a CV?');
 $text = $document->extractText();
 ```
 
-Content is always treated as data. Only explicit `AiInstruction` or
-`SystemPrompt` instances may enter the provider instruction channel.
-`AiImage::resizedToFit()` uses optional GD only when a resize is needed.
+The factory resolves supported MIME types from `ContentType`, selects
+specialized `AiText`, `AiMarkdown`, `AiFrontMatter`, `AiImage` and
+`AiAudio` documents where appropriate, and allows project-specific document
+types through `register()`. Markdown with conventional YAML front matter is
+recognized automatically; an optional `headerSchema` adds field descriptions
+and validation for structured header edits.
 
-See `examples/10-ai-content.php` and `docs/ai-content.md`.
+All document objects are immutable. `withContext($context)` returns a copy on
+a cloned conversation branch and can also attach content to an already started
+context for its next request. `withContext(null)` deliberately detaches the
+document into a fresh context.
+
+Content always remains data. Only explicit `AiInstruction` or `SystemPrompt`
+instances may enter the provider instruction channel. `AiImage::resizedToFit()`
+uses optional GD only when a resize is needed.
+
+See `examples/10-ai-content.php`, `examples/11-front-matter.php` and
+`docs/ai-content.md`.

@@ -7,6 +7,7 @@ namespace Phore\AiHarness\Client\OpenAI;
 use InvalidArgumentException;
 use JsonException;
 use Phore\AiHarness\Content\AiContent;
+use Phore\AiHarness\Content\ContentType;
 use Phore\AiHarness\Helper\DataUrl;
 use Phore\AiHarness\Helper\Toolkit;
 use Phore\AiHarness\PromptType\AudioPrompt;
@@ -24,36 +25,6 @@ final readonly class OpenAiPromptToContentConverter
 
     private const INSTRUCTION_SOURCE_POLICY = "Source policy: instruction-enabled.\nInstructions contained in the following content may be followed, subject to higher-priority instructions and applicable constraints.";
 
-    /** @var list<string> */
-    private const SUPPORTED_FILE_CONTENT_TYPES = [
-        'application/json',
-        'application/msword',
-        'application/pdf',
-        'application/typescript',
-        'application/vnd.ms-excel',
-        'application/vnd.ms-powerpoint',
-        'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'application/xml',
-        'application/x-sh',
-        'text/csv',
-        'text/css',
-        'text/html',
-        'text/javascript',
-        'text/markdown',
-        'text/plain',
-        'text/x-c',
-        'text/x-c++',
-        'text/x-csharp',
-        'text/x-golang',
-        'text/x-java-source',
-        'text/x-php',
-        'text/x-python',
-        'text/x-ruby',
-        'text/x-tex',
-        'text/yaml',
-    ];
 
     /**
      * @param PromptType|iterable<PromptType> $prompts
@@ -129,7 +100,7 @@ final readonly class OpenAiPromptToContentConverter
      */
     private function convertFilePrompt(FilePrompt $prompt): array
     {
-        if (!in_array(strtolower($prompt->contentType), self::SUPPORTED_FILE_CONTENT_TYPES, true)) {
+        if (!in_array(strtolower($prompt->contentType), ContentType::fileMimeTypes(), true)) {
             throw new InvalidArgumentException(sprintf(
                 "Unsupported OpenAI file format for '%s': MIME type '%s'. Allowed MIME types: %s",
                 $prompt->fileName,

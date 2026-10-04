@@ -52,7 +52,8 @@ final readonly class AiFrontMatter extends AiMarkdown
             self::serializeFrontMatter($header, $this->body->rawData),
             $this->fileName,
             $this->description,
-            headerSchema: $this->headerSchema,
+            $this->ai_get_context(),
+            $this->headerSchema,
         );
     }
 
@@ -64,7 +65,8 @@ final readonly class AiFrontMatter extends AiMarkdown
             self::serializeFrontMatter($this->header, $body),
             $this->fileName,
             $this->description,
-            headerSchema: $this->headerSchema,
+            $this->ai_get_context(),
+            $this->headerSchema,
         );
     }
 
@@ -79,8 +81,20 @@ final readonly class AiFrontMatter extends AiMarkdown
             $edited,
             $this->fileName,
             $this->description,
-            headerSchema: $this->headerSchema,
+            $this->ai_get_context(),
+            $this->headerSchema,
         );
+    }
+
+    /**
+     * Check whether Markdown starts with conventional YAML front matter.
+     *
+     * @example AiFrontMatter::hasFrontMatter($markdown);
+     * @see __construct()
+     */
+    public static function hasFrontMatter(string $rawData): bool
+    {
+        return preg_match('/^---\\R.*?\\R---(?:\\R|$)/s', $rawData) === 1;
     }
 
     protected function recreate(string $rawData, ?AiContext $context = null): static

@@ -10,6 +10,7 @@ use Phore\AiHarness\Client\OpenAI\OpenAiPromptTypeConverter;
 use Phore\AiHarness\Content\AiCode;
 use Phore\AiHarness\Content\AiDocument;
 use Phore\AiHarness\Content\AiDocumentFactory;
+use Phore\AiHarness\Content\AiFrontMatter;
 use Phore\AiHarness\Content\AiImage;
 use Phore\AiHarness\Content\AiMarkdown;
 use Phore\AiHarness\Content\AiText;
@@ -90,6 +91,29 @@ final class AiContentTest extends TestCase
         self::assertNotSame($document, $detached);
         self::assertNotSame($document->ai_get_context(), $detached->ai_get_context());
         self::assertSame('hello', $detached->rawData);
+    }
+
+    public function testFactoryDetectsMarkdownFrontMatter(): void
+    {
+        $document = (new AiDocumentFactory())->fromRaw(
+            "---\ntitle: Hello\n---\n# Hello\n",
+            fileName: 'page.md',
+        );
+
+        self::assertInstanceOf(AiFrontMatter::class, $document);
+        self::assertSame('Hello', $document->header['title']);
+    }
+
+    public function testWithContextCanBranchFromStartedContext(): void
+    {
+        $context = new AiContext();
+        $responseId = new \ReflectionProperty(AiContext::class, 'responseId');
+        $responseId->setValue($context, 'resp_started');
+
+        $rebound = AiText::fromRaw('hello')->withContext($context);
+
+        self::assertNotSame($context, $rebound->ai_get_context());
+        self::assertSame('resp_started', $rebound->ai_get_context()->getResponseId());
     }
 
     public function testContentIsConvertedAsUntrustedSource(): void
