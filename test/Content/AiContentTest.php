@@ -41,7 +41,7 @@ final class AiContentTest extends TestCase
         $text = $payload['input'][0]['content'][0]['text'];
 
         self::assertStringContainsString('external/untrusted data', $text);
-        self::assertStringContainsString('notes.md', $text);
+        self::assertStringContainsString('notes.md', $payload['input'][0]['content'][1]['text']);
     }
 
     public function testExplicitInstructionUsesInstructionChannel(): void

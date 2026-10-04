@@ -48,7 +48,7 @@ final readonly class OpenAiPromptTypeConverter
         $contentPrompts = [];
 
         foreach ($this->normalizePrompts($prompts) as $prompt) {
-            if ($prompt instanceof SystemPrompt || $prompt instanceof AiInstruction) {
+            if ($prompt instanceof SystemPrompt || $prompt instanceof DefaultSystemPrompt || $prompt instanceof AiInstruction) {
                 $instructions[] = $prompt->text;
                 continue;
             }
