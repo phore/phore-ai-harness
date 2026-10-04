@@ -771,7 +771,13 @@ Prepared Prompts, Tools und Defaults.
 
 Das Trait delegiert `do`, `text`, `file`, `struct`, `structArray`,
 `image`, `choice`, `choices`, `yesNo`, `rank` und `score`.
-Zusätzlich stehen `ai_set_checkpoint()`, `ai_rollback()`,
+Zusätzlich stehen `ai_get_content_by_id()` für die exakte Content-Auflösung
+und `ai_query_content()` für AI-gestützte Content-Selektion zur Verfügung.
+`ai_query_content()` liefert ein `AiContentResultSet`, das erneut abgefragt
+oder mit `withContext()` auf einen frischen beziehungsweise bestehenden
+Conversation-Branch gesetzt werden kann.
+
+Außerdem stehen `ai_set_checkpoint()`, `ai_rollback()`,
 `ai_export_state()`, `ai_import_state()` und
 `ai_get_response_id()` zur Verfügung. Der eigentliche Context ist über
 `ai_get_context()` erreichbar.

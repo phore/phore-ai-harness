@@ -6,12 +6,10 @@ use Phore\AiHarness\Content\AiText;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
 
-// Preferred entry point: the factory selects the concrete AiDocument subtype.
-$attachmentBytes = file_get_contents(__DIR__ . '/fixtures/example.pdf');
+// Preferred entry point: load the real file and let the factory select the subtype.
 $factory = new AiDocumentFactory();
-$document = $factory->fromRaw(
-    rawData: $attachmentBytes,
-    fileName: 'lebenslauf.pdf',
+$document = $factory->fromFile(
+    '/path/to/lebenslauf.pdf',
     description: 'Application document received by email.',
     id: 'cv',
     aliases: ['resume', 'application attachment'],
@@ -20,9 +18,8 @@ $document = $factory->fromRaw(
 
 $isCv = $document->ai_yes_no('Is this document a CV?');
 
-$coverLetter = $factory->fromRaw(
-    rawData: 'Dear team, ...',
-    fileName: 'cover-letter.txt',
+$coverLetter = $factory->fromFile(
+    '/path/to/cover-letter.txt',
     id: 'cover-letter',
     aliases: ['letter'],
 );
@@ -88,7 +85,7 @@ $factory->register(
     extensions: ['note'],
 );
 
-$custom = $factory->fromRaw('Remember this.', fileName: 'memo.note');
+$custom = $factory->fromFile('/path/to/memo.note');
 
 var_dump(
     $isCv,

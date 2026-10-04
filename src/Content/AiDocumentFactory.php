@@ -61,6 +61,7 @@ final class AiDocumentFactory
      * @param string $path Readable source file.
      * @param string|null $description Trusted application metadata.
      * @param AiContext|null $context Optional AI context to clone and bind.
+     * @param ClassSchema|class-string|null $headerSchema Optional front-matter schema object or DTO class name.
      * @return AiDocument Specialized document selected from the filename extension.
      * @throws \RuntimeException When the file cannot be read.
      * @throws InvalidArgumentException When the extension is unsupported.
@@ -71,7 +72,7 @@ final class AiDocumentFactory
         string $path,
         ?string $description = null,
         ?AiContext $context = null,
-        ?ClassSchema $headerSchema = null,
+        ClassSchema|string|null $headerSchema = null,
         ?string $id = null,
         array $aliases = [],
         string $instructions = '',
@@ -108,6 +109,7 @@ final class AiDocumentFactory
      * @param string|null $fileName Optional filename used for type detection.
      * @param string|null $description Trusted application metadata.
      * @param AiContext|null $context Optional AI context to clone and bind.
+     * @param ClassSchema|class-string|null $headerSchema Optional front-matter schema object or DTO class name.
      * @return AiDocument Specialized document instance.
      * @throws InvalidArgumentException When neither type nor resolvable filename is available.
      * @example $document = (new AiDocumentFactory())->fromRaw($bytes, fileName: 'attachment.pdf');
@@ -119,7 +121,7 @@ final class AiDocumentFactory
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
-        ?ClassSchema $headerSchema = null,
+        ClassSchema|string|null $headerSchema = null,
         ?string $id = null,
         array $aliases = [],
         string $instructions = '',
@@ -171,7 +173,7 @@ final class AiDocumentFactory
         string $contentType,
         ?string $description,
         ?AiContext $context,
-        ?ClassSchema $headerSchema,
+        ClassSchema|string|null $headerSchema,
         ?string $id,
         array $aliases,
         string $instructions,

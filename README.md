@@ -373,13 +373,14 @@ attachments:
 use Phore\AiHarness\Content\AiDocumentFactory;
 
 $factory = new AiDocumentFactory();
-$document = $factory->fromRaw(
-    rawData: $attachmentBytes,
-    fileName: 'lebenslauf.pdf',
+$document = $factory->fromFile(
+    '/path/to/lebenslauf.pdf',
     description: 'Applicant attachment.',
+    id: 'cv',
+    aliases: ['resume', 'application document'],
 );
 
-$isCv = $document->ai_yes_no('Is this document a CV?');
+$isCv = $document->ai_yes_no('Is cv a CV?');
 $text = $document->extractText();
 ```
 
@@ -387,14 +388,27 @@ The factory resolves supported MIME types from `ContentType`, selects
 specialized `AiText`, `AiMarkdown`, `AiFrontMatter`, `AiImage` and
 `AiAudio` documents where appropriate, and allows project-specific document
 types through `register()`. Markdown with conventional YAML front matter is
-recognized automatically; an optional `headerSchema` adds field descriptions
-and validation for structured header edits.
+recognized automatically; an optional `headerSchema` accepts either a
+`ClassSchema` or a PHP class name. Class names are parsed through `phore/schema`,
+including property descriptions, and the resulting schema is used both for AI
+guidance and validation.
 
 Each content object also has a unique immutable ID, optional non-unique
-aliases and optional document-specific instructions. Use
-`$context->getContentById()` for exact lookup and `$context->queryContent()`
-for AI-assisted selection. Queries return an `AiContentResultSet` that can be
-refined again or rebound to a fresh context.
+aliases and optional document-specific instructions. If no ID is supplied, the
+harness generates one and `getId()` returns it. IDs and aliases are included as
+trusted metadata, so later prompts can refer to content by names such as
+`cv`, `resume` or an automatically generated ID.
+
+Use `$context->getContentById()` for exact lookup without an AI call and
+`$context->queryContent()` for natural-language selection. Queries return an
+`AiContentResultSet` with `all()`, `first()`, `getById()`, `query()`,
+`getContext()` and `withContext()`. Chained queries refine only the previous
+subset; `withContext()` starts that subset on a fresh or supplied conversation
+branch. Objects using `AiContextTrait` expose the same operations as
+`ai_get_content_by_id()` and `ai_query_content()`.
+
+See `examples/12-content-query.php` for the complete file → ID/alias → query →
+result-set → new-context flow.
 
 All document objects are immutable. `withContext($context)` returns a copy on
 a cloned conversation branch and can also attach content to an already started
@@ -405,5 +419,5 @@ Content always remains data. Only explicit `AiInstruction` or `SystemPrompt`
 instances may enter the provider instruction channel. `AiImage::resizedToFit()`
 uses optional GD only when a resize is needed.
 
-See `examples/10-ai-content.php`, `examples/11-front-matter.php` and
-`docs/ai-content.md`.
+See `examples/10-ai-content.php`, `examples/11-front-matter.php`,
+`examples/12-content-query.php` and `docs/ai-content.md`.

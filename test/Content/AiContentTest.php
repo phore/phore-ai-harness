@@ -44,6 +44,12 @@ final readonly class CustomDocument extends AiDocument
     }
 }
 
+final class ArticleHeaderSchema
+{
+    /** Human-readable article title. */
+    public string $title;
+}
+
 final class AiContentTest extends TestCase
 {
     public function testRawContentKeepsFilenameAndMetadata(): void
@@ -173,6 +179,40 @@ final class AiContentTest extends TestCase
         self::assertSame($first, $set->first());
         self::assertSame($second, $set->getById('second'));
         self::assertSame([$first, $second], $set->all());
+    }
+
+    public function testFrontMatterAcceptsSchemaClassName(): void
+    {
+        $document = AiFrontMatter::fromRaw(
+            "---\ntitle: Hello\n---\n# Hello\n",
+            headerSchema: ArticleHeaderSchema::class,
+        );
+
+        self::assertSame(ArticleHeaderSchema::class, $document->headerSchema?->className);
+        self::assertSame('Hello', $document->header['title']);
+    }
+
+    public function testResultSetExposesSubsetContext(): void
+    {
+        $image = AiText::fromRaw('image description', id: 'image-1');
+        $set = new AiContentResultSet(
+            [$image],
+            new AiContext(prompts: [$image]),
+        );
+
+        self::assertSame($image, $set->getContext()->getContentById('image-1'));
+    }
+
+    public function testFactoryAcceptsSchemaClassNameForFrontMatter(): void
+    {
+        $document = (new AiDocumentFactory())->fromRaw(
+            "---\ntitle: Hello\n---\n# Hello\n",
+            fileName: 'page.md',
+            headerSchema: ArticleHeaderSchema::class,
+        );
+
+        self::assertInstanceOf(AiFrontMatter::class, $document);
+        self::assertSame(ArticleHeaderSchema::class, $document->headerSchema?->className);
     }
 
     public function testWithContextCreatesNewObjectAndCanDetach(): void

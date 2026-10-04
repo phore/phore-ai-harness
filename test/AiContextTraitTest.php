@@ -7,6 +7,7 @@ namespace Phore\AiHarness\Test;
 use LogicException;
 use Phore\AiHarness\AiContext;
 use Phore\AiHarness\AiContextTrait;
+use Phore\AiHarness\Content\AiText;
 use Phore\AiHarness\PromptType\TextPrompt;
 use PHPUnit\Framework\TestCase;
 
@@ -40,6 +41,17 @@ final class AiContextTraitTest extends TestCase
 
         self::assertStringContainsString('"checkpoints"', $state);
         self::assertSame($host, $host->ai_rollback('initial'));
+    }
+
+    public function testContentLookupAndQueryAreForwardedByTrait(): void
+    {
+        $content = AiText::fromRaw('hello', id: 'message');
+        $host = new ReadonlyAiContextHost(new AiContext(prompts: [$content]));
+
+        self::assertSame($content, $host->ai_get_content_by_id('message'));
+
+        $emptyHost = new ReadonlyAiContextHost(new AiContext());
+        self::assertCount(0, $emptyHost->ai_query_content('Find matching content.'));
     }
 
     public function testContextIsCreatedLazilyAndCannotBeRebound(): void

@@ -14,16 +14,19 @@ are never promoted to instructions implicitly.
 ```php
 $factory = new AiDocumentFactory();
 
-$document = $factory->fromRaw(
-    rawData: $attachmentBytes,
-    fileName: 'lebenslauf.pdf',
+$document = $factory->fromFile(
+    '/path/to/lebenslauf.pdf',
     description: 'Attachment from the current applicant mail.',
+    id: 'cv',
+    aliases: ['resume', 'application document'],
 );
 
-$isCv = $document->ai_yes_no('Is this a CV?');
+$isCv = $document->ai_yes_no('Is cv a CV?');
 ```
 
-`fromFile()` resolves the content type from the extension. `fromRaw()` accepts
+`fromFile()` is the preferred entry point for real files and resolves the
+content type from the extension. `fromRaw()` is intended for bytes that are
+already in memory and accepts
 an explicit `ContentType`/MIME type or a filename with a supported extension.
 If both are supplied, the explicit content type wins. The small `ContentType`
 value object intentionally contains only the mappings supported by the harness.
@@ -48,37 +51,99 @@ Registered factories must return an `AiDocument`.
 
 ## IDs, aliases and content queries
 
-Every `AiContent` has a unique immutable ID. Pass `id:` when an application
-already has a stable identifier; otherwise the harness generates one. Aliases
-are optional human-friendly names and may intentionally occur on several
-content objects. `instructions` are document-specific handling notes and
-default to an empty string.
+Every `AiContent` has a unique immutable ID. Set `id:` when the application
+already has a stable identifier. Otherwise the harness generates an ID
+automatically; retrieve it with `getId()` and use that value in later prompts.
+IDs must be unique inside one `AiContext`.
+
+Aliases are optional human-readable alternative names. They do not have to be
+unique. Both the ID and aliases are exposed to the model as trusted metadata, so
+prompts can refer to content by either name. `instructions` are
+document-specific handling notes and default to an empty string.
+
+For files, prefer `fromFile()`:
 
 ```php
-$cv = $factory->fromRaw(
-    $bytes,
-    fileName: 'cv.pdf',
-    id: 'cv',
-    aliases: ['resume', 'application'],
-    instructions: 'Treat as applicant-provided source material.',
+$factory = new AiDocumentFactory();
+
+$priceList = $factory->fromFile(
+    '/path/to/preisliste.pdf',
+    id: 'price-list-2026',
+    aliases: ['Preisliste', 'Liste 123'],
+    instructions: 'Use this as the authoritative current price list.',
 );
 
-$context = new AiContext(prompts: [$cv, $photo, $coverLetter]);
-$matches = $context->queryContent('Which items are relevant to the CV?');
+$photo = $factory->fromFile(
+    '/path/to/package.jpg',
+    aliases: ['Paketfoto'],
+);
 
-$all = $matches->all();
-$first = $matches->first();
-$same = $context->getContentById('cv');
+$generatedPhotoId = $photo->getId();
+
+$context = new AiContext(prompts: [$priceList, $photo]);
+
+$answer = $context->text(
+    'Compare Liste 123 with Paketfoto and summarize relevant differences.',
+);
+
+$answerById = $context->text(
+    'Use content ' . $generatedPhotoId . ' and describe the visible package.',
+);
 ```
 
-`queryContent()` lets the model select only from IDs registered in the
-context, validates the returned IDs locally and returns an
-`AiContentResultSet`. The result set supports `all()`, `first()`,
-`getById()`, another `query()`, and `withContext()` to continue the subset
-on a fresh or supplied conversation branch. IDs must be unique inside one
-context; aliases do not have to be unique. When a context is exported and
-rebuilt later, provide stable explicit IDs so the reconstructed setup hash and
-content references remain stable.
+Exact lookup does not call the model:
+
+```php
+$priceListAgain = $context->getContentById('price-list-2026');
+$imageAgain = $context->getContentById($generatedPhotoId);
+```
+
+Natural-language selection uses `queryContent()`. The model can only select
+from IDs already registered in the context; the harness validates the returned
+IDs and resolves them back to the original `AiContent` objects:
+
+```php
+$images = $context->queryContent(
+    'Which content items are images showing visible transport damage?',
+);
+
+foreach ($images as $content) {
+    echo $content->getId() . PHP_EOL;
+}
+
+$all = $images->all();
+$first = $images->first();
+$known = $images->getById($generatedPhotoId);
+```
+
+The returned `AiContentResultSet` is itself queryable. A chained query only
+sees the previous subset:
+
+```php
+$closeUps = $images->query('Which of these are close-up images?');
+```
+
+A result set also owns a context containing exactly its selected items.
+`withContext()` rebinds that subset. Without an argument it starts a fresh
+conversation; with an existing context it clones that conversation branch and
+attaches the subset:
+
+```php
+$freshImages = $images->withContext();
+$summary = $freshImages->getContext()->text(
+    'Summarize the damage shown by these images.',
+);
+
+$continued = $images->withContext($existingContext);
+$answer = $continued->getContext()->text(
+    'Relate these selected images to the previous conversation.',
+);
+```
+
+Objects using `AiContextTrait` expose the same operations as
+`ai_get_content_by_id()` and `ai_query_content()`. When a context is exported
+and rebuilt later, provide stable explicit IDs so the reconstructed setup hash
+and references remain stable.
 
 ## Text and Markdown
 
@@ -94,10 +159,20 @@ context and deliberately detaches the document from its previous conversation.
 `AiFrontMatter` combines a structured YAML header with an `AiMarkdown` body.
 `headerEdit()` edits only metadata, `bodyEdit()` only Markdown content, and
 `edit()` may change both. `AiDocumentFactory` detects conventional YAML front
-matter automatically for Markdown input. An optional
-`Phore\Schema\Schema\ClassSchema` can be passed as `headerSchema`; it provides
-the JSON Schema including field descriptions to the AI and validates every
-generated header with `Phore\Schema\Validator\Validator`.
+matter automatically for Markdown input. An optional `headerSchema` accepts either a
+`Phore\Schema\Schema\ClassSchema` or a PHP class name. A class name is
+parsed automatically through `phore/schema`; property types and descriptions
+become the JSON Schema supplied to the AI, and every generated header is
+validated against the same schema.
+
+```php
+$article = AiFrontMatter::fromFile(
+    '/path/to/article.md',
+    headerSchema: ArticleHeader::class,
+    id: 'article',
+    aliases: ['page', 'release article'],
+);
+```
 
 ## Instruction boundary
 
@@ -111,5 +186,7 @@ All `AiDocument` content is untrusted source material. Embedded text such as
 height and MIME type. `resizedToFit()` preserves aspect ratio and keeps the
 bound context. GD is required only when an actual resize is necessary.
 
-See `examples/10-ai-content.php` for the document/factory flow and
-`examples/11-front-matter.php` for structured front matter.
+See `examples/10-ai-content.php` for the document/factory flow,
+`examples/11-front-matter.php` for structured front matter and
+`examples/12-content-query.php` for IDs, aliases, exact lookup, image queries,
+result-set refinement and context rebinding.

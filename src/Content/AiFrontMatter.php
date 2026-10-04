@@ -13,20 +13,22 @@ final readonly class AiFrontMatter extends AiMarkdown
 {
     public array $header;
     public AiMarkdown $body;
+    public ?ClassSchema $headerSchema;
 
     public function __construct(
         string $rawData,
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
-        public ?ClassSchema $headerSchema = null,
+        ClassSchema|string|null $headerSchema = null,
         ?string $id = null,
         array $aliases = [],
         string $instructions = '',
     ) {
         [$header, $body] = self::parseFrontMatter($rawData);
-        if ($headerSchema !== null) {
-            (new Validator())->assertValid($headerSchema, $header);
+        $this->headerSchema = self::normalizeHeaderSchema($headerSchema);
+        if ($this->headerSchema !== null) {
+            (new Validator())->assertValid($this->headerSchema, $header);
         }
 
         $this->header = $header;
@@ -54,7 +56,7 @@ final readonly class AiFrontMatter extends AiMarkdown
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
-        ?ClassSchema $headerSchema = null,
+        ClassSchema|string|null $headerSchema = null,
         ?string $id = null,
         array $aliases = [],
         string $instructions = '',
@@ -83,7 +85,7 @@ final readonly class AiFrontMatter extends AiMarkdown
         string $path,
         ?string $description = null,
         ?AiContext $context = null,
-        ?ClassSchema $headerSchema = null,
+        ClassSchema|string|null $headerSchema = null,
         ?string $id = null,
         array $aliases = [],
         string $instructions = '',
@@ -114,7 +116,7 @@ final readonly class AiFrontMatter extends AiMarkdown
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,
-        ?ClassSchema $headerSchema = null,
+        ClassSchema|string|null $headerSchema = null,
         ?string $id = null,
         array $aliases = [],
         string $instructions = '',
@@ -221,6 +223,28 @@ final readonly class AiFrontMatter extends AiMarkdown
             $this->aliases,
             $this->instructions,
         );
+    }
+
+    /**
+     * Resolve an optional schema object or class name to a ClassSchema.
+     *
+     * Passing a class-string lets phore/schema parse PHPDoc descriptions and
+     * property types automatically, so the same metadata is available to the AI
+     * and to local validation.
+     *
+     * @param ClassSchema|class-string|null $headerSchema
+     * @return ClassSchema|null Parsed schema or null when validation is disabled.
+     * @example $schema = self::normalizeHeaderSchema(ArticleHeader::class);
+     * @see \phore_schema_class()
+     */
+    private static function normalizeHeaderSchema(
+        ClassSchema|string|null $headerSchema,
+    ): ?ClassSchema {
+        if ($headerSchema === null || $headerSchema instanceof ClassSchema) {
+            return $headerSchema;
+        }
+
+        return \phore_schema_class($headerSchema);
     }
 
     private static function parseFrontMatter(string $rawData): array

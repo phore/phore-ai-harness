@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Phore\AiHarness;
 
 use LogicException;
+use Phore\AiHarness\Content\AiContent;
+use Phore\AiHarness\Content\AiContentResultSet;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\Result\ImageResultType;
 use Phore\AiHarness\ToolType\ToolType;
@@ -291,6 +293,40 @@ trait AiContextTrait
         AiOptions|array|string|null $options = null,
     ): ?float {
         return $this->ai_context()->score($prompt, $allowNull, $options);
+    }
+
+    /**
+     * Resolve one content object by its unique ID in the bound context.
+     *
+     * @param string $id Exact immutable content ID.
+     * @return AiContent|null Matching object or null when the ID is unknown.
+     * @example $image = $ticket->ai_get_content_by_id('damage-photo');
+     * @see AiContext::getContentById()
+     */
+    public function ai_get_content_by_id(string $id): ?AiContent
+    {
+        return $this->ai_context()->getContentById($id);
+    }
+
+    /**
+     * Query all content in the bound context and return a reusable subset.
+     *
+     * The model selects only from IDs already registered in the context. The
+     * result set resolves those IDs back to the original AiContent instances and
+     * can be queried again or rebound to another context.
+     *
+     * @param string $prompt Natural-language selection question.
+     * @param AiOptions|array<string,mixed>|string|null $options Runtime options or model name.
+     * @return AiContentResultSet Matching content subset.
+     * @example $images = $ticket->ai_query_content('Which images show visible damage?');
+     * @see AiContext::queryContent()
+     * @see AiContentResultSet
+     */
+    public function ai_query_content(
+        string $prompt,
+        AiOptions|array|string|null $options = null,
+    ): AiContentResultSet {
+        return $this->ai_context()->queryContent($prompt, $options);
     }
 
     /**

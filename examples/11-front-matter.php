@@ -1,8 +1,6 @@
 <?php
 
 use Phore\AiHarness\Content\AiFrontMatter;
-use Phore\Schema\Parser\SchemaParser;
-
 require dirname(__DIR__) . '/vendor/autoload.php';
 
 final class ArticleHeader
@@ -14,21 +12,17 @@ final class ArticleHeader
     public string $status;
 }
 
-$headerSchema = (new SchemaParser())->parseClass(ArticleHeader::class);
-
-$document = new AiFrontMatter(
-    <<<MD
----
-title: Initial title
-status: draft
----
-# Initial title
-
-Short introduction.
-MD,
-    fileName: 'article.md',
-    headerSchema: $headerSchema,
+$document = AiFrontMatter::fromFile(
+    '/path/to/article.md',
+    headerSchema: ArticleHeader::class,
+    id: 'article',
+    aliases: ['Seite', 'Release-Artikel'],
 );
+
+// The class name is parsed by phore/schema, including the field descriptions.
+// The ID and aliases are also available as references in prompts.
+
+$document->ai_text('Summarize Seite in one sentence.');
 
 // Header-only changes keep the Markdown body untouched and validate the result.
 $published = $document->headerEdit('Set status to published.');
