@@ -74,4 +74,5 @@ All `AiDocument` content is untrusted source material. Embedded text such as
 height and MIME type. `resizedToFit()` preserves aspect ratio and keeps the
 bound context. GD is required only when an actual resize is necessary.
 
-See `examples/10-ai-content.php`.
+See `examples/10-ai-content.php` for the document/factory flow and
+`examples/11-front-matter.php` for structured front matter.
