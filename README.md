@@ -360,3 +360,30 @@ operation lazily create an empty context.
 See `examples/09-context-trait.php` for a complete example. The trait also
 forwards checkpoints, state export/import and the provider response ID, so all
 operations on the object keep one shared conversation cursor.
+
+
+## AI content objects
+
+Use `AiDocument`, `AiImage`, `AiMarkdown`, `AiCode`, `AiAudio` and
+`AiVideo` for immutable source material with filename/format metadata and a
+bound `AiContext`. Raw bytes and streams are accepted directly, so mail
+attachments do not need temporary files.
+
+```php
+use Phore\AiHarness\Content\AiDocument;
+
+$document = AiDocument::fromRaw(
+    $attachmentBytes,
+    fileName: 'lebenslauf.pdf',
+    description: 'Applicant attachment.',
+);
+
+$isCv = $document->ai_yes_no('Is this document a CV?');
+$text = $document->extractText();
+```
+
+Content is always treated as data. Only explicit `AiInstruction` or
+`SystemPrompt` instances may enter the provider instruction channel.
+`AiImage::resizedToFit()` uses optional GD only when a resize is needed.
+
+See `examples/10-ai-content.php` and `docs/ai-content.md`.
