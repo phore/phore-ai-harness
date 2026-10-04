@@ -30,6 +30,7 @@
     "phpunit/phpunit": "^13.2.2"
   },
   "suggest": {
+    "ext-gd": "Optional: resize AiImage content with resizedToFit()."
   },
   "config": {
     "preferred-install": "source",

@@ -123,16 +123,14 @@ final class OpenAiPromptTypeConverterTest extends TestCase
         self::assertStringEndsWith("\nHello", $payload['input'][0]['content'][0]['text']);
     }
 
-    public function testDetectsSystemPromptsByPromptType(): void
+    public function testRejectsArbitrarySystemPromptTypes(): void
     {
-        $payload = (new OpenAiPromptTypeConverter())->convert([
+        $this->expectException(\InvalidArgumentException::class);
+
+        (new OpenAiPromptTypeConverter())->convert([
             new OpenAiPromptTypeConverterTestCustomSystemPrompt('Use concise German.'),
             new TextPrompt('Hello'),
         ]);
-
-        self::assertSame('Use concise German.', $payload['instructions']);
-        self::assertStringContainsString(self::UNTRUSTED, $payload['input'][0]['content'][0]['text']);
-        self::assertStringEndsWith("\nHello", $payload['input'][0]['content'][0]['text']);
     }
 
     public function testConvertsDefaultSystemPromptToInstructions(): void

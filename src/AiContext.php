@@ -8,6 +8,8 @@ use InvalidArgumentException;
 use JsonException;
 use LogicException;
 use Phore\AiHarness\Client\OpenAiClient;
+use Phore\AiHarness\Content\AiContent;
+use Phore\AiHarness\Content\AiContentResultSet;
 use Phore\AiHarness\Context\Traits\DoTrait;
 use Phore\AiHarness\Context\Traits\FileTrait;
 use Phore\AiHarness\Context\Traits\ImageTrait;
@@ -52,6 +54,10 @@ final class AiContext
 
     /** @var list<PromptType|ToolType> */
     private array $prompts;
+    /** @var list<PromptType|ToolType> */
+    private array $pendingPrompts = [];
+    /** @var array<string, AiContent> */
+    private array $contentById = [];
     private AiOptions $defaults;
     private ?OpenAiClient $client = null;
     private mixed $clientSelection = null;
@@ -80,6 +86,7 @@ final class AiContext
         AiOptions|array $options = [],
     ) {
         $this->prompts = $this->normalizeContextItems(Toolkit::normalizePromptItems($prompts));
+        $this->registerContentItems($this->prompts);
         $this->defaults = AiOptions::fromArray($options);
     }
 
@@ -149,6 +156,152 @@ final class AiContext
     public function getResponseId(): ?string
     {
         return $this->responseId;
+    }
+
+    /**
+     * Return content registered under an exact unique ID.
+     *
+     * @return AiContent|null Null when the ID is not part of this context.
+     * @example $invoice = $context->getContentById('invoice');
+     * @see queryContent()
+     */
+    public function getContentById(string $id): ?AiContent
+    {
+        $id = trim($id);
+        if ($id === '') {
+            throw new InvalidArgumentException('AI content ID must not be empty.');
+        }
+
+        return $this->contentById[$id] ?? null;
+    }
+
+    /**
+     * Select content matching a natural-language query.
+     *
+     * The model can inspect all content already attached to this conversation.
+     * It chooses only from server-provided unique IDs; returned IDs are resolved
+     * back to the original AiContent instances before leaving this method.
+     *
+     * @param AiOptions|array<string, mixed>|string|null $options Per-call AI options.
+     * @return AiContentResultSet Matching content; an empty set is valid.
+     * @example $images = $context->queryContent('Which images show the damaged package?');
+     * @see getContentById()
+     */
+    public function queryContent(
+        string $prompt,
+        AiOptions|array|string|null $options = null,
+    ): AiContentResultSet {
+        if (trim($prompt) === '') {
+            throw new InvalidArgumentException('AI content query must not be empty.');
+        }
+
+        $contents = array_values($this->contentById);
+        if ($contents === []) {
+            return new AiContentResultSet([], new self());
+        }
+
+        $choices = [];
+        foreach ($contents as $content) {
+            $parts = ['class=' . $content::class];
+
+            if ($content->fileName !== null) {
+                $parts[] = 'file=' . $content->fileName;
+            }
+            if ($content->aliases !== []) {
+                $parts[] = 'aliases=' . implode(', ', $content->aliases);
+            }
+            if ($content->description !== null) {
+                $parts[] = 'description=' . $content->description;
+            }
+            if ($content->instructions !== '') {
+                $parts[] = 'instructions=' . $content->instructions;
+            }
+
+            $choices['content:' . $content->id] = implode('; ', $parts);
+        }
+
+        $ids = $this->choices(
+            $prompt,
+            $choices,
+            min: 0,
+            max: count($choices),
+            options: $options,
+        );
+
+        $matched = [];
+        foreach ($ids ?? [] as $choiceId) {
+            if (!is_string($choiceId) || !str_starts_with($choiceId, 'content:')) {
+                throw new \RuntimeException('AI content query returned an invalid content selection.');
+            }
+
+            $id = substr($choiceId, strlen('content:'));
+            if (!isset($this->contentById[$id])) {
+                throw new \RuntimeException('AI content query returned an unknown content ID.');
+            }
+
+            $matched[] = $this->contentById[$id];
+        }
+
+        return new AiContentResultSet($matched, new self(prompts: $matched));
+    }
+
+    /**
+     * Clone a fresh context and append prepared prompts/tools.
+     *
+     * Prepared source material cannot be added after the provider conversation
+     * started, because root content is not resent with previous_response_id.
+     */
+    public function withPrepared(string|PromptType|ToolType|array $prompts): self
+    {
+        $this->assertIdle();
+        if ($this->responseId !== null) {
+            throw new LogicException('Cannot add prepared content after the AI context has started.');
+        }
+
+        $clone = clone $this;
+        $items = $clone->normalizeContextItems(Toolkit::normalizePromptItems($prompts));
+        $clone->registerContentItems($items);
+        $clone->prompts = $clone->normalizeContextItems([
+            ...$clone->prompts,
+            ...$items,
+        ]);
+
+        return $clone;
+    }
+
+    /**
+     * Clone this context and attach source material without mutating the original.
+     *
+     * Fresh contexts receive the source as prepared root content. Started
+     * contexts queue it for the next request exactly once, so immutable content
+     * can be rebound to an existing conversation branch.
+     *
+     * @param string|PromptType|ToolType|array $prompts Source items to attach.
+     * @return self Cloned context branch.
+     * @throws LogicException While an operation is running.
+     * @example $branch = $context->withSource($document);
+     * @see withPrepared()
+     */
+    public function withSource(string|PromptType|ToolType|array $prompts): self
+    {
+        $this->assertIdle();
+        $items = $this->normalizeContextItems(Toolkit::normalizePromptItems($prompts));
+        $clone = clone $this;
+        $clone->registerContentItems($items);
+
+        if ($clone->responseId === null) {
+            $clone->prompts = $clone->normalizeContextItems([
+                ...$clone->prompts,
+                ...$items,
+            ]);
+        } else {
+            $clone->pendingPrompts = $clone->normalizeContextItems([
+                ...$clone->pendingPrompts,
+                ...$items,
+            ]);
+        }
+
+        return $clone;
     }
 
     /**
@@ -295,6 +448,7 @@ final class AiContext
             // Auch bei anschliessenden lokalen Decode-Fehlern bleibt dieser erhalten.
             if ($ai !== null && $ai->getLastResponseId() !== null) {
                 $this->responseId = $ai->getLastResponseId();
+                $this->pendingPrompts = [];
             }
             $this->running = false;
         }
@@ -331,6 +485,24 @@ final class AiContext
 
     /**
      * @param list<PromptType|ToolType> $items
+     */
+    private function registerContentItems(array $items): void
+    {
+        foreach ($items as $item) {
+            if (!$item instanceof AiContent) {
+                continue;
+            }
+
+            if (isset($this->contentById[$item->id])) {
+                throw new InvalidArgumentException('Duplicate AI content ID in context: ' . $item->id);
+            }
+
+            $this->contentById[$item->id] = $item;
+        }
+    }
+
+    /**
+     * @param list<PromptType|ToolType> $items
      * @return list<PromptType|ToolType>
      */
     private function withContextItems(array $items): array
@@ -344,7 +516,7 @@ final class AiContext
 
         $callbacks = [];
         $merged = [];
-        foreach ([...$contextItems, ...$items] as $item) {
+        foreach ([...$contextItems, ...$this->pendingPrompts, ...$items] as $item) {
             if ($item instanceof CallbackTool) {
                 $name = $item->name();
                 if (isset($callbacks[$name])) {
