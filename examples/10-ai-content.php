@@ -30,10 +30,17 @@ final readonly class CustomNote extends AiDocument
     public function __construct(
         string $rawData,
         ?string $fileName = null,
+        \Phore\AiHarness\Content\ContentType|string|null $contentType = null,
         ?string $description = null,
         ?\Phore\AiHarness\AiContext $context = null,
     ) {
-        parent::__construct($rawData, $fileName, 'text/plain', $description, $context);
+        parent::__construct(
+            $rawData,
+            $fileName,
+            $contentType ?? 'application/x-note',
+            $description,
+            $context,
+        );
     }
 }
 
@@ -45,7 +52,7 @@ $factory->register(
         string $contentType,
         ?string $description,
         ?\Phore\AiHarness\AiContext $context,
-    ): AiDocument => new CustomNote($rawData, $fileName, $description, $context),
+    ): AiDocument => new CustomNote($rawData, $fileName, $contentType, $description, $context),
     extensions: ['note'],
 );
 
