@@ -11,10 +11,13 @@ use Phore\AiHarness\PromptType\PromptType;
 
 final readonly class AiCode extends AiContent
 {
+    public string $language;
+    public ?string $version;
+
     public function __construct(
         string $rawData,
-        public string $language,
-        public ?string $version = null,
+        string $language,
+        ?string $version = null,
         ?string $fileName = null,
         ?string $description = null,
         ?AiContext $context = null,

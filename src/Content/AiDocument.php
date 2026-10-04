@@ -12,10 +12,12 @@ use Phore\AiHarness\PromptType\PromptType;
 
 final readonly class AiDocument extends AiContent
 {
+    public string $contentType;
+
     public function __construct(
         string $rawData,
         ?string $fileName = null,
-        public ?string $contentType = null,
+        ?string $contentType = null,
         ?string $description = null,
         ?AiContext $context = null,
     ) {

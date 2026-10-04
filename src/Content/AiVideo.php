@@ -11,7 +11,9 @@ use Phore\AiHarness\PromptType\PromptType;
 
 final readonly class AiVideo extends AiContent
 {
-    public function __construct(string $rawData, ?string $fileName = null, public ?string $contentType = null, ?string $description = null, ?AiContext $context = null)
+    public string $contentType;
+
+    public function __construct(string $rawData, ?string $fileName = null, ?string $contentType = null, ?string $description = null, ?AiContext $context = null)
     {
         parent::__construct($rawData, $fileName, $description, $context);
         $this->contentType = $contentType

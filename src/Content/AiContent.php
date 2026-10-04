@@ -17,12 +17,17 @@ abstract readonly class AiContent implements PromptType
 {
     use AiContextTrait;
 
+    public string $rawData;
+    public ?string $fileName;
+    public ?string $description;
+
     protected function __construct(
-        public string $rawData,
-        public ?string $fileName = null,
-        public ?string $description = null,
+        string $rawData,
+        ?string $fileName = null,
+        ?string $description = null,
         ?AiContext $context = null,
     ) {
+        $this->rawData = $rawData;
         $this->fileName = self::normalizeFileName($fileName);
         $this->description = self::normalizeOptionalText($description, 'description');
         $this->ai_set_context($context === null

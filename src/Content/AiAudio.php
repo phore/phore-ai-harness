@@ -11,7 +11,9 @@ use Phore\AiHarness\PromptType\PromptType;
 
 final readonly class AiAudio extends AiContent
 {
-    public function __construct(string $rawData, public string $format, ?string $fileName = null, ?string $description = null, ?AiContext $context = null)
+    public string $format;
+
+    public function __construct(string $rawData, string $format, ?string $fileName = null, ?string $description = null, ?AiContext $context = null)
     {
         $format = strtolower(trim($format));
         if ($format === '') {
