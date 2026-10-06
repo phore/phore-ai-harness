@@ -14,8 +14,9 @@ use Throwable;
 
 final class AiFileSystem
 {
-    /** @var array<string, array{type: 'root'|'file', path: string, searchable: bool, editable: bool, creatable: bool, deletable: bool}> */
-    private array $sources = [];
+    private ?string $root = null;
+    private FileSystemPolicy $policy;
+    private RevisionStoreInterface $revisionStore;
 
     /** @var array<string, list<callable(FileOperationContext): void>> */
     private array $hooks = [
@@ -35,15 +36,15 @@ final class AiFileSystem
      * Bind a controlled filesystem to an AI context.
      *
      * The constructor registers this instance in the context's shared
-     * AiFileSystemToolSet. Model-visible paths stay below explicitly added roots
-     * or files; arbitrary host paths are never accepted.
+     * AiFileSystemToolSet. One optional root can be added later with addRoot();
+     * model-visible paths are always relative to that root.
      *
      * @param AiContext $context Context that receives the shared filesystem tools.
      * @param string|null $id Stable routing ID; generated when omitted.
      * @param string|null $alias Optional human-readable name.
      * @param string|null $description Optional purpose shown by filesystem_list_systems.
-     * @param FileSystemPolicy $policy Pattern and size limits for this filesystem.
-     * @param RevisionStoreInterface|null $revisionStore Optional history/restore backend.
+     * @param FileSystemPolicy|null $policy Optional path policy; omitted means all paths are allowed.
+     * @param RevisionStoreInterface|null $revisionStore Optional history backend; defaults to memory.
      * @throws InvalidArgumentException For invalid IDs, aliases or descriptions.
      * @example $fs = new AiFileSystem($context, id: 'app', alias: 'backend');
      * @see AiFileSystemToolSet
@@ -53,12 +54,14 @@ final class AiFileSystem
         ?string $id = null,
         ?string $alias = null,
         ?string $description = null,
-        private readonly FileSystemPolicy $policy = new FileSystemPolicy(),
-        private readonly ?RevisionStoreInterface $revisionStore = null,
+        ?FileSystemPolicy $policy = null,
+        ?RevisionStoreInterface $revisionStore = null,
     ) {
         $this->id = $this->normalizeId($id ?? 'fs_' . bin2hex(random_bytes(8)));
         $this->alias = $this->normalizeOptionalText($alias, 'alias');
         $this->description = $this->normalizeOptionalText($description, 'description');
+        $this->policy = $policy ?? new FileSystemPolicy();
+        $this->revisionStore = $revisionStore ?? new MemoryRevisionStore();
 
         $toolSet = $context->getToolSet(AiFileSystemToolSet::class);
         if ($toolSet === null) {
@@ -69,72 +72,30 @@ final class AiFileSystem
     }
 
     /**
-     * Add a directory root under a virtual top-level name.
+     * Add the single directory root exposed by this filesystem.
+     *
+     * Paths used by list/read/edit/create/delete are relative to this root.
+     * A second root is rejected; use another AiFileSystem when a second root
+     * needs an independent namespace.
      *
      * @return $this
      * @throws RuntimeException When the directory cannot be resolved.
-     * @example $fs->addRoot('/srv/app', 'app', editable: true);
-     * @see addFile()
+     * @throws LogicException When a root was already configured.
+     * @example $fs->addRoot('/srv/app');
+     * @see FileSystemPolicy
      */
-    public function addRoot(
-        string $path,
-        ?string $alias = null,
-        bool $searchable = true,
-        bool $editable = false,
-        bool $creatable = false,
-        bool $deletable = false,
-    ): self {
+    public function addRoot(string $path): self
+    {
+        if ($this->root !== null) {
+            throw new LogicException('AI filesystem root is already configured.');
+        }
+
         $realPath = realpath($path);
         if ($realPath === false || !is_dir($realPath) || !is_readable($realPath)) {
             throw new RuntimeException('Cannot read AI filesystem root: ' . $path);
         }
 
-        $this->addSource(
-            $alias ?? basename($realPath),
-            [
-                'type' => 'root',
-                'path' => $realPath,
-                'searchable' => $searchable,
-                'editable' => $editable,
-                'creatable' => $creatable,
-                'deletable' => $deletable,
-            ],
-        );
-
-        return $this;
-    }
-
-    /**
-     * Add one explicit file under a virtual top-level name.
-     *
-     * @return $this
-     * @throws RuntimeException When the file cannot be resolved or read.
-     * @example $fs->addFile('/srv/shared/README.md', 'shared-readme', editable: true);
-     * @see addRoot()
-     */
-    public function addFile(
-        string $path,
-        ?string $alias = null,
-        bool $searchable = true,
-        bool $editable = false,
-        bool $deletable = false,
-    ): self {
-        $realPath = realpath($path);
-        if ($realPath === false || !is_file($realPath) || !is_readable($realPath)) {
-            throw new RuntimeException('Cannot read AI filesystem file: ' . $path);
-        }
-
-        $this->addSource(
-            $alias ?? basename($realPath),
-            [
-                'type' => 'file',
-                'path' => $realPath,
-                'searchable' => $searchable,
-                'editable' => $editable,
-                'creatable' => false,
-                'deletable' => $deletable,
-            ],
-        );
+        $this->root = $realPath;
 
         return $this;
     }
@@ -223,31 +184,19 @@ final class AiFileSystem
     }
 
     /**
-     * Return model-visible metadata without traversing any roots.
+     * Return model-visible metadata without exposing the host root path.
      *
-     * @return array{id: string, alias: ?string, description: ?string, sources: list<array<string, mixed>>}
+     * @return array{id: string, alias: ?string, description: ?string, rootConfigured: bool}
      * @example $metadata = $fs->describe();
      * @see AiFileSystemToolSet::listFileSystems()
      */
     public function describe(): array
     {
-        $sources = [];
-        foreach ($this->sources as $alias => $source) {
-            $sources[] = [
-                'path' => $alias,
-                'type' => $source['type'],
-                'searchable' => $source['searchable'],
-                'editable' => $source['editable'],
-                'creatable' => $source['creatable'],
-                'deletable' => $source['deletable'],
-            ];
-        }
-
         return [
             'id' => $this->id,
             'alias' => $this->alias,
             'description' => $this->description,
-            'sources' => $sources,
+            'rootConfigured' => $this->root !== null,
         ];
     }
 
@@ -311,8 +260,8 @@ final class AiFileSystem
         $seen = 0;
         $hasMore = false;
 
-        foreach ($this->files($path) as [$virtualPath, $realPath, $source]) {
-            if (!$this->canSearch($virtualPath, $source)) {
+        foreach ($this->files($path) as [$virtualPath, $realPath]) {
+            if (!$this->canSearch($virtualPath)) {
                 continue;
             }
             try {
@@ -364,8 +313,8 @@ final class AiFileSystem
      */
     public function read(string $path, int $startLine = 1, int $lineCount = 200): array
     {
-        [$virtualPath, $realPath, $source] = $this->resolveFile($path);
-        if (!$this->canSearch($virtualPath, $source)) {
+        [$virtualPath, $realPath] = $this->resolveFile($path);
+        if (!$this->canSearch($virtualPath)) {
             throw new RuntimeException('AI filesystem file is not searchable: ' . $virtualPath);
         }
 
@@ -399,8 +348,8 @@ final class AiFileSystem
      */
     public function edit(string $path, array $edits): array
     {
-        [$virtualPath, $realPath, $source] = $this->resolveFile($path);
-        if (!$this->canEdit($virtualPath, $source)) {
+        [$virtualPath, $realPath] = $this->resolveFile($path);
+        if (!$this->canEdit($virtualPath)) {
             throw new RuntimeException('AI filesystem file is not editable: ' . $virtualPath);
         }
 
@@ -427,8 +376,8 @@ final class AiFileSystem
             throw new InvalidArgumentException('Created content must be UTF-8 text: ' . $path);
         }
 
-        [$virtualPath, $realPath, $source] = $this->resolveMutationTarget($path, mustExist: false);
-        if (!$this->canCreate($virtualPath, $source)) {
+        [$virtualPath, $realPath] = $this->resolveMutationTarget($path, mustExist: false);
+        if (!$this->canCreate($virtualPath)) {
             throw new RuntimeException('AI filesystem file is not creatable: ' . $virtualPath);
         }
         if (file_exists($realPath)) {
@@ -437,7 +386,7 @@ final class AiFileSystem
 
         $event = new FileOperationContext($this->id, 'create', $virtualPath, $realPath, null, $content);
         $this->runHooks('beforeCreate', $event);
-        $this->revisionStore?->save($this->id, $virtualPath, null);
+        $this->revisionStore->save($this->id, $virtualPath, null);
         $this->persistNew($realPath, $content);
 
         try {
@@ -447,7 +396,7 @@ final class AiFileSystem
             throw $error;
         }
 
-        $revisionId = $this->revisionStore?->save($this->id, $virtualPath, $content);
+        $revisionId = $this->revisionStore->save($this->id, $virtualPath, $content);
 
         return [
             'path' => $virtualPath,
@@ -470,15 +419,15 @@ final class AiFileSystem
      */
     public function delete(string $path): array
     {
-        [$virtualPath, $realPath, $source] = $this->resolveMutationTarget($path, mustExist: true);
-        if (!$this->canDelete($virtualPath, $source)) {
+        [$virtualPath, $realPath] = $this->resolveMutationTarget($path, mustExist: true);
+        if (!$this->canDelete($virtualPath)) {
             throw new RuntimeException('AI filesystem file is not deletable: ' . $virtualPath);
         }
 
         $content = $this->readTextFile($realPath, $virtualPath);
         $event = new FileOperationContext($this->id, 'delete', $virtualPath, $realPath, $content, null);
         $this->runHooks('beforeDelete', $event);
-        $this->revisionStore?->save($this->id, $virtualPath, $content);
+        $this->revisionStore->save($this->id, $virtualPath, $content);
         $this->deletePersisted($realPath, $content);
 
         try {
@@ -488,7 +437,7 @@ final class AiFileSystem
             throw $error;
         }
 
-        $revisionId = $this->revisionStore?->save($this->id, $virtualPath, null);
+        $revisionId = $this->revisionStore->save($this->id, $virtualPath, null);
 
         return [
             'path' => $virtualPath,
@@ -509,8 +458,8 @@ final class AiFileSystem
         [$virtualPath] = $this->resolveRevisionTarget($path);
 
         return [
-            'enabled' => $this->revisionStore !== null,
-            'revisions' => $this->revisionStore?->history($this->id, $virtualPath, $limit) ?? [],
+            'enabled' => true,
+            'revisions' => $this->revisionStore->history($this->id, $virtualPath, $limit),
         ];
     }
 
@@ -524,12 +473,8 @@ final class AiFileSystem
      */
     public function restore(string $path, int $revisionId): array
     {
-        if ($this->revisionStore === null) {
-            throw new LogicException('AI filesystem revision history is not enabled.');
-        }
-
-        [$virtualPath, $realPath, $source] = $this->resolveRevisionTarget($path);
-        if (!$this->canRestore($virtualPath, $source)) {
+        [$virtualPath, $realPath] = $this->resolveRevisionTarget($path);
+        if (!$this->canRestore($virtualPath)) {
             throw new RuntimeException('AI filesystem file is not restorable: ' . $virtualPath);
         }
 
@@ -572,54 +517,30 @@ final class AiFileSystem
         return $this->context;
     }
 
-    private function addSource(string $alias, array $source): void
-    {
-        $alias = $this->normalizeVirtualName($alias);
-        if (isset($this->sources[$alias])) {
-            throw new InvalidArgumentException('Duplicate AI filesystem source alias: ' . $alias);
-        }
-
-        $this->sources[$alias] = $source;
-    }
-
     private function entries(string $path, bool $recursive): Generator
     {
         $path = $this->normalizeVirtualPath($path, allowEmpty: true);
+        $root = $this->requireRoot();
+
         if ($path === '') {
-            foreach ($this->sources as $alias => $source) {
-                if ($this->policy->isIgnored($alias)) {
-                    continue;
-                }
-                if ($source['type'] === 'file') {
-                    if (is_file($source['path'])) {
-                        yield $this->fileEntry($alias, $source['path'], $source);
-                    }
-                    continue;
-                }
-
-                yield ['path' => $alias, 'type' => 'directory'];
-                if ($recursive) {
-                    yield from $this->walkDirectory($source['path'], $alias, $source, true);
-                }
-            }
+            yield from $this->walkDirectory($root, '', $recursive);
 
             return;
         }
 
-        [$virtualPath, $realPath, $source] = $this->resolve($path);
+        [$virtualPath, $realPath] = $this->resolve($path);
         if (is_file($realPath)) {
-            yield $this->fileEntry($virtualPath, $realPath, $source);
+            yield $this->fileEntry($virtualPath, $realPath);
 
             return;
         }
 
-        yield from $this->walkDirectory($realPath, $virtualPath, $source, $recursive);
+        yield from $this->walkDirectory($realPath, $virtualPath, $recursive);
     }
 
     private function walkDirectory(
         string $realDirectory,
         string $virtualDirectory,
-        array $source,
         bool $recursive,
     ): Generator {
         $names = @scandir($realDirectory);
@@ -632,25 +553,26 @@ final class AiFileSystem
                 continue;
             }
 
-            $virtualPath = $virtualDirectory . '/' . $name;
+            $virtualPath = ltrim($virtualDirectory . '/' . $name, '/');
             if ($this->policy->isIgnored($virtualPath)) {
                 continue;
             }
 
             $candidate = realpath($realDirectory . DIRECTORY_SEPARATOR . $name);
-            if ($candidate === false || !$this->isInsideSource($candidate, $source)) {
+            if ($candidate === false || !$this->isInsideRoot($candidate)) {
                 continue;
             }
 
             if (is_dir($candidate)) {
                 yield ['path' => $virtualPath, 'type' => 'directory'];
                 if ($recursive) {
-                    yield from $this->walkDirectory($candidate, $virtualPath, $source, true);
+                    yield from $this->walkDirectory($candidate, $virtualPath, true);
                 }
                 continue;
             }
+
             if (is_file($candidate)) {
-                yield $this->fileEntry($virtualPath, $candidate, $source);
+                yield $this->fileEntry($virtualPath, $candidate);
             }
         }
     }
@@ -662,96 +584,81 @@ final class AiFileSystem
                 continue;
             }
 
-            [$virtualPath, $realPath, $source] = $this->resolveFile($entry['path']);
-            yield [$virtualPath, $realPath, $source];
+            [$virtualPath, $realPath] = $this->resolveFile($entry['path']);
+            yield [$virtualPath, $realPath];
         }
     }
 
-    private function fileEntry(string $virtualPath, string $realPath, array $source): array
+    private function fileEntry(string $virtualPath, string $realPath): array
     {
         return [
             'path' => $virtualPath,
             'type' => 'file',
             'bytes' => filesize($realPath) ?: 0,
-            'searchable' => $this->canSearch($virtualPath, $source),
-            'editable' => $this->canEdit($virtualPath, $source),
+            'searchable' => $this->canSearch($virtualPath),
+            'editable' => $this->canEdit($virtualPath),
         ];
     }
 
     private function resolveFile(string $path): array
     {
-        [$virtualPath, $realPath, $source] = $this->resolve($path);
+        [$virtualPath, $realPath] = $this->resolve($path);
         if (!is_file($realPath)) {
             throw new RuntimeException('AI filesystem path is not a file: ' . $virtualPath);
         }
 
-        return [$virtualPath, $realPath, $source];
+        return [$virtualPath, $realPath];
     }
 
     private function resolve(string $path): array
     {
         $virtualPath = $this->normalizeVirtualPath($path);
-        [$sourceName, $relative] = array_pad(explode('/', $virtualPath, 2), 2, '');
-        $source = $this->sources[$sourceName] ?? null;
-        if ($source === null) {
-            throw new RuntimeException('Unknown AI filesystem source: ' . $sourceName);
-        }
+        $candidate = realpath(
+            $this->requireRoot()
+            . DIRECTORY_SEPARATOR
+            . str_replace('/', DIRECTORY_SEPARATOR, $virtualPath),
+        );
 
-        if ($source['type'] === 'file') {
-            if ($relative !== '') {
-                throw new RuntimeException('AI filesystem file has no child path: ' . $virtualPath);
-            }
-
-            return [$virtualPath, $source['path'], $source];
-        }
-
-        $candidate = $relative === ''
-            ? $source['path']
-            : realpath($source['path'] . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relative));
-        if ($candidate === false || !$this->isInsideSource($candidate, $source)) {
+        if ($candidate === false || !$this->isInsideRoot($candidate)) {
             throw new RuntimeException('AI filesystem path does not exist or leaves its root: ' . $virtualPath);
         }
 
-        return [$virtualPath, $candidate, $source];
+        return [$virtualPath, $candidate];
     }
 
-    private function isInsideSource(string $candidate, array $source): bool
+    private function isInsideRoot(string $candidate): bool
     {
-        if ($source['type'] === 'file') {
-            return $candidate === $source['path'];
-        }
+        $root = $this->requireRoot();
 
-        return $candidate === $source['path']
-            || str_starts_with($candidate, $source['path'] . DIRECTORY_SEPARATOR);
+        return $candidate === $root
+            || str_starts_with($candidate, $root . DIRECTORY_SEPARATOR);
     }
 
-    private function canSearch(string $virtualPath, array $source): bool
+    private function canSearch(string $virtualPath): bool
     {
-        return $source['searchable'] && $this->policy->isSearchable($virtualPath);
+        return $this->policy->isSearchable($virtualPath);
     }
 
-    private function canEdit(string $virtualPath, array $source): bool
+    private function canEdit(string $virtualPath): bool
     {
-        return $source['editable'] && $this->policy->isEditable($virtualPath);
+        return $this->policy->isEditable($virtualPath);
     }
 
-    private function canCreate(string $virtualPath, array $source): bool
+    private function canCreate(string $virtualPath): bool
     {
-        return $source['type'] === 'root'
-            && $source['creatable']
-            && $this->policy->isCreatable($virtualPath);
+        return $this->policy->isCreatable($virtualPath);
     }
 
-    private function canDelete(string $virtualPath, array $source): bool
+    private function canDelete(string $virtualPath): bool
     {
-        return $source['deletable'] && $this->policy->isDeletable($virtualPath);
+        return $this->policy->isDeletable($virtualPath);
     }
 
-    private function canRestore(string $virtualPath, array $source): bool
+    private function canRestore(string $virtualPath): bool
     {
-        return $this->canEdit($virtualPath, $source)
-            || $this->canCreate($virtualPath, $source)
-            || $this->canDelete($virtualPath, $source);
+        return $this->canEdit($virtualPath)
+            || $this->canCreate($virtualPath)
+            || $this->canDelete($virtualPath);
     }
 
     private function readTextFile(string $realPath, string $virtualPath): string
@@ -792,7 +699,7 @@ final class AiFileSystem
 
         $event = new FileOperationContext($this->id, 'edit', $virtualPath, $realPath, $original, $updated);
         $this->runHooks('beforeEdit', $event);
-        $this->revisionStore?->save($this->id, $virtualPath, $original);
+        $this->revisionStore->save($this->id, $virtualPath, $original);
         $this->persist($realPath, $updated, $original);
 
         try {
@@ -802,7 +709,7 @@ final class AiFileSystem
             throw $error;
         }
 
-        $revisionId = $this->revisionStore?->save($this->id, $virtualPath, $updated);
+        $revisionId = $this->revisionStore->save($this->id, $virtualPath, $updated);
 
         return [
             'path' => $virtualPath,
@@ -815,59 +722,37 @@ final class AiFileSystem
     private function resolveMutationTarget(string $path, bool $mustExist): array
     {
         $virtualPath = $this->normalizeVirtualPath($path);
-        [$sourceName, $relative] = array_pad(explode('/', $virtualPath, 2), 2, '');
-        $source = $this->sources[$sourceName] ?? null;
-        if ($source === null) {
-            throw new RuntimeException('Unknown AI filesystem source: ' . $sourceName);
-        }
+        $root = $this->requireRoot();
+        $realPath = $root . DIRECTORY_SEPARATOR
+            . str_replace('/', DIRECTORY_SEPARATOR, $virtualPath);
 
-        if ($source['type'] === 'file') {
-            if ($relative !== '') {
-                throw new RuntimeException('AI filesystem file has no child path: ' . $virtualPath);
-            }
-            $realPath = $source['path'];
-        } else {
-            if ($relative === '') {
-                throw new RuntimeException('AI filesystem mutation target must be a file: ' . $virtualPath);
-            }
-
-            $realPath = $source['path'] . DIRECTORY_SEPARATOR
-                . str_replace('/', DIRECTORY_SEPARATOR, $relative);
-            $parent = realpath(dirname($realPath));
-            if ($parent === false || !$this->isInsideSource($parent, $source)) {
-                throw new RuntimeException(
-                    'AI filesystem target parent does not exist or leaves its root: ' . $virtualPath,
-                );
-            }
+        $parent = realpath(dirname($realPath));
+        if ($parent === false || !$this->isInsideRoot($parent)) {
+            throw new RuntimeException(
+                'AI filesystem target parent does not exist or leaves its root: ' . $virtualPath,
+            );
         }
 
         if ($mustExist) {
             $resolved = realpath($realPath);
-            if ($resolved === false || !is_file($resolved) || !$this->isInsideSource($resolved, $source)) {
+            if ($resolved === false || !is_file($resolved) || !$this->isInsideRoot($resolved)) {
                 throw new RuntimeException('AI filesystem file does not exist: ' . $virtualPath);
             }
             $realPath = $resolved;
         } elseif (file_exists($realPath)) {
             $resolved = realpath($realPath);
-            if ($resolved === false || !$this->isInsideSource($resolved, $source)) {
+            if ($resolved === false || !$this->isInsideRoot($resolved)) {
                 throw new RuntimeException('AI filesystem target leaves its root: ' . $virtualPath);
             }
             $realPath = $resolved;
         }
 
-        return [$virtualPath, $realPath, $source];
+        return [$virtualPath, $realPath];
     }
 
     private function resolveRevisionTarget(string $path): array
     {
-        $virtualPath = $this->normalizeVirtualPath($path);
-        [$sourceName] = explode('/', $virtualPath, 2);
-        $source = $this->sources[$sourceName] ?? null;
-        if ($source === null) {
-            throw new RuntimeException('Unknown AI filesystem source: ' . $sourceName);
-        }
-
-        return $this->resolveMutationTarget($virtualPath, mustExist: false);
+        return $this->resolveMutationTarget($path, mustExist: false);
     }
 
     private function addHook(string $event, callable $hook): self
@@ -962,18 +847,13 @@ final class AiFileSystem
         return $value;
     }
 
-    private function normalizeVirtualName(string $name): string
+    private function requireRoot(): string
     {
-        $name = trim(str_replace('\\', '/', $name), '/');
-        if (
-            $name === ''
-            || str_contains($name, '/')
-            || preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/', $name) !== 1
-        ) {
-            throw new InvalidArgumentException('AI filesystem source alias must be one safe path segment.');
+        if ($this->root === null) {
+            throw new LogicException('AI filesystem root is not configured.');
         }
 
-        return $name;
+        return $this->root;
     }
 
     private function normalizeVirtualPath(string $path, bool $allowEmpty = false): string
