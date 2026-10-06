@@ -11,14 +11,25 @@ use Phore\AiHarness\AiContext;
 use Phore\AiHarness\FileSystem\Editor\MarkdownFileEditor;
 use Phore\AiHarness\FileSystem\Editor\TextFileEditor;
 use RuntimeException;
+use Throwable;
 
 final class AiFileSystem
 {
-    /** @var array<string, array{type: 'root'|'file', path: string, searchable: bool, editable: bool}> */
+    /** @var array<string, array{type: 'root'|'file', path: string, searchable: bool, editable: bool, creatable: bool, deletable: bool}> */
     private array $sources = [];
 
     /** @var list<FileEditorInterface> */
     private array $editors = [];
+
+    /** @var array<string, list<callable(FileOperationContext): void>> */
+    private array $hooks = [
+        'beforeCreate' => [],
+        'afterCreate' => [],
+        'beforeEdit' => [],
+        'afterEdit' => [],
+        'beforeDelete' => [],
+        'afterDelete' => [],
+    ];
 
     public readonly string $id;
     public readonly ?string $alias;
@@ -75,6 +86,8 @@ final class AiFileSystem
         ?string $alias = null,
         bool $searchable = true,
         bool $editable = false,
+        bool $creatable = false,
+        bool $deletable = false,
     ): self {
         $realPath = realpath($path);
         if ($realPath === false || !is_dir($realPath) || !is_readable($realPath)) {
@@ -83,7 +96,14 @@ final class AiFileSystem
 
         $this->addSource(
             $alias ?? basename($realPath),
-            ['type' => 'root', 'path' => $realPath, 'searchable' => $searchable, 'editable' => $editable],
+            [
+                'type' => 'root',
+                'path' => $realPath,
+                'searchable' => $searchable,
+                'editable' => $editable,
+                'creatable' => $creatable,
+                'deletable' => $deletable,
+            ],
         );
 
         return $this;
@@ -102,6 +122,7 @@ final class AiFileSystem
         ?string $alias = null,
         bool $searchable = true,
         bool $editable = false,
+        bool $deletable = false,
     ): self {
         $realPath = realpath($path);
         if ($realPath === false || !is_file($realPath) || !is_readable($realPath)) {
@@ -110,7 +131,14 @@ final class AiFileSystem
 
         $this->addSource(
             $alias ?? basename($realPath),
-            ['type' => 'file', 'path' => $realPath, 'searchable' => $searchable, 'editable' => $editable],
+            [
+                'type' => 'file',
+                'path' => $realPath,
+                'searchable' => $searchable,
+                'editable' => $editable,
+                'creatable' => false,
+                'deletable' => $deletable,
+            ],
         );
 
         return $this;
@@ -134,6 +162,89 @@ final class AiFileSystem
     }
 
     /**
+     * Register a check that runs before a new file is created.
+     *
+     * Throwing a RuntimeException vetoes the operation before any write.
+     *
+     * @return $this
+     * @example $fs->onBeforeCreate(fn (FileOperationContext $event) => assertPathAllowed($event->path));
+     * @see FileOperationContext
+     */
+    public function onBeforeCreate(callable $hook): self
+    {
+        return $this->addHook('beforeCreate', $hook);
+    }
+
+    /**
+     * Register a check that runs after a new file was written.
+     *
+     * When the hook throws, the newly created file is removed again before the
+     * exception leaves the filesystem.
+     *
+     * @return $this
+     * @example $fs->onAfterCreate(fn (FileOperationContext $event) => validateFile($event->realPath));
+     * @see FileOperationContext
+     */
+    public function onAfterCreate(callable $hook): self
+    {
+        return $this->addHook('afterCreate', $hook);
+    }
+
+    /**
+     * Register a check that runs before an existing file is edited.
+     *
+     * @return $this
+     * @example $fs->onBeforeEdit(fn (FileOperationContext $event) => assertEditable($event->path));
+     * @see FileOperationContext
+     */
+    public function onBeforeEdit(callable $hook): self
+    {
+        return $this->addHook('beforeEdit', $hook);
+    }
+
+    /**
+     * Register a validator that runs after an edited file was written.
+     *
+     * A thrown exception rolls the file back to its previous content. Runtime
+     * exceptions become recoverable tool feedback, so the model can retry with
+     * a corrected edit.
+     *
+     * @return $this
+     * @example $fs->onAfterEdit(fn (FileOperationContext $event) => validateFile($event->realPath));
+     * @see FileOperationContext
+     */
+    public function onAfterEdit(callable $hook): self
+    {
+        return $this->addHook('afterEdit', $hook);
+    }
+
+    /**
+     * Register a check that runs before an existing file is deleted.
+     *
+     * @return $this
+     * @example $fs->onBeforeDelete(fn (FileOperationContext $event) => protectConfig($event->path));
+     * @see FileOperationContext
+     */
+    public function onBeforeDelete(callable $hook): self
+    {
+        return $this->addHook('beforeDelete', $hook);
+    }
+
+    /**
+     * Register a check that runs after a file was deleted.
+     *
+     * A thrown exception recreates the original file before it is propagated.
+     *
+     * @return $this
+     * @example $fs->onAfterDelete(fn (FileOperationContext $event) => auditDelete($event->path));
+     * @see FileOperationContext
+     */
+    public function onAfterDelete(callable $hook): self
+    {
+        return $this->addHook('afterDelete', $hook);
+    }
+
+    /**
      * Return model-visible metadata without traversing any roots.
      *
      * @return array{id: string, alias: ?string, description: ?string, sources: list<array<string, mixed>>}
@@ -149,6 +260,8 @@ final class AiFileSystem
                 'type' => $source['type'],
                 'searchable' => $source['searchable'],
                 'editable' => $source['editable'],
+                'creatable' => $source['creatable'],
+                'deletable' => $source['deletable'],
             ];
         }
 
@@ -323,6 +436,93 @@ final class AiFileSystem
     }
 
     /**
+     * Create a UTF-8 text file inside a root that explicitly allows creation.
+     *
+     * The target parent directory must already exist. Before/after hooks can
+     * veto or validate the operation; a failing after hook removes the new file.
+     *
+     * @return array{path: string, status: string, bytes: int, revisionId: ?int}
+     * @throws RuntimeException When creation is not allowed or the target exists.
+     * @example $fs->create('app/docs/new.md', "# New\n");
+     * @see onAfterCreate()
+     */
+    public function create(string $path, string $content): array
+    {
+        if (str_contains($content, "\0") || preg_match('//u', $content) !== 1) {
+            throw new InvalidArgumentException('Created content must be UTF-8 text: ' . $path);
+        }
+
+        [$virtualPath, $realPath, $source] = $this->resolveMutationTarget($path, mustExist: false);
+        if (!$this->canCreate($virtualPath, $source)) {
+            throw new RuntimeException('AI filesystem file is not creatable: ' . $virtualPath);
+        }
+        if (file_exists($realPath)) {
+            throw new RuntimeException('AI filesystem path already exists: ' . $virtualPath);
+        }
+
+        $event = new FileOperationContext($this->id, 'create', $virtualPath, $realPath, null, $content);
+        $this->runHooks('beforeCreate', $event);
+        $this->revisionStore?->save($this->id, $virtualPath, null);
+        $this->persistNew($realPath, $content);
+
+        try {
+            $this->runHooks('afterCreate', $event);
+        } catch (Throwable $error) {
+            $this->deletePersisted($realPath, $content);
+            throw $error;
+        }
+
+        $revisionId = $this->revisionStore?->save($this->id, $virtualPath, $content);
+
+        return [
+            'path' => $virtualPath,
+            'status' => 'created',
+            'bytes' => strlen($content),
+            'revisionId' => $revisionId,
+        ];
+    }
+
+    /**
+     * Delete one existing text file from a source that explicitly allows it.
+     *
+     * The original content is revisioned before deletion. A failing after hook
+     * recreates the file atomically, so validators never leave a partial delete.
+     *
+     * @return array{path: string, status: string, revisionId: ?int}
+     * @throws RuntimeException When deletion is not allowed.
+     * @example $fs->delete('app/docs/obsolete.md');
+     * @see restore()
+     */
+    public function delete(string $path): array
+    {
+        [$virtualPath, $realPath, $source] = $this->resolveMutationTarget($path, mustExist: true);
+        if (!$this->canDelete($virtualPath, $source)) {
+            throw new RuntimeException('AI filesystem file is not deletable: ' . $virtualPath);
+        }
+
+        $content = $this->readTextFile($realPath, $virtualPath);
+        $event = new FileOperationContext($this->id, 'delete', $virtualPath, $realPath, $content, null);
+        $this->runHooks('beforeDelete', $event);
+        $this->revisionStore?->save($this->id, $virtualPath, $content);
+        $this->deletePersisted($realPath, $content);
+
+        try {
+            $this->runHooks('afterDelete', $event);
+        } catch (Throwable $error) {
+            $this->persistNew($realPath, $content);
+            throw $error;
+        }
+
+        $revisionId = $this->revisionStore?->save($this->id, $virtualPath, null);
+
+        return [
+            'path' => $virtualPath,
+            'status' => 'deleted',
+            'revisionId' => $revisionId,
+        ];
+    }
+
+    /**
      * Return a structural representation when a specialized editor supports it.
      *
      * Markdown is represented as a heading tree with stable IDs for the current
@@ -393,7 +593,7 @@ final class AiFileSystem
      */
     public function history(string $path, int $limit = 20): array
     {
-        [$virtualPath] = $this->resolveFile($path);
+        [$virtualPath] = $this->resolveRevisionTarget($path);
 
         return [
             'enabled' => $this->revisionStore !== null,
@@ -415,9 +615,9 @@ final class AiFileSystem
             throw new LogicException('AI filesystem revision history is not enabled.');
         }
 
-        [$virtualPath, $realPath, $source] = $this->resolveFile($path);
-        if (!$this->canEdit($virtualPath, $source)) {
-            throw new RuntimeException('AI filesystem file is not editable: ' . $virtualPath);
+        [$virtualPath, $realPath, $source] = $this->resolveRevisionTarget($path);
+        if (!$this->canRestore($virtualPath, $source)) {
+            throw new RuntimeException('AI filesystem file is not restorable: ' . $virtualPath);
         }
 
         $target = $this->revisionStore->get($this->id, $virtualPath, $revisionId);
@@ -425,15 +625,32 @@ final class AiFileSystem
             throw new RuntimeException('AI filesystem revision does not exist: ' . $revisionId);
         }
 
-        $current = $this->readTextFile($realPath, $virtualPath);
+        $currentExists = is_file($realPath);
+        $current = $currentExists ? $this->readTextFile($realPath, $virtualPath) : null;
         $this->revisionStore->save($this->id, $virtualPath, $current);
-        $this->persist($realPath, $target, $current);
-        $newRevisionId = $this->revisionStore->save($this->id, $virtualPath, $target);
+
+        // Restore kann bewusst auch den Zustand "Datei existiert nicht" abbilden.
+        if ($target['exists']) {
+            if ($currentExists) {
+                $this->persist($realPath, $target['content'], $current);
+            } else {
+                $this->persistNew($realPath, $target['content']);
+            }
+        } elseif ($currentExists) {
+            $this->deletePersisted($realPath, $current);
+        }
+
+        $newRevisionId = $this->revisionStore->save(
+            $this->id,
+            $virtualPath,
+            $target['content'],
+        );
 
         return [
             'path' => $virtualPath,
             'restoredRevisionId' => $revisionId,
             'revisionId' => $newRevisionId,
+            'exists' => $target['exists'],
         ];
     }
 
@@ -461,7 +678,9 @@ final class AiFileSystem
                     continue;
                 }
                 if ($source['type'] === 'file') {
-                    yield $this->fileEntry($alias, $source['path'], $source);
+                    if (is_file($source['path'])) {
+                        yield $this->fileEntry($alias, $source['path'], $source);
+                    }
                     continue;
                 }
 
@@ -603,6 +822,25 @@ final class AiFileSystem
         return $source['editable'] && $this->policy->isEditable($virtualPath);
     }
 
+    private function canCreate(string $virtualPath, array $source): bool
+    {
+        return $source['type'] === 'root'
+            && $source['creatable']
+            && $this->policy->isCreatable($virtualPath);
+    }
+
+    private function canDelete(string $virtualPath, array $source): bool
+    {
+        return $source['deletable'] && $this->policy->isDeletable($virtualPath);
+    }
+
+    private function canRestore(string $virtualPath, array $source): bool
+    {
+        return $this->canEdit($virtualPath, $source)
+            || $this->canCreate($virtualPath, $source)
+            || $this->canDelete($virtualPath, $source);
+    }
+
     private function readTextFile(string $realPath, string $virtualPath): string
     {
         $size = filesize($realPath);
@@ -661,10 +899,18 @@ final class AiFileSystem
             ];
         }
 
-        if ($this->revisionStore !== null) {
-            $this->revisionStore->save($this->id, $virtualPath, $original);
-        }
+        $event = new FileOperationContext($this->id, 'edit', $virtualPath, $realPath, $original, $updated);
+        $this->runHooks('beforeEdit', $event);
+        $this->revisionStore?->save($this->id, $virtualPath, $original);
         $this->persist($realPath, $updated, $original);
+
+        try {
+            $this->runHooks('afterEdit', $event);
+        } catch (Throwable $error) {
+            $this->persist($realPath, $original, $updated);
+            throw $error;
+        }
+
         $revisionId = $this->revisionStore?->save($this->id, $virtualPath, $updated);
 
         return [
@@ -673,6 +919,98 @@ final class AiFileSystem
             'bytes' => strlen($updated),
             'revisionId' => $revisionId,
         ];
+    }
+
+    private function resolveMutationTarget(string $path, bool $mustExist): array
+    {
+        $virtualPath = $this->normalizeVirtualPath($path);
+        [$sourceName, $relative] = array_pad(explode('/', $virtualPath, 2), 2, '');
+        $source = $this->sources[$sourceName] ?? null;
+        if ($source === null) {
+            throw new RuntimeException('Unknown AI filesystem source: ' . $sourceName);
+        }
+
+        if ($source['type'] === 'file') {
+            if ($relative !== '') {
+                throw new RuntimeException('AI filesystem file has no child path: ' . $virtualPath);
+            }
+            $realPath = $source['path'];
+        } else {
+            if ($relative === '') {
+                throw new RuntimeException('AI filesystem mutation target must be a file: ' . $virtualPath);
+            }
+
+            $realPath = $source['path'] . DIRECTORY_SEPARATOR
+                . str_replace('/', DIRECTORY_SEPARATOR, $relative);
+            $parent = realpath(dirname($realPath));
+            if ($parent === false || !$this->isInsideSource($parent, $source)) {
+                throw new RuntimeException(
+                    'AI filesystem target parent does not exist or leaves its root: ' . $virtualPath,
+                );
+            }
+        }
+
+        if ($mustExist) {
+            $resolved = realpath($realPath);
+            if ($resolved === false || !is_file($resolved) || !$this->isInsideSource($resolved, $source)) {
+                throw new RuntimeException('AI filesystem file does not exist: ' . $virtualPath);
+            }
+            $realPath = $resolved;
+        } elseif (file_exists($realPath)) {
+            $resolved = realpath($realPath);
+            if ($resolved === false || !$this->isInsideSource($resolved, $source)) {
+                throw new RuntimeException('AI filesystem target leaves its root: ' . $virtualPath);
+            }
+            $realPath = $resolved;
+        }
+
+        return [$virtualPath, $realPath, $source];
+    }
+
+    private function resolveRevisionTarget(string $path): array
+    {
+        $virtualPath = $this->normalizeVirtualPath($path);
+        [$sourceName] = explode('/', $virtualPath, 2);
+        $source = $this->sources[$sourceName] ?? null;
+        if ($source === null) {
+            throw new RuntimeException('Unknown AI filesystem source: ' . $sourceName);
+        }
+
+        return $this->resolveMutationTarget($virtualPath, mustExist: false);
+    }
+
+    private function addHook(string $event, callable $hook): self
+    {
+        $this->hooks[$event][] = $hook;
+
+        return $this;
+    }
+
+    private function runHooks(string $event, FileOperationContext $context): void
+    {
+        foreach ($this->hooks[$event] as $hook) {
+            $hook($context);
+        }
+    }
+
+    private function persistNew(string $path, string $content): void
+    {
+        if (file_exists($path)) {
+            throw new RuntimeException('AI filesystem create target already exists: ' . $path);
+        }
+
+        $this->persist($path, $content);
+    }
+
+    private function deletePersisted(string $path, string $expectedContent): void
+    {
+        $current = @file_get_contents($path);
+        if ($current === false || $current !== $expectedContent) {
+            throw new RuntimeException('AI filesystem file changed since it was read: ' . $path);
+        }
+        if (!@unlink($path)) {
+            throw new RuntimeException('Cannot delete AI filesystem file: ' . $path);
+        }
     }
 
     private function persist(string $path, string $content, ?string $expectedContent = null): void
