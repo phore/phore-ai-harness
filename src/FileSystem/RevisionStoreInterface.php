@@ -6,10 +6,14 @@ namespace Phore\AiHarness\FileSystem;
 
 interface RevisionStoreInterface
 {
-    public function save(string $fileSystemId, string $path, string $content): int;
+    /**
+     * Save one filesystem state. A null content value represents a missing file.
+     */
+    public function save(string $fileSystemId, string $path, ?string $content): int;
 
-    /** @return list<array{id: int, createdAt: string}> */
+    /** @return list<array{id: int, createdAt: string, exists: bool}> */
     public function history(string $fileSystemId, string $path, int $limit = 20): array;
 
-    public function get(string $fileSystemId, string $path, int $revisionId): ?string;
+    /** @return array{exists: bool, content: ?string}|null */
+    public function get(string $fileSystemId, string $path, int $revisionId): ?array;
 }
