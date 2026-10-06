@@ -75,7 +75,7 @@ final class AiFileSystemTest extends TestCase
         self::assertSame(1, $page['nextOffset']);
 
         $secondPage = $fileSystem->list('project/docs', recursive: true, offset: 1, limit: 10);
-        self::assertCount(1, $secondPage['items']);
+        self::assertCount(2, $secondPage['items']);
         self::assertNull($secondPage['nextOffset']);
 
         $matches = $fileSystem->grep('needle', 'project');
