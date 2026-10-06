@@ -15,6 +15,10 @@ use Throwable;
 final class AiFileSystem
 {
     private ?string $root = null;
+
+    /** @var array<string, string> */
+    private array $files = [];
+
     private FileSystemPolicy $policy;
     private RevisionStoreInterface $revisionStore;
 
@@ -36,21 +40,25 @@ final class AiFileSystem
      * Bind a controlled filesystem to an AI context.
      *
      * The constructor registers this instance in the context's shared
-     * AiFileSystemToolSet. One optional root can be added later with addRoot();
-     * model-visible paths are always relative to that root.
+     * AiFileSystemToolSet. One optional root can be supplied here or added
+     * later with addRoot(); paths below it are always relative to that root.
+     * Explicit files can be added independently with addFile().
      *
      * @param AiContext $context Context that receives the shared filesystem tools.
+     * @param string|null $root Optional root directory; may also be set later with addRoot().
      * @param string|null $id Stable routing ID; generated when omitted.
      * @param string|null $alias Optional human-readable name.
      * @param string|null $description Optional purpose shown by filesystem_list_systems.
      * @param FileSystemPolicy|null $policy Optional path policy; omitted means all paths are allowed.
      * @param RevisionStoreInterface|null $revisionStore Optional history backend; defaults to memory.
      * @throws InvalidArgumentException For invalid IDs, aliases or descriptions.
-     * @example $fs = new AiFileSystem($context, id: 'app', alias: 'backend');
-     * @see AiFileSystemToolSet
+     * @example $fs = new AiFileSystem($context, root: '/srv/app', id: 'app');
+     * @see addRoot()
+     * @see addFile()
      */
     public function __construct(
         private readonly AiContext $context,
+        ?string $root = null,
         ?string $id = null,
         ?string $alias = null,
         ?string $description = null,
@@ -62,6 +70,10 @@ final class AiFileSystem
         $this->description = $this->normalizeOptionalText($description, 'description');
         $this->policy = $policy ?? new FileSystemPolicy();
         $this->revisionStore = $revisionStore ?? new MemoryRevisionStore();
+
+        if ($root !== null) {
+            $this->addRoot($root);
+        }
 
         $toolSet = $context->getToolSet(AiFileSystemToolSet::class);
         if ($toolSet === null) {
@@ -75,14 +87,15 @@ final class AiFileSystem
      * Add the single directory root exposed by this filesystem.
      *
      * Paths used by list/read/edit/create/delete are relative to this root.
-     * A second root is rejected; use another AiFileSystem when a second root
-     * needs an independent namespace.
+     * A second root is rejected; use another AiFileSystem for another root.
+     * Explicit files already registered must not be inside the root and must not
+     * collide with a top-level path in the root.
      *
      * @return $this
-     * @throws RuntimeException When the directory cannot be resolved.
+     * @throws RuntimeException When the directory cannot be resolved or collides.
      * @throws LogicException When a root was already configured.
      * @example $fs->addRoot('/srv/app');
-     * @see FileSystemPolicy
+     * @see addFile()
      */
     public function addRoot(string $path): self
     {
@@ -95,7 +108,59 @@ final class AiFileSystem
             throw new RuntimeException('Cannot read AI filesystem root: ' . $path);
         }
 
+        foreach ($this->files as $name => $filePath) {
+            if ($this->isInsidePath($filePath, $realPath)) {
+                throw new RuntimeException(
+                    'Explicit AI filesystem file is already inside the root: ' . $name,
+                );
+            }
+            if (file_exists($realPath . DIRECTORY_SEPARATOR . $name)) {
+                throw new RuntimeException('Duplicate AI filesystem path: ' . $name);
+            }
+        }
+
         $this->root = $realPath;
+
+        return $this;
+    }
+
+    /**
+     * Add one explicit real file under its basename.
+     *
+     * Explicit files work without a root and can be listed, searched, read,
+     * edited and restored. Create and delete remain root-only operations.
+     * Basenames must be unique within one AiFileSystem; aliases and virtual
+     * in-memory files are intentionally not supported.
+     *
+     * @return $this
+     * @throws RuntimeException When the file cannot be read or its basename collides.
+     * @example $fs->addFile('/srv/shared/architecture.md');
+     * @see addRoot()
+     */
+    public function addFile(string $path): self
+    {
+        $realPath = realpath($path);
+        if ($realPath === false || !is_file($realPath) || !is_readable($realPath)) {
+            throw new RuntimeException('Cannot read AI filesystem file: ' . $path);
+        }
+
+        $name = $this->normalizeVirtualName(basename($realPath));
+        if (isset($this->files[$name])) {
+            throw new RuntimeException('Duplicate AI filesystem file name: ' . $name);
+        }
+
+        if ($this->root !== null) {
+            if ($this->isInsidePath($realPath, $this->root)) {
+                throw new RuntimeException(
+                    'Explicit AI filesystem file is already inside the root: ' . $name,
+                );
+            }
+            if (file_exists($this->root . DIRECTORY_SEPARATOR . $name)) {
+                throw new RuntimeException('Duplicate AI filesystem path: ' . $name);
+            }
+        }
+
+        $this->files[$name] = $realPath;
 
         return $this;
     }
@@ -186,7 +251,7 @@ final class AiFileSystem
     /**
      * Return model-visible metadata without exposing the host root path.
      *
-     * @return array{id: string, alias: ?string, description: ?string, rootConfigured: bool}
+     * @return array{id: string, alias: ?string, description: ?string, rootConfigured: bool, files: list<string>}
      * @example $metadata = $fs->describe();
      * @see AiFileSystemToolSet::listFileSystems()
      */
@@ -197,6 +262,7 @@ final class AiFileSystem
             'alias' => $this->alias,
             'description' => $this->description,
             'rootConfigured' => $this->root !== null,
+            'files' => array_keys($this->files),
         ];
     }
 
@@ -308,7 +374,7 @@ final class AiFileSystem
      * Read a bounded line range from a searchable UTF-8 file.
      *
      * @return array{path: string, startLine: int, endLine: int, totalLines: int, content: string}
-     * @example $source = $fs->read('app/src/Service.php', startLine: 40, lineCount: 80);
+     * @example $source = $fs->read('src/Service.php', startLine: 40, lineCount: 80);
      * @see grep()
      */
     public function read(string $path, int $startLine = 1, int $lineCount = 200): array
@@ -343,7 +409,7 @@ final class AiFileSystem
      *
      * @param list<array{search: string|null, replacement: string}> $edits
      * @return array{path: string, status: string, bytes: int, revisionId: ?int}
-     * @example $fs->edit('app/README.md', [['search' => 'Old', 'replacement' => 'New']]);
+     * @example $fs->edit('README.md', [['search' => 'Old', 'replacement' => 'New']]);
      * @see history()
      */
     public function edit(string $path, array $edits): array
@@ -367,7 +433,7 @@ final class AiFileSystem
      *
      * @return array{path: string, status: string, bytes: int, revisionId: ?int}
      * @throws RuntimeException When creation is not allowed or the target exists.
-     * @example $fs->create('app/docs/new.md', "# New\n");
+     * @example $fs->create('docs/new.md', "# New\n");
      * @see onAfterCreate()
      */
     public function create(string $path, string $content): array
@@ -414,12 +480,17 @@ final class AiFileSystem
      *
      * @return array{path: string, status: string, revisionId: ?int}
      * @throws RuntimeException When deletion is not allowed.
-     * @example $fs->delete('app/docs/obsolete.md');
+     * @example $fs->delete('docs/obsolete.md');
      * @see restore()
      */
     public function delete(string $path): array
     {
-        [$virtualPath, $realPath] = $this->resolveMutationTarget($path, mustExist: true);
+        $virtualPath = $this->normalizeVirtualPath($path);
+        if (isset($this->files[$virtualPath])) {
+            throw new RuntimeException('Explicit AI filesystem files cannot be deleted: ' . $virtualPath);
+        }
+
+        [$virtualPath, $realPath] = $this->resolveMutationTarget($virtualPath, mustExist: true);
         if (!$this->canDelete($virtualPath)) {
             throw new RuntimeException('AI filesystem file is not deletable: ' . $virtualPath);
         }
@@ -450,7 +521,7 @@ final class AiFileSystem
      * Return saved revisions for one file, newest first.
      *
      * @return array{enabled: bool, revisions: list<array{id: int, createdAt: string}>}
-     * @example $history = $fs->history('app/README.md');
+     * @example $history = $fs->history('README.md');
      * @see restore()
      */
     public function history(string $path, int $limit = 20): array
@@ -468,7 +539,7 @@ final class AiFileSystem
      *
      * @return array{path: string, restoredRevisionId: int, revisionId: int}
      * @throws LogicException When no revision store is configured.
-     * @example $fs->restore('app/README.md', 12);
+     * @example $fs->restore('README.md', 12);
      * @see SqliteRevisionStore
      */
     public function restore(string $path, int $revisionId): array
@@ -520,10 +591,18 @@ final class AiFileSystem
     private function entries(string $path, bool $recursive): Generator
     {
         $path = $this->normalizeVirtualPath($path, allowEmpty: true);
-        $root = $this->requireRoot();
 
         if ($path === '') {
-            yield from $this->walkDirectory($root, '', $recursive);
+            if ($this->root !== null) {
+                yield from $this->walkDirectory($this->root, '', $recursive);
+            }
+
+            foreach ($this->files as $name => $realPath) {
+                if ($this->policy->isIgnored($name)) {
+                    continue;
+                }
+                yield $this->fileEntry($name, $realPath);
+            }
 
             return;
         }
@@ -613,10 +692,14 @@ final class AiFileSystem
     private function resolve(string $path): array
     {
         $virtualPath = $this->normalizeVirtualPath($path);
+
+        if (isset($this->files[$virtualPath])) {
+            return [$virtualPath, $this->files[$virtualPath]];
+        }
+
+        $root = $this->requireRoot();
         $candidate = realpath(
-            $this->requireRoot()
-            . DIRECTORY_SEPARATOR
-            . str_replace('/', DIRECTORY_SEPARATOR, $virtualPath),
+            $root . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $virtualPath),
         );
 
         if ($candidate === false || !$this->isInsideRoot($candidate)) {
@@ -628,8 +711,11 @@ final class AiFileSystem
 
     private function isInsideRoot(string $candidate): bool
     {
-        $root = $this->requireRoot();
+        return $this->isInsidePath($candidate, $this->requireRoot());
+    }
 
+    private function isInsidePath(string $candidate, string $root): bool
+    {
         return $candidate === $root
             || str_starts_with($candidate, $root . DIRECTORY_SEPARATOR);
     }
@@ -656,6 +742,10 @@ final class AiFileSystem
 
     private function canRestore(string $virtualPath): bool
     {
+        if (isset($this->files[$virtualPath])) {
+            return $this->canEdit($virtualPath);
+        }
+
         return $this->canEdit($virtualPath)
             || $this->canCreate($virtualPath)
             || $this->canDelete($virtualPath);
@@ -752,7 +842,12 @@ final class AiFileSystem
 
     private function resolveRevisionTarget(string $path): array
     {
-        return $this->resolveMutationTarget($path, mustExist: false);
+        $virtualPath = $this->normalizeVirtualPath($path);
+        if (isset($this->files[$virtualPath])) {
+            return [$virtualPath, $this->files[$virtualPath]];
+        }
+
+        return $this->resolveMutationTarget($virtualPath, mustExist: false);
     }
 
     private function addHook(string $event, callable $hook): self
@@ -854,6 +949,20 @@ final class AiFileSystem
         }
 
         return $this->root;
+    }
+
+    private function normalizeVirtualName(string $name): string
+    {
+        $name = trim(str_replace('\\', '/', $name), '/');
+        if (
+            $name === ''
+            || str_contains($name, '/')
+            || preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/', $name) !== 1
+        ) {
+            throw new InvalidArgumentException('AI filesystem file name must be one safe path segment.');
+        }
+
+        return $name;
     }
 
     private function normalizeVirtualPath(string $path, bool $allowEmpty = false): string
