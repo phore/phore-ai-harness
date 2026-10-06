@@ -25,7 +25,7 @@ final class AiFileSystemToolSet implements AiToolSet
             new CallbackTool(
                 [$this, 'listFileSystems'],
                 'filesystem_list_systems',
-                'List AI filesystems with IDs, aliases, descriptions and source roots.',
+                'List AI filesystems with IDs, descriptions, root status and explicit files.',
             ),
             new CallbackTool(
                 [$this, 'listFiles'],
@@ -50,17 +50,17 @@ final class AiFileSystemToolSet implements AiToolSet
             new CallbackTool(
                 [$this, 'createFile'],
                 'filesystem_create',
-                'Create one UTF-8 text file when its root and policy explicitly allow creation.',
+                'Create one UTF-8 text file inside the configured root when policy permits it.',
             ),
             new CallbackTool(
                 [$this, 'deleteFile'],
                 'filesystem_delete',
-                'Delete one UTF-8 text file when its source and policy explicitly allow deletion.',
+                'Delete one UTF-8 text file inside the configured root when policy permits it.',
             ),
             new CallbackTool(
                 [$this, 'history'],
                 'filesystem_history',
-                'List saved revisions for one file when revision history is configured.',
+                'List saved revisions for one file from the default memory or injected store.',
             ),
             new CallbackTool(
                 [$this, 'restore'],
