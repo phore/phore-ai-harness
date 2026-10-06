@@ -40,11 +40,23 @@ final readonly class FileSystemPolicy
         return !$this->isIgnored($path) && $this->matches($path, $this->editable);
     }
 
+    /**
+     * Check whether a virtual path is allowed for file creation.
+     *
+     * @example $policy->isCreatable('app/docs/generated.md');
+     * @see AiFileSystem::create()
+     */
     public function isCreatable(string $path): bool
     {
         return !$this->isIgnored($path) && $this->matches($path, $this->creatable);
     }
 
+    /**
+     * Check whether a virtual path is allowed for file deletion.
+     *
+     * @example $policy->isDeletable('app/docs/generated/old.md');
+     * @see AiFileSystem::delete()
+     */
     public function isDeletable(string $path): bool
     {
         return !$this->isIgnored($path) && $this->matches($path, $this->deletable);
