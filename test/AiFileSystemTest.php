@@ -54,6 +54,16 @@ final class AiFileSystemTest extends TestCase
         self::assertCount(2, $toolSet->listFileSystems());
     }
 
+    public function testOnlyOneRootCanBeConfigured(): void
+    {
+        $context = new AiContext();
+        $fileSystem = new AiFileSystem($context, id: 'project');
+        $fileSystem->addRoot($this->root);
+
+        $this->expectException(\LogicException::class);
+        $fileSystem->addRoot($this->root);
+    }
+
     public function testFilesystemToolSchemasExposeRoutingAndEditShape(): void
     {
         $context = new AiContext();
@@ -87,79 +97,72 @@ final class AiFileSystemTest extends TestCase
             $context,
             id: 'project',
             policy: new FileSystemPolicy(
-                ignore: ['project/vendor/*'],
-                editable: ['project/docs/*'],
+                ignore: ['vendor/*'],
+                editable: ['docs/*'],
                 maxListLimit: 10,
             ),
         );
-        $fileSystem->addRoot($this->root, 'project', editable: true);
+        $fileSystem->addRoot($this->root);
 
-        $page = $fileSystem->list('project/docs', recursive: true, limit: 1);
+        $page = $fileSystem->list('docs', recursive: true, limit: 1);
         self::assertCount(1, $page['items']);
         self::assertSame(1, $page['nextOffset']);
 
-        $secondPage = $fileSystem->list('project/docs', recursive: true, offset: 1, limit: 10);
+        $secondPage = $fileSystem->list('docs', recursive: true, offset: 1, limit: 10);
         self::assertCount(1, $secondPage['items']);
         self::assertNull($secondPage['nextOffset']);
 
-        $matches = $fileSystem->grep('needle', 'project');
+        $matches = $fileSystem->grep('needle');
         self::assertCount(2, $matches['matches']);
         self::assertStringNotContainsString('vendor', json_encode($matches, JSON_THROW_ON_ERROR));
 
-        $read = $fileSystem->read('project/docs/a.md', startLine: 2, lineCount: 1);
+        $read = $fileSystem->read('docs/a.md', startLine: 2, lineCount: 1);
         self::assertSame('needle alpha', $read['content']);
 
         $this->expectException(\InvalidArgumentException::class);
         $fileSystem->read('../outside.txt');
     }
 
-    public function testReadonlyAndBinaryFilesCannotBeEdited(): void
+    public function testPolicyCanPreventEditsAndBinaryFilesCannotBeEdited(): void
     {
         $context = new AiContext();
-        $fileSystem = new AiFileSystem($context, id: 'project');
-        $fileSystem->addRoot($this->root, 'project', editable: false);
+        $fileSystem = new AiFileSystem(
+            $context,
+            id: 'project',
+            policy: new FileSystemPolicy(editable: []),
+        );
+        $fileSystem->addRoot($this->root);
 
         try {
             $fileSystem->edit(
-                'project/docs/a.md',
+                'docs/a.md',
                 [['search' => 'Title', 'replacement' => 'Changed']],
             );
-            self::fail('Expected readonly edit to fail.');
+            self::fail('Expected policy-protected edit to fail.');
         } catch (\RuntimeException $error) {
             self::assertStringContainsString('not editable', $error->getMessage());
         }
 
         $editable = new AiFileSystem($context, id: 'editable');
-        $editable->addFile($this->root . '/binary.bin', 'binary', editable: true);
+        $editable->addRoot($this->root);
 
         $this->expectException(\RuntimeException::class);
-        $editable->edit('binary', [['search' => 'abc', 'replacement' => 'ABC']]);
+        $editable->edit('binary.bin', [['search' => 'abc', 'replacement' => 'ABC']]);
     }
 
     public function testCreateDeleteRestoreAndAfterEditValidationRollback(): void
     {
-        if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
-            self::markTestSkipped('PDO SQLite is not available.');
-        }
-
         $context = new AiContext();
         $fileSystem = new AiFileSystem(
             $context,
             id: 'lifecycle',
             policy: new FileSystemPolicy(
-                editable: ['project/docs/*'],
-                creatable: ['project/docs/*'],
-                deletable: ['project/docs/*'],
+                editable: ['docs/*'],
+                creatable: ['docs/*'],
+                deletable: ['docs/*'],
             ),
-            revisionStore: new SqliteRevisionStore(':memory:'),
         );
-        $fileSystem->addRoot(
-            $this->root,
-            'project',
-            editable: true,
-            creatable: true,
-            deletable: true,
-        );
+        $fileSystem->addRoot($this->root);
 
         $events = [];
         $fileSystem
@@ -181,7 +184,7 @@ final class AiFileSystemTest extends TestCase
                 }
             });
 
-        $path = 'project/docs/generated.txt';
+        $path = 'docs/generated.txt';
         $fileSystem->create($path, "created\n");
         self::assertSame("created\n", file_get_contents($this->root . '/docs/generated.txt'));
 
@@ -255,9 +258,9 @@ final class AiFileSystemTest extends TestCase
         $context = new AiContext();
         $store = new SqliteRevisionStore(':memory:');
         $fileSystem = new AiFileSystem($context, id: 'project', revisionStore: $store);
-        $fileSystem->addRoot($this->root, 'project', editable: true);
+        $fileSystem->addRoot($this->root);
 
-        $result = $fileSystem->edit('project/docs/a.md', [[
+        $result = $fileSystem->edit('docs/a.md', [[
             'search' => 'needle alpha',
             'replacement' => 'needle changed',
         ]]);
@@ -267,16 +270,16 @@ final class AiFileSystemTest extends TestCase
             file_get_contents($this->root . '/docs/a.md'),
         );
 
-        $history = $fileSystem->history('project/docs/a.md');
+        $history = $fileSystem->history('docs/a.md');
         self::assertTrue($history['enabled']);
         self::assertCount(2, $history['revisions']);
 
         $oldest = $history['revisions'][1]['id'];
-        $fileSystem->restore('project/docs/a.md', $oldest);
+        $fileSystem->restore('docs/a.md', $oldest);
         self::assertSame(
             "# Title\nneedle alpha\nlast\n",
             file_get_contents($this->root . '/docs/a.md'),
         );
-        self::assertCount(3, $fileSystem->history('project/docs/a.md')['revisions']);
+        self::assertCount(3, $fileSystem->history('docs/a.md')['revisions']);
     }
 }
