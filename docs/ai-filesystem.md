@@ -6,14 +6,13 @@ filesystem tools instead of the host filesystem.
 
 ## Typical flow
 
-The root can be supplied directly in the constructor:
+The root is the first constructor argument. If no context is supplied, the
+filesystem creates its own `AiContext`; pass `context:` only when it should
+share an existing conversation.
 
 ```php
-$context = new AiContext();
-
 $fileSystem = new AiFileSystem(
-    $context,
-    root: '/srv/backend',
+    '/srv/backend',
     id: 'backend',
     description: 'PHP application code and project documentation.',
     policy: new FileSystemPolicy(
@@ -27,7 +26,8 @@ $fileSystem = new AiFileSystem(
 $fileSystem->addFile('/srv/shared/architecture.md');
 ```
 
-The root can instead be added later with `addRoot('/srv/backend')`. Each
+The generated context is available through `getContext()`. The root can
+instead be added later with `addRoot('/srv/backend')`. Each
 filesystem accepts at most one root. Multiple roots are modeled as multiple
 `AiFileSystem` instances with different IDs. Paths below the root are relative,
 for example `src/Service.php`, with no additional root alias.
@@ -84,8 +84,7 @@ For history that must survive later processes or sessions, inject
 
 ```php
 $fileSystem = new AiFileSystem(
-    $context,
-    root: '/srv/backend',
+    '/srv/backend',
     id: 'backend',
     revisionStore: new SqliteRevisionStore('/var/lib/app/ai-history.sqlite'),
 );
