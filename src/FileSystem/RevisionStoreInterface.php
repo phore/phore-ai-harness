@@ -4,6 +4,15 @@ declare(strict_types=1);
 
 namespace Phore\AiHarness\FileSystem;
 
+/**
+ * Stores restorable AiFileSystem states.
+ *
+ * AiFileSystem uses MemoryRevisionStore by default. SqliteRevisionStore can be
+ * injected when revision history must survive a later process or session.
+ *
+ * @see MemoryRevisionStore
+ * @see SqliteRevisionStore
+ */
 interface RevisionStoreInterface
 {
     /**
