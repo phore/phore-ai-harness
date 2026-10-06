@@ -8,6 +8,7 @@ use PDO;
 use Phore\AiHarness\AiContext;
 use Phore\AiHarness\FileSystem\AiFileSystem;
 use Phore\AiHarness\FileSystem\AiFileSystemToolSet;
+use Phore\AiHarness\FileSystem\FileOperationContext;
 use Phore\AiHarness\FileSystem\FileSystemPolicy;
 use Phore\AiHarness\FileSystem\SqliteRevisionStore;
 use PHPUnit\Framework\TestCase;
@@ -71,6 +72,8 @@ final class AiFileSystemTest extends TestCase
 
         self::assertArrayHasKey('filesystem_list_systems', $schemas);
         self::assertArrayHasKey('filesystem_structure_edit', $schemas);
+        self::assertArrayHasKey('filesystem_create', $schemas);
+        self::assertArrayHasKey('filesystem_delete', $schemas);
         self::assertArrayHasKey(
             'fileSystemId',
             $schemas['filesystem_read']['properties'],
@@ -167,6 +170,96 @@ final class AiFileSystemTest extends TestCase
         $after = $fileSystem->structure('project/docs/sections.md');
         self::assertSame($betaId, $after['sections'][0]['children'][0]['id']);
         self::assertSame($alphaId, $after['sections'][0]['children'][1]['id']);
+    }
+
+    public function testCreateDeleteRestoreAndAfterEditValidationRollback(): void
+    {
+        if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
+            self::markTestSkipped('PDO SQLite is not available.');
+        }
+
+        $context = new AiContext();
+        $fileSystem = new AiFileSystem(
+            $context,
+            id: 'lifecycle',
+            policy: new FileSystemPolicy(
+                editable: ['project/docs/*'],
+                creatable: ['project/docs/*'],
+                deletable: ['project/docs/*'],
+            ),
+            revisionStore: new SqliteRevisionStore(':memory:'),
+        );
+        $fileSystem->addRoot(
+            $this->root,
+            'project',
+            editable: true,
+            creatable: true,
+            deletable: true,
+        );
+
+        $events = [];
+        $fileSystem
+            ->onBeforeCreate(function (FileOperationContext $event) use (&$events): void {
+                $events[] = 'before-create:' . $event->path;
+            })
+            ->onAfterCreate(function (FileOperationContext $event) use (&$events): void {
+                $events[] = 'after-create:' . $event->path;
+            })
+            ->onBeforeDelete(function (FileOperationContext $event) use (&$events): void {
+                $events[] = 'before-delete:' . $event->path;
+            })
+            ->onAfterDelete(function (FileOperationContext $event) use (&$events): void {
+                $events[] = 'after-delete:' . $event->path;
+            })
+            ->onAfterEdit(function (FileOperationContext $event): void {
+                if (str_contains($event->afterContent ?? '', 'INVALID')) {
+                    throw new \RuntimeException('Validation failed.');
+                }
+            });
+
+        $path = 'project/docs/generated.txt';
+        $fileSystem->create($path, "created\n");
+        self::assertSame("created\n", file_get_contents($this->root . '/docs/generated.txt'));
+
+        $createHistory = $fileSystem->history($path)['revisions'];
+        self::assertFalse($createHistory[1]['exists']);
+        $fileSystem->restore($path, $createHistory[1]['id']);
+        self::assertFileDoesNotExist($this->root . '/docs/generated.txt');
+
+        $fileSystem->create($path, "created\n");
+        $fileSystem->delete($path);
+        self::assertFileDoesNotExist($this->root . '/docs/generated.txt');
+
+        $deleteHistory = $fileSystem->history($path)['revisions'];
+        $existingRevision = current(array_filter(
+            $deleteHistory,
+            static fn (array $revision): bool => $revision['exists'],
+        ));
+        self::assertIsArray($existingRevision);
+        $fileSystem->restore($path, $existingRevision['id']);
+        self::assertSame("created\n", file_get_contents($this->root . '/docs/generated.txt'));
+
+        try {
+            $fileSystem->edit($path, [['search' => 'created', 'replacement' => 'INVALID']]);
+            self::fail('Expected after-edit validation to fail.');
+        } catch (\RuntimeException $error) {
+            self::assertSame('Validation failed.', $error->getMessage());
+        }
+        self::assertSame("created\n", file_get_contents($this->root . '/docs/generated.txt'));
+
+        $result = $fileSystem->edit($path, [['search' => 'created', 'replacement' => 'valid']]);
+        self::assertSame('applied', $result['status']);
+        self::assertSame(
+            [
+                'before-create:' . $path,
+                'after-create:' . $path,
+                'before-create:' . $path,
+                'after-create:' . $path,
+                'before-delete:' . $path,
+                'after-delete:' . $path,
+            ],
+            $events,
+        );
     }
 
     public function testEditsCreateSqliteHistoryAndCanBeRestored(): void
