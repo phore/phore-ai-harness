@@ -56,6 +56,31 @@ final class AiFileSystemTest extends TestCase
         self::assertCount(2, $toolSet->listFileSystems());
     }
 
+    public function testFilesystemToolSchemasExposeRoutingAndEditShape(): void
+    {
+        $context = new AiContext();
+        new AiFileSystem($context, id: 'project');
+
+        $toolSet = $context->getToolSet(AiFileSystemToolSet::class);
+        self::assertInstanceOf(AiFileSystemToolSet::class, $toolSet);
+
+        $schemas = [];
+        foreach ($toolSet->getTools() as $tool) {
+            $schemas[$tool->name()] = $tool->toArray()['parameters'];
+        }
+
+        self::assertArrayHasKey('filesystem_list_systems', $schemas);
+        self::assertArrayHasKey('filesystem_structure_edit', $schemas);
+        self::assertArrayHasKey(
+            'fileSystemId',
+            $schemas['filesystem_read']['properties'],
+        );
+
+        $editSchema = json_encode($schemas['filesystem_edit'], JSON_THROW_ON_ERROR);
+        self::assertStringContainsString('"search"', $editSchema);
+        self::assertStringContainsString('"replacement"', $editSchema);
+    }
+
     public function testListSearchReadAndPolicyStayInsideDeclaredRoots(): void
     {
         $context = new AiContext();
