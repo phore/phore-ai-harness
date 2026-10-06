@@ -48,6 +48,16 @@ final class AiFileSystemToolSet implements AiToolSet
                 'Apply exact search/replacement edits to one editable file.',
             ),
             new CallbackTool(
+                [$this, 'structure'],
+                'filesystem_structure',
+                'Inspect a file through its specialized structural editor, for example Markdown heading sections.',
+            ),
+            new CallbackTool(
+                [$this, 'structureEdit'],
+                'filesystem_structure_edit',
+                'Apply one specialized structural edit using stable element IDs returned by filesystem_structure.',
+            ),
+            new CallbackTool(
                 [$this, 'history'],
                 'filesystem_history',
                 'List saved revisions for one file when revision history is configured.',
@@ -176,6 +186,36 @@ final class AiFileSystemToolSet implements AiToolSet
         return $this->call(
             $fileSystemId,
             static fn (AiFileSystem $fileSystem): array => $fileSystem->edit($path, $edits),
+        );
+    }
+
+    /** @return array<string, mixed> */
+    public function structure(string $fileSystemId, string $path): array
+    {
+        return $this->call(
+            $fileSystemId,
+            static fn (AiFileSystem $fileSystem): array => $fileSystem->structure($path),
+        );
+    }
+
+    /** @return array<string, mixed> */
+    public function structureEdit(
+        string $fileSystemId,
+        string $path,
+        string $action,
+        string $sectionId,
+        ?string $markdown = null,
+        ?string $referenceId = null,
+    ): array {
+        return $this->call(
+            $fileSystemId,
+            static fn (AiFileSystem $fileSystem): array => $fileSystem->structureEdit(
+                $path,
+                $action,
+                $sectionId,
+                $markdown,
+                $referenceId,
+            ),
         );
     }
 
