@@ -44,8 +44,8 @@ final class AiFileSystemTest extends TestCase
     public function testContextReusesOneFilesystemToolSetForSeveralFilesystems(): void
     {
         $context = new AiContext();
-        $first = new AiFileSystem($context, id: 'first');
-        $second = new AiFileSystem($context, id: 'second');
+        $first = new AiFileSystem(context: $context, id: 'first');
+        $second = new AiFileSystem(context: $context, id: 'second');
 
         $toolSet = $context->getToolSet(AiFileSystemToolSet::class);
         self::assertInstanceOf(AiFileSystemToolSet::class, $toolSet);
@@ -54,10 +54,22 @@ final class AiFileSystemTest extends TestCase
         self::assertCount(2, $toolSet->listFileSystems());
     }
 
+    public function testFilesystemCreatesOwnContextWhenNoneIsSupplied(): void
+    {
+        $fileSystem = new AiFileSystem($this->root, id: 'standalone');
+        $context = $fileSystem->getContext();
+
+        self::assertInstanceOf(AiContext::class, $context);
+
+        $toolSet = $context->getToolSet(AiFileSystemToolSet::class);
+        self::assertInstanceOf(AiFileSystemToolSet::class, $toolSet);
+        self::assertSame($fileSystem, $toolSet->getFileSystem('standalone'));
+    }
+
     public function testRootCanBePassedToConstructorOrAddedLaterButOnlyOnce(): void
     {
         $context = new AiContext();
-        $fileSystem = new AiFileSystem($context, root: $this->root, id: 'constructor-root');
+        $fileSystem = new AiFileSystem($this->root, context: $context, id: 'constructor-root');
         self::assertSame('needle alpha', $fileSystem->read('docs/a.md', 2, 1)['content']);
 
         try {
@@ -67,7 +79,7 @@ final class AiFileSystemTest extends TestCase
             self::assertStringContainsString('already configured', $error->getMessage());
         }
 
-        $later = new AiFileSystem($context, id: 'later-root');
+        $later = new AiFileSystem(context: $context, id: 'later-root');
         $later->addRoot($this->root);
         self::assertSame('needle beta', $later->read('docs/b.txt', 2, 1)['content']);
     }
@@ -75,7 +87,7 @@ final class AiFileSystemTest extends TestCase
     public function testExplicitFilesUseBasenameAndWorkWithoutRoot(): void
     {
         $context = new AiContext();
-        $fileSystem = new AiFileSystem($context, id: 'files-only');
+        $fileSystem = new AiFileSystem(context: $context, id: 'files-only');
         $fileSystem->addFile($this->root . '/docs/a.md');
 
         self::assertSame('needle alpha', $fileSystem->read('a.md', 2, 1)['content']);
@@ -108,7 +120,7 @@ final class AiFileSystemTest extends TestCase
     public function testFilesystemToolSchemasExposeRoutingAndEditShape(): void
     {
         $context = new AiContext();
-        new AiFileSystem($context, id: 'project');
+        new AiFileSystem(context: $context, id: 'project');
 
         $toolSet = $context->getToolSet(AiFileSystemToolSet::class);
         self::assertInstanceOf(AiFileSystemToolSet::class, $toolSet);
@@ -132,8 +144,8 @@ final class AiFileSystemTest extends TestCase
     {
         $context = new AiContext();
         $fileSystem = new AiFileSystem(
-            $context,
-            root: $this->root,
+            $this->root,
+            context: $context,
             id: 'project',
             policy: new FileSystemPolicy(
                 ignore: ['vendor/*'],
@@ -160,8 +172,8 @@ final class AiFileSystemTest extends TestCase
     {
         $context = new AiContext();
         $readonly = new AiFileSystem(
-            $context,
-            root: $this->root,
+            $this->root,
+            context: $context,
             id: 'readonly',
             policy: new FileSystemPolicy(editable: []),
         );
@@ -173,7 +185,7 @@ final class AiFileSystemTest extends TestCase
             self::assertStringContainsString('not editable', $error->getMessage());
         }
 
-        $binary = new AiFileSystem($context, id: 'binary');
+        $binary = new AiFileSystem(context: $context, id: 'binary');
         $binary->addFile($this->root . '/binary.bin');
 
         $this->expectException(\RuntimeException::class);
@@ -183,7 +195,7 @@ final class AiFileSystemTest extends TestCase
     public function testDefaultPolicyAndMemoryHistorySupportFullLifecycle(): void
     {
         $context = new AiContext();
-        $fileSystem = new AiFileSystem($context, root: $this->root, id: 'lifecycle');
+        $fileSystem = new AiFileSystem($this->root, context: $context, id: 'lifecycle');
 
         $events = [];
         $fileSystem
@@ -253,8 +265,8 @@ final class AiFileSystemTest extends TestCase
         $database = $this->root . '/history.sqlite';
         $context = new AiContext();
         $fileSystem = new AiFileSystem(
-            $context,
-            root: $this->root,
+            $this->root,
+            context: $context,
             id: 'persistent',
             revisionStore: new SqliteRevisionStore($database),
         );
@@ -264,8 +276,8 @@ final class AiFileSystemTest extends TestCase
         ]]);
 
         $nextSession = new AiFileSystem(
-            new AiContext(),
-            root: $this->root,
+            $this->root,
+            context: new AiContext(),
             id: 'persistent',
             revisionStore: new SqliteRevisionStore($database),
         );
