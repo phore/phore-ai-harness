@@ -23,6 +23,10 @@ final class AiFileSystemTest extends TestCase
         mkdir($this->root . '/vendor', 0777, true);
         file_put_contents($this->root . '/docs/a.md', "# Title\nneedle alpha\nlast\n");
         file_put_contents($this->root . '/docs/b.txt', "beta\nneedle beta\n");
+        file_put_contents(
+            $this->root . '/docs/sections.md',
+            "# Guide\nIntro\n## Alpha\nA\n### Detail\nD\n## Beta\nB\n",
+        );
         file_put_contents($this->root . '/vendor/ignored.txt', "needle ignored\n");
         file_put_contents($this->root . '/binary.bin', "abc\0def");
     }
@@ -106,6 +110,38 @@ final class AiFileSystemTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $editable->edit('binary', [['search' => 'abc', 'replacement' => 'ABC']]);
+    }
+
+    public function testMarkdownStructureUsesStableIdsAndCanMoveWholeSections(): void
+    {
+        $context = new AiContext();
+        $fileSystem = new AiFileSystem($context, id: 'project');
+        $fileSystem->addRoot($this->root, 'project', editable: true);
+
+        $structure = $fileSystem->structure('project/docs/sections.md');
+        self::assertSame('Guide', $structure['sections'][0]['title']);
+        self::assertSame('Alpha', $structure['sections'][0]['children'][0]['title']);
+        self::assertSame('Detail', $structure['sections'][0]['children'][0]['children'][0]['title']);
+        self::assertSame('Beta', $structure['sections'][0]['children'][1]['title']);
+
+        $alphaId = $structure['sections'][0]['children'][0]['id'];
+        $betaId = $structure['sections'][0]['children'][1]['id'];
+
+        $result = $fileSystem->structureEdit(
+            'project/docs/sections.md',
+            'move_before',
+            $betaId,
+            referenceId: $alphaId,
+        );
+        self::assertSame('applied', $result['status']);
+        self::assertLessThan(
+            strpos(file_get_contents($this->root . '/docs/sections.md'), '## Alpha'),
+            strpos(file_get_contents($this->root . '/docs/sections.md'), '## Beta'),
+        );
+
+        $after = $fileSystem->structure('project/docs/sections.md');
+        self::assertSame($betaId, $after['sections'][0]['children'][0]['id']);
+        self::assertSame($alphaId, $after['sections'][0]['children'][1]['id']);
     }
 
     public function testEditsCreateSqliteHistoryAndCanBeRestored(): void

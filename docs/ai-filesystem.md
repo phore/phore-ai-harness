@@ -97,6 +97,8 @@ The shared tool set exposes these callbacks:
 | `filesystem_grep` | literal text search with line context |
 | `filesystem_read` | read a bounded line range |
 | `filesystem_edit` | apply exact search/replacement edits |
+| `filesystem_structure` | inspect a file through a structural editor |
+| `filesystem_structure_edit` | edit or move a structural element by stable ID |
 | `filesystem_history` | list saved revisions |
 | `filesystem_restore` | restore a saved revision |
 
@@ -124,8 +126,35 @@ $fileSystem->registerEditor(new ProjectConfigEditor());
 ```
 
 This keeps file-type-specific parsing or structural editing outside the generic
-filesystem routing. The tool names remain unchanged, so adding a specialized
-editor does not duplicate callbacks in the context.
+filesystem routing. The generic structural tools remain unchanged, so adding a
+specialized editor does not duplicate callbacks in the context.
+
+### Markdown sections
+
+The built-in Markdown editor exposes the heading hierarchy as a tree. Each
+section includes its heading level, title, line range, children and a stable ID.
+The ID remains stable while the section's heading level/title and its duplicate
+occurrence remain unchanged. After renaming or adding duplicate headings, obtain
+the structure again instead of reusing an old ID.
+
+```php
+$structure = $fileSystem->structure('app/docs/guide.md');
+
+$alphaId = $structure['sections'][0]['children'][0]['id'];
+$betaId = $structure['sections'][0]['children'][1]['id'];
+
+$fileSystem->structureEdit(
+    'app/docs/guide.md',
+    'move_before',
+    $betaId,
+    referenceId: $alphaId,
+);
+```
+
+Supported actions are `replace`, `delete`, `insert_before`,
+`insert_after`, `move_before` and `move_after`. A section range includes
+its child sections, so moving or deleting a heading moves or deletes its subtree.
+Moves relative to an ancestor or descendant are rejected as ambiguous.
 
 ## Revisions and restore
 
