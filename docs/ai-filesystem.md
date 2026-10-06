@@ -1,218 +1,104 @@
 # AI File System
 
-`AiFileSystem` exposes selected local files and directories to an `AiContext`
-without making the whole host filesystem available. The model sees virtual paths
-and one shared set of tools for listing, searching, reading, editing, revision
-history and restore.
+`AiFileSystem` exposes one optional directory root plus explicitly added real
+files to an `AiContext`. The model sees relative paths and one shared set of
+filesystem tools instead of the host filesystem.
 
 ## Typical flow
 
-Create the context first, then bind one or more filesystems to it:
+The root can be supplied directly in the constructor:
 
 ```php
 $context = new AiContext();
 
 $fileSystem = new AiFileSystem(
     $context,
+    root: '/srv/backend',
     id: 'backend',
-    alias: 'Backend project',
-    description: 'Application code and documentation.',
+    description: 'PHP application code and project documentation.',
     policy: new FileSystemPolicy(
-        ignore: ['app/vendor/*', 'app/node_modules/*', 'app/.git/*'],
-        editable: ['app/src/*', 'app/docs/*'],
-        creatable: ['app/docs/*'],
-        deletable: ['app/docs/generated/*'],
+        ignore: ['vendor/*', 'node_modules/*', '.git/*'],
+        editable: ['src/*', 'docs/*'],
+        creatable: ['docs/*'],
+        deletable: ['docs/generated/*'],
     ),
-    revisionStore: new SqliteRevisionStore('/var/lib/app/ai-history.sqlite'),
 );
 
-$fileSystem->addRoot(
-    '/srv/backend',
-    'app',
-    searchable: true,
-    editable: true,
-    creatable: true,
-    deletable: true,
-);
-$fileSystem->addFile(
-    '/srv/shared/architecture.md',
-    'architecture',
-    searchable: true,
-    editable: false,
-);
-
-$context->do(
-    'Find the deprecated cache adapter, update app/src and the matching '
-    . 'documentation in app/docs. Do not edit architecture.',
-    throw: true,
-);
+$fileSystem->addFile('/srv/shared/architecture.md');
 ```
 
-The `AiFileSystem` constructor registers the filesystem in the context's
-`AiFileSystemToolSet`. A second filesystem attached to the same context reuses
-that exact tool-set instance; the context does not receive another copy of the
-same callbacks.
+The root can instead be added later with `addRoot('/srv/backend')`. Each
+filesystem accepts at most one root. Multiple roots are modeled as multiple
+`AiFileSystem` instances with different IDs. Paths below the root are relative,
+for example `src/Service.php`, with no additional root alias.
 
-## Virtual paths and several roots
+`addFile()` exposes one real file under its basename. There is no file alias and
+no virtual/in-memory file API. Duplicate basenames are rejected. A file already
+inside the configured root cannot be added again because it is already reachable
+through its relative root path.
 
-Every added root or explicit file gets a virtual top-level name. A root added as
-`app` exposes paths such as `app/src/Service.php`; an individual file added as
-`architecture` is addressed exactly by that name. Real absolute paths are not
-passed to the model.
+Without a root, explicit files can still be listed, searched, read, edited and
+restored. Create and delete require a configured root.
 
-This also avoids collisions. Two different `AiFileSystem` instances may both
-contain `README.md`, because every tool call routes first by the filesystem
-`id`. Within one filesystem, different roots must use different virtual names.
+## Policy
 
-`id` is the stable routing value used by tools. `alias` and `description` are
-optional model-facing metadata. For resumable applications, set explicit stable
-IDs and rebuild the same filesystem/tool-set setup before importing an
-`AiContext` state.
+There are no permission flags on `addRoot()` or `addFile()`. Omitting the
+policy uses an open `FileSystemPolicy`: search, edit, create and delete are
+allowed inside the safe filesystem boundary.
 
-## Searchable and editable access
-
-`addRoot()` and `addFile()` independently define whether a source is searchable
-and editable. `FileSystemPolicy` applies an additional allowlist and ignore layer
-using virtual-path patterns.
+A supplied policy is the single path-level restriction layer:
 
 ```php
 $policy = new FileSystemPolicy(
-    ignore: ['app/vendor/*', 'app/node_modules/*'],
+    ignore: ['vendor/*', '.git/*'],
     searchable: ['*'],
-    editable: ['app/src/*', 'app/docs/*'],
-);
-
-$fileSystem->addRoot('/srv/backend', 'app', searchable: true, editable: true);
-$fileSystem->addFile('/srv/shared/secret.txt', 'secret', searchable: false);
-```
-
-A file must pass both checks: the source must permit the operation and the policy
-must permit its virtual path. Ignored directories are pruned while walking the
-tree, so a recursive list or search does not first enumerate all of
-`node_modules` or another ignored subtree.
-
-Listing is paginated with `offset` and `limit`. The policy caps the requested
-limit. Recursive listing is opt-in. This keeps large source trees from being
-placed into one tool result.
-
-## Create and delete permissions
-
-Creating and deleting files are separate capabilities and are disabled by
-default. A root must opt in with `creatable: true` or `deletable: true`, and
-the matching `FileSystemPolicy` pattern must allow the concrete virtual path.
-This means `editable: true` does not implicitly allow adding or removing files.
-
-`filesystem_create` creates UTF-8 text files below an existing root directory.
-It never creates directories. `filesystem_delete` removes an existing UTF-8
-text file. Explicit files added with `addFile()` may opt into deletion, but
-creation is only available below directory roots.
-
-## Mutation hooks and validation
-
-Create, edit and delete each expose before and after hooks:
-
-`onBeforeCreate()`, `onAfterCreate()`, `onBeforeEdit()`,
-`onAfterEdit()`, `onBeforeDelete()` and `onAfterDelete()`.
-
-Every callback receives a `FileOperationContext` containing filesystem ID,
-operation, virtual path, real path, previous content and resulting content.
-Before hooks can veto a mutation before it touches disk. After hooks inspect the
-state that was actually written.
-
-If an after hook throws, the filesystem automatically rolls the mutation back
-before propagating the exception. For callbacks reached through the shared tool
-set, a `RuntimeException` becomes recoverable tool feedback. The model can then
-use the validation message to correct its edit and call the tool again.
-
-```php
-$fileSystem->onAfterEdit(
-    static function (FileOperationContext $event): void {
-        if (!str_ends_with($event->path, '.php')) {
-            return;
-        }
-
-        $output = [];
-        $exitCode = 0;
-        exec('php -l ' . escapeshellarg($event->realPath) . ' 2>&1', $output, $exitCode);
-
-        if ($exitCode !== 0) {
-            throw new RuntimeException(implode("\n", $output));
-        }
-    },
+    editable: ['src/*', 'docs/*'],
+    creatable: ['docs/generated/*'],
+    deletable: ['docs/generated/*'],
 );
 ```
 
-This validation is transactional from the caller's perspective: when the
-validator fails, the invalid file content is no longer present when the tool
-returns the recoverable error.
+Policy defaults allow every operation; narrow only the capabilities that need
+restrictions. Ignored directories are not traversed. `maxListLimit`,
+`maxSearchResults` and `maxReadBytes` bound tool results.
 
-## How the model works with files
+## Tools and edits
 
-The shared tool set exposes these callbacks:
+The shared `AiFileSystemToolSet` provides list, grep, read, edit, create,
+delete, history and restore operations. Editing is file-type agnostic. Every
+non-null `search` must be an exact unique match in the original content.
+`search=null` means a full rewrite and must be the only edit in that call.
 
-| Tool | Purpose |
-| --- | --- |
-| `filesystem_list_systems` | discover filesystem IDs, aliases and roots |
-| `filesystem_list` | list one virtual directory with pagination |
-| `filesystem_grep` | literal text search with line context |
-| `filesystem_read` | read a bounded line range |
-| `filesystem_edit` | apply exact search/replacement edits |
-| `filesystem_create` | create an explicitly permitted UTF-8 text file |
-| `filesystem_delete` | delete an explicitly permitted UTF-8 text file |
-| `filesystem_history` | list saved revisions |
-| `filesystem_restore` | restore a saved revision |
+Create, edit and delete support optional before/after hooks. A failing after-hook
+rolls the filesystem state back before propagating the error. Runtime validation
+errors routed through the toolset become recoverable tool feedback, so the model
+can correct the mutation and retry.
 
-The model normally starts with `filesystem_list_systems`, narrows the tree with
-`filesystem_list` or `filesystem_grep`, reads only the relevant sections and
-then edits an explicitly editable file.
+## Revision history
 
-`filesystem_edit` uses the same exact-edit semantics as the existing text/file
-editing engine: every non-null search must be unique in the original content,
-and `search=null` means a full rewrite and must be the only edit. The operation
-is file-type agnostic; Markdown, PHP and other UTF-8 text files use exactly the
-same replacement logic.
+Revision history is active by default through `MemoryRevisionStore`. It keeps
+restorable states for the lifetime of the current process without setup.
 
-Binary and invalid UTF-8 content can be listed, but it cannot be read, searched
-or edited as text. `maxReadBytes` bounds how much one text file may contribute
-to read/search operations.
-
-## Revisions and restore
-
-Revision history is optional. Pass a `RevisionStoreInterface` to enable it.
-`SqliteRevisionStore` stores file contents and metadata in SQLite and deduplicates
-consecutive identical revisions.
-
-The store records both file contents and whether a file existed. Create records
-the previous missing state, delete records a missing state after removal, and
-edit records its before/after contents. Consequently a create can be restored
-back to "missing", and a deleted file can be restored with its previous content.
-
-Only mutations that pass their after hooks are stored as new successful states.
-A failed after hook rolls the filesystem back first. Restoring an old revision
-also creates a new latest revision, so history is never rewritten destructively.
+For history that must survive later processes or sessions, inject
+`SqliteRevisionStore`:
 
 ```php
-$history = $fileSystem->history('app/docs/guide.md');
-$revisionId = $history['revisions'][1]['id'];
-
-$fileSystem->restore('app/docs/guide.md', $revisionId);
+$fileSystem = new AiFileSystem(
+    $context,
+    root: '/srv/backend',
+    id: 'backend',
+    revisionStore: new SqliteRevisionStore('/var/lib/app/ai-history.sqlite'),
+);
 ```
 
-The normal `AiContext::setCheckpoint()` and `rollback()` still affect only the
-provider conversation cursor. File rollback is explicitly handled by the
-filesystem revision store.
+Both stores record content and existence state. A created file can therefore be
+restored to "missing", and a deleted root file can be recreated from history.
 
-## Toolsets and context state
+Revision history is independent of `AiContext::rollback()`, which only moves
+the conversation cursor.
 
-`AiToolSet` is the generic grouping contract behind the filesystem feature.
-`AiContext::addToolSet()` registers one instance per concrete tool-set class;
-`hasToolSet()` and `getToolSet()` retrieve that instance. The same tool-set
-object can deliberately be registered on several contexts, and cloned contexts
-share the registered tool-set objects just like other external tool dependencies.
+## Safety boundaries
 
-Toolset objects and filesystem registrations are process-local application
-objects. `AiContext::exportState()` does not serialize them. Rebuild the same
-toolsets, filesystem IDs, roots and policies before `importState()`.
-
-See `examples/13-tool-set.php` for the generic registry pattern and
-`examples/14-ai-file-system.php` for a complete filesystem setup.
+Model tool calls never receive arbitrary host paths. Path traversal is rejected,
+symlinks leaving the root are not traversed, reads are bounded, mutations accept
+UTF-8 text only, and writes use snapshot checks plus atomic replacement.
