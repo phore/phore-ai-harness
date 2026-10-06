@@ -199,7 +199,16 @@ final class AiFileSystemToolSet implements AiToolSet
         );
     }
 
-    /** @return array<string, mixed> */
+    /**
+     * Create a UTF-8 text file through the routed filesystem.
+     *
+     * Creation still requires both the root-level capability and the policy
+     * allowlist. Hook validation failures are surfaced as recoverable tool errors.
+     *
+     * @return array<string, mixed>
+     * @example $toolSet->createFile('backend', 'app/docs/generated.md', "# Generated\n");
+     * @see AiFileSystem::create()
+     */
     public function createFile(string $fileSystemId, string $path, string $content): array
     {
         return $this->call(
@@ -208,7 +217,13 @@ final class AiFileSystemToolSet implements AiToolSet
         );
     }
 
-    /** @return array<string, mixed> */
+    /**
+     * Delete one explicitly permitted text file through the routed filesystem.
+     *
+     * @return array<string, mixed>
+     * @example $toolSet->deleteFile('backend', 'app/docs/generated/old.md');
+     * @see AiFileSystem::delete()
+     */
     public function deleteFile(string $fileSystemId, string $path): array
     {
         return $this->call(
