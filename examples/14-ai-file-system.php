@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Phore\AiHarness\AiContext;
 use Phore\AiHarness\FileSystem\AiFileSystem;
+use Phore\AiHarness\FileSystem\FileOperationContext;
 use Phore\AiHarness\FileSystem\FileSystemPolicy;
 use Phore\AiHarness\FileSystem\SqliteRevisionStore;
 
@@ -19,11 +20,35 @@ $fileSystem = new AiFileSystem(
     policy: new FileSystemPolicy(
         ignore: ['app/vendor/*', 'app/node_modules/*', 'app/.git/*'],
         editable: ['app/src/*', 'app/docs/*'],
+        creatable: ['app/docs/*'],
+        deletable: ['app/docs/generated/*'],
     ),
     revisionStore: new SqliteRevisionStore('/tmp/backend-ai-history.sqlite'),
 );
 
-$fileSystem->addRoot('/srv/backend', 'app', searchable: true, editable: true);
+$fileSystem->addRoot(
+    '/srv/backend',
+    'app',
+    searchable: true,
+    editable: true,
+    creatable: true,
+    deletable: true,
+);
+
+$fileSystem->onAfterEdit(
+    static function (FileOperationContext $event): void {
+        if (!str_ends_with($event->path, '.php')) {
+            return;
+        }
+
+        $output = [];
+        $exitCode = 0;
+        exec('php -l ' . escapeshellarg($event->realPath) . ' 2>&1', $output, $exitCode);
+        if ($exitCode !== 0) {
+            throw new RuntimeException(implode("\n", $output));
+        }
+    },
+);
 
 $fileSystem->addFile(
     '/srv/shared/architecture.md',
