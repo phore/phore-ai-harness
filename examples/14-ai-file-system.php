@@ -8,8 +8,11 @@ use Phore\AiHarness\FileSystem\FileSystemPolicy;
 
 require_once dirname(__DIR__) . '/vendor/autoload.php';
 
+$context = new AiContext();
+
 $fileSystem = new AiFileSystem(
     '/srv/backend',
+    context: $context,
     id: 'backend',
     description: 'PHP application code and project documentation.',
     policy: new FileSystemPolicy(
@@ -37,7 +40,6 @@ $fileSystem->onAfterEdit(
 
 $fileSystem->addFile('/srv/shared/architecture.md');
 
-$context = $fileSystem->getContext();
 $context->do(
     'Find the deprecated cache adapter, update its use in src and update '
     . 'the matching documentation in docs. Do not edit architecture.md.',
