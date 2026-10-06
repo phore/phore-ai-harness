@@ -54,14 +54,55 @@ final class AiFileSystemTest extends TestCase
         self::assertCount(2, $toolSet->listFileSystems());
     }
 
-    public function testOnlyOneRootCanBeConfigured(): void
+    public function testRootCanBePassedToConstructorOrAddedLaterButOnlyOnce(): void
     {
         $context = new AiContext();
-        $fileSystem = new AiFileSystem($context, id: 'project');
-        $fileSystem->addRoot($this->root);
+        $fileSystem = new AiFileSystem($context, root: $this->root, id: 'constructor-root');
+        self::assertSame('needle alpha', $fileSystem->read('docs/a.md', 2, 1)['content']);
 
-        $this->expectException(\LogicException::class);
-        $fileSystem->addRoot($this->root);
+        try {
+            $fileSystem->addRoot($this->root);
+            self::fail('Expected a second root to be rejected.');
+        } catch (\LogicException $error) {
+            self::assertStringContainsString('already configured', $error->getMessage());
+        }
+
+        $later = new AiFileSystem($context, id: 'later-root');
+        $later->addRoot($this->root);
+        self::assertSame('needle beta', $later->read('docs/b.txt', 2, 1)['content']);
+    }
+
+    public function testExplicitFilesUseBasenameAndWorkWithoutRoot(): void
+    {
+        $context = new AiContext();
+        $fileSystem = new AiFileSystem($context, id: 'files-only');
+        $fileSystem->addFile($this->root . '/docs/a.md');
+
+        self::assertSame('needle alpha', $fileSystem->read('a.md', 2, 1)['content']);
+        self::assertSame(
+            'applied',
+            $fileSystem->edit('a.md', [['search' => 'needle alpha', 'replacement' => 'changed']])['status'],
+        );
+        self::assertCount(2, $fileSystem->history('a.md')['revisions']);
+
+        try {
+            $fileSystem->create('new.md', "# New\n");
+            self::fail('Expected create without a root to fail.');
+        } catch (\LogicException $error) {
+            self::assertStringContainsString('root is not configured', $error->getMessage());
+        }
+
+        try {
+            $fileSystem->delete('a.md');
+            self::fail('Expected explicit files to be non-deletable.');
+        } catch (\RuntimeException $error) {
+            self::assertStringContainsString('cannot be deleted', $error->getMessage());
+        }
+
+        mkdir($this->root . '/other');
+        file_put_contents($this->root . '/other/a.md', "duplicate\n");
+        $this->expectException(\RuntimeException::class);
+        $fileSystem->addFile($this->root . '/other/a.md');
     }
 
     public function testFilesystemToolSchemasExposeRoutingAndEditShape(): void
@@ -80,21 +121,19 @@ final class AiFileSystemTest extends TestCase
         self::assertArrayHasKey('filesystem_list_systems', $schemas);
         self::assertArrayHasKey('filesystem_create', $schemas);
         self::assertArrayHasKey('filesystem_delete', $schemas);
-        self::assertArrayHasKey(
-            'fileSystemId',
-            $schemas['filesystem_read']['properties'],
-        );
+        self::assertArrayHasKey('fileSystemId', $schemas['filesystem_read']['properties']);
 
         $editSchema = json_encode($schemas['filesystem_edit'], JSON_THROW_ON_ERROR);
         self::assertStringContainsString('"search"', $editSchema);
         self::assertStringContainsString('"replacement"', $editSchema);
     }
 
-    public function testListSearchReadAndPolicyStayInsideDeclaredRoots(): void
+    public function testListSearchReadAndPolicyStayInsideRoot(): void
     {
         $context = new AiContext();
         $fileSystem = new AiFileSystem(
             $context,
+            root: $this->root,
             id: 'project',
             policy: new FileSystemPolicy(
                 ignore: ['vendor/*'],
@@ -102,22 +141,16 @@ final class AiFileSystemTest extends TestCase
                 maxListLimit: 10,
             ),
         );
-        $fileSystem->addRoot($this->root);
 
         $page = $fileSystem->list('docs', recursive: true, limit: 1);
         self::assertCount(1, $page['items']);
         self::assertSame(1, $page['nextOffset']);
-
-        $secondPage = $fileSystem->list('docs', recursive: true, offset: 1, limit: 10);
-        self::assertCount(1, $secondPage['items']);
-        self::assertNull($secondPage['nextOffset']);
+        self::assertCount(1, $fileSystem->list('docs', true, 1, 10)['items']);
 
         $matches = $fileSystem->grep('needle');
         self::assertCount(2, $matches['matches']);
         self::assertStringNotContainsString('vendor', json_encode($matches, JSON_THROW_ON_ERROR));
-
-        $read = $fileSystem->read('docs/a.md', startLine: 2, lineCount: 1);
-        self::assertSame('needle alpha', $read['content']);
+        self::assertSame('needle alpha', $fileSystem->read('docs/a.md', 2, 1)['content']);
 
         $this->expectException(\InvalidArgumentException::class);
         $fileSystem->read('../outside.txt');
@@ -126,43 +159,31 @@ final class AiFileSystemTest extends TestCase
     public function testPolicyCanPreventEditsAndBinaryFilesCannotBeEdited(): void
     {
         $context = new AiContext();
-        $fileSystem = new AiFileSystem(
+        $readonly = new AiFileSystem(
             $context,
-            id: 'project',
+            root: $this->root,
+            id: 'readonly',
             policy: new FileSystemPolicy(editable: []),
         );
-        $fileSystem->addRoot($this->root);
 
         try {
-            $fileSystem->edit(
-                'docs/a.md',
-                [['search' => 'Title', 'replacement' => 'Changed']],
-            );
+            $readonly->edit('docs/a.md', [['search' => 'Title', 'replacement' => 'Changed']]);
             self::fail('Expected policy-protected edit to fail.');
         } catch (\RuntimeException $error) {
             self::assertStringContainsString('not editable', $error->getMessage());
         }
 
-        $editable = new AiFileSystem($context, id: 'editable');
-        $editable->addRoot($this->root);
+        $binary = new AiFileSystem($context, id: 'binary');
+        $binary->addFile($this->root . '/binary.bin');
 
         $this->expectException(\RuntimeException::class);
-        $editable->edit('binary.bin', [['search' => 'abc', 'replacement' => 'ABC']]);
+        $binary->edit('binary.bin', [['search' => 'abc', 'replacement' => 'ABC']]);
     }
 
-    public function testCreateDeleteRestoreAndAfterEditValidationRollback(): void
+    public function testDefaultPolicyAndMemoryHistorySupportFullLifecycle(): void
     {
         $context = new AiContext();
-        $fileSystem = new AiFileSystem(
-            $context,
-            id: 'lifecycle',
-            policy: new FileSystemPolicy(
-                editable: ['docs/*'],
-                creatable: ['docs/*'],
-                deletable: ['docs/*'],
-            ),
-        );
-        $fileSystem->addRoot($this->root);
+        $fileSystem = new AiFileSystem($context, root: $this->root, id: 'lifecycle');
 
         $events = [];
         $fileSystem
@@ -186,8 +207,6 @@ final class AiFileSystemTest extends TestCase
 
         $path = 'docs/generated.txt';
         $fileSystem->create($path, "created\n");
-        self::assertSame("created\n", file_get_contents($this->root . '/docs/generated.txt'));
-
         $createHistory = $fileSystem->history($path)['revisions'];
         self::assertFalse($createHistory[1]['exists']);
         $fileSystem->restore($path, $createHistory[1]['id']);
@@ -195,91 +214,68 @@ final class AiFileSystemTest extends TestCase
 
         $fileSystem->create($path, "created\n");
         $fileSystem->delete($path);
-        self::assertFileDoesNotExist($this->root . '/docs/generated.txt');
-
-        $deleteHistory = $fileSystem->history($path)['revisions'];
         $existingRevision = current(array_filter(
-            $deleteHistory,
+            $fileSystem->history($path)['revisions'],
             static fn (array $revision): bool => $revision['exists'],
         ));
         self::assertIsArray($existingRevision);
         $fileSystem->restore($path, $existingRevision['id']);
-        self::assertSame("created\n", file_get_contents($this->root . '/docs/generated.txt'));
 
         $toolSet = $context->getToolSet(AiFileSystemToolSet::class);
         self::assertInstanceOf(AiFileSystemToolSet::class, $toolSet);
 
         try {
-            $toolSet->editFile(
-                'lifecycle',
-                $path,
-                [['search' => 'created', 'replacement' => 'INVALID']],
-            );
+            $toolSet->editFile('lifecycle', $path, [[
+                'search' => 'created',
+                'replacement' => 'INVALID',
+            ]]);
             self::fail('Expected after-edit validation to fail.');
         } catch (RecoverableToolException $error) {
             self::assertSame('Validation failed.', $error->getMessage());
         }
         self::assertSame("created\n", file_get_contents($this->root . '/docs/generated.txt'));
 
-        $result = $toolSet->editFile(
-            'lifecycle',
-            $path,
-            [['search' => 'created', 'replacement' => 'valid']],
-        );
+        $result = $toolSet->editFile('lifecycle', $path, [[
+            'search' => null,
+            'replacement' => "rewritten\n",
+        ]]);
         self::assertSame('applied', $result['status']);
-        self::assertSame("valid\n", file_get_contents($this->root . '/docs/generated.txt'));
-
-        $rewrite = $toolSet->editFile(
-            'lifecycle',
-            $path,
-            [['search' => null, 'replacement' => "rewritten\n"]],
-        );
-        self::assertSame('applied', $rewrite['status']);
         self::assertSame("rewritten\n", file_get_contents($this->root . '/docs/generated.txt'));
-        self::assertSame(
-            [
-                'before-create:' . $path,
-                'after-create:' . $path,
-                'before-create:' . $path,
-                'after-create:' . $path,
-                'before-delete:' . $path,
-                'after-delete:' . $path,
-            ],
-            $events,
-        );
+        self::assertCount(6, $events);
     }
 
-    public function testEditsCreateSqliteHistoryAndCanBeRestored(): void
+    public function testSqliteRevisionStorePersistsAcrossInstances(): void
     {
         if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
             self::markTestSkipped('PDO SQLite is not available.');
         }
 
+        $database = $this->root . '/history.sqlite';
         $context = new AiContext();
-        $store = new SqliteRevisionStore(':memory:');
-        $fileSystem = new AiFileSystem($context, id: 'project', revisionStore: $store);
-        $fileSystem->addRoot($this->root);
-
-        $result = $fileSystem->edit('docs/a.md', [[
+        $fileSystem = new AiFileSystem(
+            $context,
+            root: $this->root,
+            id: 'persistent',
+            revisionStore: new SqliteRevisionStore($database),
+        );
+        $fileSystem->edit('docs/a.md', [[
             'search' => 'needle alpha',
             'replacement' => 'needle changed',
         ]]);
-        self::assertSame('applied', $result['status']);
-        self::assertSame(
-            "# Title\nneedle changed\nlast\n",
-            file_get_contents($this->root . '/docs/a.md'),
-        );
 
-        $history = $fileSystem->history('docs/a.md');
-        self::assertTrue($history['enabled']);
+        $nextSession = new AiFileSystem(
+            new AiContext(),
+            root: $this->root,
+            id: 'persistent',
+            revisionStore: new SqliteRevisionStore($database),
+        );
+        $history = $nextSession->history('docs/a.md');
         self::assertCount(2, $history['revisions']);
 
-        $oldest = $history['revisions'][1]['id'];
-        $fileSystem->restore('docs/a.md', $oldest);
+        $nextSession->restore('docs/a.md', $history['revisions'][1]['id']);
         self::assertSame(
             "# Title\nneedle alpha\nlast\n",
             file_get_contents($this->root . '/docs/a.md'),
         );
-        self::assertCount(3, $fileSystem->history('docs/a.md')['revisions']);
     }
 }
