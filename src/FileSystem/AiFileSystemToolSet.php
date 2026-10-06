@@ -48,6 +48,16 @@ final class AiFileSystemToolSet implements AiToolSet
                 'Apply exact search/replacement edits to one editable file.',
             ),
             new CallbackTool(
+                [$this, 'createFile'],
+                'filesystem_create',
+                'Create one UTF-8 text file when its root and policy explicitly allow creation.',
+            ),
+            new CallbackTool(
+                [$this, 'deleteFile'],
+                'filesystem_delete',
+                'Delete one UTF-8 text file when its source and policy explicitly allow deletion.',
+            ),
+            new CallbackTool(
                 [$this, 'structure'],
                 'filesystem_structure',
                 'Inspect a file through its specialized structural editor, for example Markdown heading sections.',
@@ -186,6 +196,24 @@ final class AiFileSystemToolSet implements AiToolSet
         return $this->call(
             $fileSystemId,
             static fn (AiFileSystem $fileSystem): array => $fileSystem->edit($path, $edits),
+        );
+    }
+
+    /** @return array<string, mixed> */
+    public function createFile(string $fileSystemId, string $path, string $content): array
+    {
+        return $this->call(
+            $fileSystemId,
+            static fn (AiFileSystem $fileSystem): array => $fileSystem->create($path, $content),
+        );
+    }
+
+    /** @return array<string, mixed> */
+    public function deleteFile(string $fileSystemId, string $path): array
+    {
+        return $this->call(
+            $fileSystemId,
+            static fn (AiFileSystem $fileSystem): array => $fileSystem->delete($path),
         );
     }
 
