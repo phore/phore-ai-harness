@@ -11,6 +11,7 @@ use Phore\AiHarness\FileSystem\AiFileSystemToolSet;
 use Phore\AiHarness\FileSystem\FileOperationContext;
 use Phore\AiHarness\FileSystem\FileSystemPolicy;
 use Phore\AiHarness\FileSystem\SqliteRevisionStore;
+use Phore\AiHarness\ToolType\RecoverableToolException;
 use PHPUnit\Framework\TestCase;
 
 final class AiFileSystemTest extends TestCase
@@ -239,15 +240,26 @@ final class AiFileSystemTest extends TestCase
         $fileSystem->restore($path, $existingRevision['id']);
         self::assertSame("created\n", file_get_contents($this->root . '/docs/generated.txt'));
 
+        $toolSet = $context->getToolSet(AiFileSystemToolSet::class);
+        self::assertInstanceOf(AiFileSystemToolSet::class, $toolSet);
+
         try {
-            $fileSystem->edit($path, [['search' => 'created', 'replacement' => 'INVALID']]);
+            $toolSet->editFile(
+                'lifecycle',
+                $path,
+                [['search' => 'created', 'replacement' => 'INVALID']],
+            );
             self::fail('Expected after-edit validation to fail.');
-        } catch (\RuntimeException $error) {
+        } catch (RecoverableToolException $error) {
             self::assertSame('Validation failed.', $error->getMessage());
         }
         self::assertSame("created\n", file_get_contents($this->root . '/docs/generated.txt'));
 
-        $result = $fileSystem->edit($path, [['search' => 'created', 'replacement' => 'valid']]);
+        $result = $toolSet->editFile(
+            'lifecycle',
+            $path,
+            [['search' => 'created', 'replacement' => 'valid']],
+        );
         self::assertSame('applied', $result['status']);
         self::assertSame(
             [
