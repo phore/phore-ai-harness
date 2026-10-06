@@ -20,11 +20,20 @@ $fileSystem = new AiFileSystem(
     policy: new FileSystemPolicy(
         ignore: ['app/vendor/*', 'app/node_modules/*', 'app/.git/*'],
         editable: ['app/src/*', 'app/docs/*'],
+        creatable: ['app/docs/*'],
+        deletable: ['app/docs/generated/*'],
     ),
     revisionStore: new SqliteRevisionStore('/var/lib/app/ai-history.sqlite'),
 );
 
-$fileSystem->addRoot('/srv/backend', 'app', searchable: true, editable: true);
+$fileSystem->addRoot(
+    '/srv/backend',
+    'app',
+    searchable: true,
+    editable: true,
+    creatable: true,
+    deletable: true,
+);
 $fileSystem->addFile(
     '/srv/shared/architecture.md',
     'architecture',
@@ -86,6 +95,57 @@ Listing is paginated with `offset` and `limit`. The policy caps the requested
 limit. Recursive listing is opt-in. This keeps large source trees from being
 placed into one tool result.
 
+## Create and delete permissions
+
+Creating and deleting files are separate capabilities and are disabled by
+default. A root must opt in with `creatable: true` or `deletable: true`, and
+the matching `FileSystemPolicy` pattern must allow the concrete virtual path.
+This means `editable: true` does not implicitly allow adding or removing files.
+
+`filesystem_create` creates UTF-8 text files below an existing root directory.
+It never creates directories. `filesystem_delete` removes an existing UTF-8
+text file. Explicit files added with `addFile()` may opt into deletion, but
+creation is only available below directory roots.
+
+## Mutation hooks and validation
+
+Create, edit and delete each expose before and after hooks:
+
+`onBeforeCreate()`, `onAfterCreate()`, `onBeforeEdit()`,
+`onAfterEdit()`, `onBeforeDelete()` and `onAfterDelete()`.
+
+Every callback receives a `FileOperationContext` containing filesystem ID,
+operation, virtual path, real path, previous content and resulting content.
+Before hooks can veto a mutation before it touches disk. After hooks inspect the
+state that was actually written.
+
+If an after hook throws, the filesystem automatically rolls the mutation back
+before propagating the exception. For callbacks reached through the shared tool
+set, a `RuntimeException` becomes recoverable tool feedback. The model can then
+use the validation message to correct its edit and call the tool again.
+
+```php
+$fileSystem->onAfterEdit(
+    static function (FileOperationContext $event): void {
+        if (!str_ends_with($event->path, '.php')) {
+            return;
+        }
+
+        $output = [];
+        $exitCode = 0;
+        exec('php -l ' . escapeshellarg($event->realPath) . ' 2>&1', $output, $exitCode);
+
+        if ($exitCode !== 0) {
+            throw new RuntimeException(implode("\n", $output));
+        }
+    },
+);
+```
+
+This validation is transactional from the caller's perspective: when the
+validator fails, the invalid file content is no longer present when the tool
+returns the recoverable error.
+
 ## How the model works with files
 
 The shared tool set exposes these callbacks:
@@ -97,6 +157,8 @@ The shared tool set exposes these callbacks:
 | `filesystem_grep` | literal text search with line context |
 | `filesystem_read` | read a bounded line range |
 | `filesystem_edit` | apply exact search/replacement edits |
+| `filesystem_create` | create an explicitly permitted UTF-8 text file |
+| `filesystem_delete` | delete an explicitly permitted UTF-8 text file |
 | `filesystem_structure` | inspect a file through a structural editor |
 | `filesystem_structure_edit` | edit or move a structural element by stable ID |
 | `filesystem_history` | list saved revisions |
@@ -162,9 +224,14 @@ Revision history is optional. Pass a `RevisionStoreInterface` to enable it.
 `SqliteRevisionStore` stores file contents and metadata in SQLite and deduplicates
 consecutive identical revisions.
 
-Before a successful edit the current content is saved; after the write the new
-content is saved. Restoring an old revision also creates a new latest revision,
-so history is never rewritten destructively.
+The store records both file contents and whether a file existed. Create records
+the previous missing state, delete records a missing state after removal, and
+edit records its before/after contents. Consequently a create can be restored
+back to "missing", and a deleted file can be restored with its previous content.
+
+Only mutations that pass their after hooks are stored as new successful states.
+A failed after hook rolls the filesystem back first. Restoring an old revision
+also creates a new latest revision, so history is never rewritten destructively.
 
 ```php
 $history = $fileSystem->history('app/docs/guide.md');
