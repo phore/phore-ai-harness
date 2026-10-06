@@ -22,30 +22,55 @@ final class SqliteRevisionStore implements RevisionStoreInterface
         $this->db->exec(
             'CREATE TABLE IF NOT EXISTS ai_file_revisions ('
             . 'id INTEGER PRIMARY KEY AUTOINCREMENT, filesystem_id TEXT NOT NULL, '
-            . 'path TEXT NOT NULL, content BLOB NOT NULL, created_at TEXT NOT NULL)'
+            . 'path TEXT NOT NULL, content BLOB NOT NULL, exists_flag INTEGER NOT NULL DEFAULT 1, '
+            . 'created_at TEXT NOT NULL)'
         );
+
+        $columns = $this->db->query('PRAGMA table_info(ai_file_revisions)')->fetchAll(PDO::FETCH_ASSOC);
+        if (!array_filter($columns, static fn (array $column): bool => $column['name'] === 'exists_flag')) {
+            $this->db->exec(
+                'ALTER TABLE ai_file_revisions ADD COLUMN exists_flag INTEGER NOT NULL DEFAULT 1'
+            );
+        }
+
         $this->db->exec(
             'CREATE INDEX IF NOT EXISTS ai_file_revisions_lookup '
             . 'ON ai_file_revisions(filesystem_id, path, id DESC)'
         );
     }
 
-    public function save(string $fileSystemId, string $path, string $content): int
+    public function save(string $fileSystemId, string $path, ?string $content): int
     {
+        $exists = $content !== null;
+        $storedContent = $content ?? '';
+
         $latest = $this->db->prepare(
-            'SELECT id, content FROM ai_file_revisions '
+            'SELECT id, content, exists_flag FROM ai_file_revisions '
             . 'WHERE filesystem_id = ? AND path = ? ORDER BY id DESC LIMIT 1'
         );
         $latest->execute([$fileSystemId, $path]);
         $row = $latest->fetch(PDO::FETCH_ASSOC);
-        if (is_array($row) && is_string($row['content']) && $row['content'] === $content) {
+        if (
+            is_array($row)
+            && (bool) $row['exists_flag'] === $exists
+            && is_string($row['content'])
+            && $row['content'] === $storedContent
+        ) {
             return (int) $row['id'];
         }
 
         $statement = $this->db->prepare(
-            'INSERT INTO ai_file_revisions(filesystem_id, path, content, created_at) VALUES(?, ?, ?, ?)'
+            'INSERT INTO ai_file_revisions('
+            . 'filesystem_id, path, content, exists_flag, created_at'
+            . ') VALUES(?, ?, ?, ?, ?)'
         );
-        $statement->execute([$fileSystemId, $path, $content, gmdate('c')]);
+        $statement->execute([
+            $fileSystemId,
+            $path,
+            $storedContent,
+            $exists ? 1 : 0,
+            gmdate('c'),
+        ]);
 
         return (int) $this->db->lastInsertId();
     }
@@ -53,7 +78,7 @@ final class SqliteRevisionStore implements RevisionStoreInterface
     public function history(string $fileSystemId, string $path, int $limit = 20): array
     {
         $statement = $this->db->prepare(
-            'SELECT id, created_at FROM ai_file_revisions '
+            'SELECT id, created_at, exists_flag FROM ai_file_revisions '
             . 'WHERE filesystem_id = ? AND path = ? ORDER BY id DESC LIMIT ?'
         );
         $statement->bindValue(1, $fileSystemId);
@@ -65,26 +90,34 @@ final class SqliteRevisionStore implements RevisionStoreInterface
             static fn (array $row): array => [
                 'id' => (int) $row['id'],
                 'createdAt' => (string) $row['created_at'],
+                'exists' => (bool) $row['exists_flag'],
             ],
             $statement->fetchAll(PDO::FETCH_ASSOC),
         );
     }
 
-    public function get(string $fileSystemId, string $path, int $revisionId): ?string
+    public function get(string $fileSystemId, string $path, int $revisionId): ?array
     {
         $statement = $this->db->prepare(
-            'SELECT content FROM ai_file_revisions WHERE filesystem_id = ? AND path = ? AND id = ?'
+            'SELECT content, exists_flag FROM ai_file_revisions '
+            . 'WHERE filesystem_id = ? AND path = ? AND id = ?'
         );
         $statement->execute([$fileSystemId, $path, $revisionId]);
-        $content = $statement->fetchColumn();
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
 
-        if ($content === false) {
+        if (!is_array($row)) {
             return null;
         }
-        if (!is_string($content)) {
+
+        $exists = (bool) $row['exists_flag'];
+        $content = $row['content'];
+        if ($exists && !is_string($content)) {
             throw new RuntimeException('Invalid revision content for ' . $path);
         }
 
-        return $content;
+        return [
+            'exists' => $exists,
+            'content' => $exists ? $content : null,
+        ];
     }
 }
