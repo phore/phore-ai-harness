@@ -21,6 +21,7 @@ use Phore\AiHarness\Helper\Toolkit;
 use Phore\AiHarness\OutputFormat\OutputFormat;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\PromptType\SystemPrompt;
+use Phore\AiHarness\ToolType\AiToolSet;
 use Phore\AiHarness\ToolType\CallbackTool;
 use Phore\AiHarness\ToolType\ToolType;
 
@@ -58,6 +59,8 @@ final class AiContext
     private array $pendingPrompts = [];
     /** @var array<string, AiContent> */
     private array $contentById = [];
+    /** @var array<class-string<AiToolSet>, AiToolSet> */
+    private array $toolSets = [];
     private AiOptions $defaults;
     private ?OpenAiClient $client = null;
     private mixed $clientSelection = null;
@@ -88,6 +91,59 @@ final class AiContext
         $this->prompts = $this->normalizeContextItems(Toolkit::normalizePromptItems($prompts));
         $this->registerContentItems($this->prompts);
         $this->defaults = AiOptions::fromArray($options);
+    }
+
+    /**
+     * Register one reusable set of related tools on this context.
+     *
+     * Exactly one instance per concrete tool-set class is allowed. The tools are
+     * added to the prepared context and remain available on later requests.
+     *
+     * @return $this
+     * @throws InvalidArgumentException When the same tool-set class is registered twice.
+     * @example $context->addToolSet(new AiFileSystemToolSet());
+     * @see getToolSet()
+     */
+    public function addToolSet(AiToolSet $toolSet): self
+    {
+        $this->assertIdle();
+        $class = $toolSet::class;
+        if (isset($this->toolSets[$class])) {
+            throw new InvalidArgumentException('AI tool set is already registered: ' . $class);
+        }
+
+        $items = $this->normalizeContextItems($toolSet->getTools());
+        $this->prompts = $this->normalizeContextItems([...$this->prompts, ...$items]);
+        $this->toolSets[$class] = $toolSet;
+
+        return $this;
+    }
+
+    /**
+     * Check whether a concrete tool-set class is registered.
+     *
+     * @param class-string<AiToolSet> $class Tool-set class to look up.
+     * @example if ($context->hasToolSet(AiFileSystemToolSet::class)) { ... }
+     * @see getToolSet()
+     */
+    public function hasToolSet(string $class): bool
+    {
+        return isset($this->toolSets[$class]);
+    }
+
+    /**
+     * Return a registered tool set with its concrete static type.
+     *
+     * @template T of AiToolSet
+     * @param class-string<T> $class Tool-set class to look up.
+     * @return T|null Registered instance or null when absent.
+     * @example $files = $context->getToolSet(AiFileSystemToolSet::class);
+     * @see addToolSet()
+     */
+    public function getToolSet(string $class): ?AiToolSet
+    {
+        /** @var T|null */
+        return $this->toolSets[$class] ?? null;
     }
 
     /**
