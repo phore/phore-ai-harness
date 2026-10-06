@@ -159,8 +159,6 @@ The shared tool set exposes these callbacks:
 | `filesystem_edit` | apply exact search/replacement edits |
 | `filesystem_create` | create an explicitly permitted UTF-8 text file |
 | `filesystem_delete` | delete an explicitly permitted UTF-8 text file |
-| `filesystem_structure` | inspect a file through a structural editor |
-| `filesystem_structure_edit` | edit or move a structural element by stable ID |
 | `filesystem_history` | list saved revisions |
 | `filesystem_restore` | restore a saved revision |
 
@@ -170,53 +168,13 @@ then edits an explicitly editable file.
 
 `filesystem_edit` uses the same exact-edit semantics as the existing text/file
 editing engine: every non-null search must be unique in the original content,
-and `search=null` means a full rewrite and must be the only edit. Editors are
-local deterministic objects; they do not start nested model requests.
+and `search=null` means a full rewrite and must be the only edit. The operation
+is file-type agnostic; Markdown, PHP and other UTF-8 text files use exactly the
+same replacement logic.
 
 Binary and invalid UTF-8 content can be listed, but it cannot be read, searched
 or edited as text. `maxReadBytes` bounds how much one text file may contribute
 to read/search operations.
-
-## File-type editors
-
-`AiFileSystem` selects the first registered `FileEditorInterface` that supports
-the file. Markdown and generic UTF-8 text editors are registered by default. A
-project can prepend a specialized editor:
-
-```php
-$fileSystem->registerEditor(new ProjectConfigEditor());
-```
-
-This keeps file-type-specific parsing or structural editing outside the generic
-filesystem routing. The generic structural tools remain unchanged, so adding a
-specialized editor does not duplicate callbacks in the context.
-
-### Markdown sections
-
-The built-in Markdown editor exposes the heading hierarchy as a tree. Each
-section includes its heading level, title, line range, children and a stable ID.
-The ID remains stable while the section's heading level/title and its duplicate
-occurrence remain unchanged. After renaming or adding duplicate headings, obtain
-the structure again instead of reusing an old ID.
-
-```php
-$structure = $fileSystem->structure('app/docs/guide.md');
-
-$alphaId = $structure['sections'][0]['children'][0]['id'];
-$betaId = $structure['sections'][0]['children'][1]['id'];
-
-$fileSystem->structureEdit(
-    'app/docs/guide.md',
-    'move_before',
-    $betaId,
-    referenceId: $alphaId,
-);
-```
-
-Supported actions are `replace`, `delete`, `insert_before`,
-`insert_after`, `move_before` and `move_after`. A section range includes
-its child sections, so moving or deleting a heading moves or deletes its subtree.
-Moves relative to an ancestor or descendant are rejected as ambiguous.
 
 ## Revisions and restore
 
