@@ -9,12 +9,16 @@ final readonly class FileSystemPolicy
     /**
      * @param list<string> $ignore Virtual-path patterns that are neither listed nor traversed.
      * @param list<string> $searchable Virtual-path allowlist for read and grep operations.
-     * @param list<string> $editable Virtual-path allowlist for edit and restore operations.
+     * @param list<string> $editable Virtual-path allowlist for edit operations.
+     * @param list<string> $creatable Virtual-path allowlist for create operations.
+     * @param list<string> $deletable Virtual-path allowlist for delete operations.
      */
     public function __construct(
         public array $ignore = [],
         public array $searchable = ['*'],
         public array $editable = ['*'],
+        public array $creatable = [],
+        public array $deletable = [],
         public int $maxListLimit = 100,
         public int $maxSearchResults = 100,
         public int $maxReadBytes = 1048576,
@@ -34,6 +38,16 @@ final readonly class FileSystemPolicy
     public function isEditable(string $path): bool
     {
         return !$this->isIgnored($path) && $this->matches($path, $this->editable);
+    }
+
+    public function isCreatable(string $path): bool
+    {
+        return !$this->isIgnored($path) && $this->matches($path, $this->creatable);
+    }
+
+    public function isDeletable(string $path): bool
+    {
+        return !$this->isIgnored($path) && $this->matches($path, $this->deletable);
     }
 
     private function matches(string $path, array $patterns): bool
