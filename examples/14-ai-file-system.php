@@ -6,7 +6,6 @@ use Phore\AiHarness\AiContext;
 use Phore\AiHarness\FileSystem\AiFileSystem;
 use Phore\AiHarness\FileSystem\FileOperationContext;
 use Phore\AiHarness\FileSystem\FileSystemPolicy;
-use Phore\AiHarness\FileSystem\SqliteRevisionStore;
 
 require_once dirname(__DIR__) . '/vendor/autoload.php';
 
@@ -14,25 +13,15 @@ $context = new AiContext();
 
 $fileSystem = new AiFileSystem(
     $context,
+    root: '/srv/backend',
     id: 'backend',
-    alias: 'Backend project',
     description: 'PHP application code and project documentation.',
     policy: new FileSystemPolicy(
-        ignore: ['app/vendor/*', 'app/node_modules/*', 'app/.git/*'],
-        editable: ['app/src/*', 'app/docs/*'],
-        creatable: ['app/docs/*'],
-        deletable: ['app/docs/generated/*'],
+        ignore: ['vendor/*', 'node_modules/*', '.git/*'],
+        editable: ['src/*', 'docs/*'],
+        creatable: ['docs/*'],
+        deletable: ['docs/generated/*'],
     ),
-    revisionStore: new SqliteRevisionStore('/tmp/backend-ai-history.sqlite'),
-);
-
-$fileSystem->addRoot(
-    '/srv/backend',
-    'app',
-    searchable: true,
-    editable: true,
-    creatable: true,
-    deletable: true,
 );
 
 $fileSystem->onAfterEdit(
@@ -50,16 +39,11 @@ $fileSystem->onAfterEdit(
     },
 );
 
-$fileSystem->addFile(
-    '/srv/shared/architecture.md',
-    'architecture',
-    searchable: true,
-    editable: false,
-);
+$fileSystem->addFile('/srv/shared/architecture.md');
 
 $context->do(
-    'Find the deprecated cache adapter in backend, update its use in app/src, '
-    . 'and update the matching documentation in app/docs. Do not edit architecture.',
+    'Find the deprecated cache adapter, update its use in src and update '
+    . 'the matching documentation in docs. Do not edit architecture.md.',
     throw: true,
 );
 
