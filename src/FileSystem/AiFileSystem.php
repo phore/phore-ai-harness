@@ -8,8 +8,7 @@ use Generator;
 use InvalidArgumentException;
 use LogicException;
 use Phore\AiHarness\AiContext;
-use Phore\AiHarness\FileSystem\Editor\MarkdownFileEditor;
-use Phore\AiHarness\FileSystem\Editor\TextFileEditor;
+use Phore\AiHarness\Edit\TextEditEngine;
 use RuntimeException;
 use Throwable;
 
@@ -17,9 +16,6 @@ final class AiFileSystem
 {
     /** @var array<string, array{type: 'root'|'file', path: string, searchable: bool, editable: bool, creatable: bool, deletable: bool}> */
     private array $sources = [];
-
-    /** @var list<FileEditorInterface> */
-    private array $editors = [];
 
     /** @var array<string, list<callable(FileOperationContext): void>> */
     private array $hooks = [
@@ -63,7 +59,6 @@ final class AiFileSystem
         $this->id = $this->normalizeId($id ?? 'fs_' . bin2hex(random_bytes(8)));
         $this->alias = $this->normalizeOptionalText($alias, 'alias');
         $this->description = $this->normalizeOptionalText($description, 'description');
-        $this->editors = [new MarkdownFileEditor(), new TextFileEditor()];
 
         $toolSet = $context->getToolSet(AiFileSystemToolSet::class);
         if ($toolSet === null) {
@@ -140,23 +135,6 @@ final class AiFileSystem
                 'deletable' => $deletable,
             ],
         );
-
-        return $this;
-    }
-
-    /**
-     * Prepend a specialized deterministic editor.
-     *
-     * Editors do not make model calls. The surrounding AI request chooses exact
-     * edits and the selected editor validates and applies them locally.
-     *
-     * @return $this
-     * @example $fs->registerEditor(new ProjectConfigEditor());
-     * @see FileEditorInterface
-     */
-    public function registerEditor(FileEditorInterface $editor): self
-    {
-        array_unshift($this->editors, $editor);
 
         return $this;
     }
@@ -427,11 +405,8 @@ final class AiFileSystem
         }
 
         $content = $this->readTextFile($realPath, $virtualPath);
-        $editor = $this->editorFor($realPath, $content);
-        $updated = $editor->apply($realPath, $content, $edits);
-        if (!$editor->supports($realPath, $updated)) {
-            throw new InvalidArgumentException('Edited result is not supported text: ' . $virtualPath);
-        }
+        $updated = TextEditEngine::applyEdits($content, $edits);
+
         return $this->writeEditedContent($virtualPath, $realPath, $content, $updated);
     }
 
@@ -520,68 +495,6 @@ final class AiFileSystem
             'status' => 'deleted',
             'revisionId' => $revisionId,
         ];
-    }
-
-    /**
-     * Return a structural representation when a specialized editor supports it.
-     *
-     * Markdown is represented as a heading tree with stable IDs for the current
-     * document revision. Generic text files intentionally have no structure.
-     *
-     * @return array<string, mixed>
-     * @throws RuntimeException When the file has no structured editor.
-     * @example $tree = $fs->structure('app/docs/guide.md');
-     * @see structureEdit()
-     */
-    public function structure(string $path): array
-    {
-        [$virtualPath, $realPath, $source] = $this->resolveFile($path);
-        if (!$this->canSearch($virtualPath, $source)) {
-            throw new RuntimeException('AI filesystem file is not searchable: ' . $virtualPath);
-        }
-
-        $content = $this->readTextFile($realPath, $virtualPath);
-        $editor = $this->structuredEditorFor($realPath, $content);
-
-        return $editor->structure($virtualPath, $content);
-    }
-
-    /**
-     * Apply one file-type-specific structural edit by stable element ID.
-     *
-     * For Markdown the supported actions are replace, delete, insert_before,
-     * insert_after, move_before and move_after. Structural edits use the same
-     * revision history and snapshot protection as exact text edits.
-     *
-     * @return array{path: string, status: string, bytes: int, revisionId: ?int}
-     * @throws RuntimeException When the file is not editable or has no structured editor.
-     * @example $fs->structureEdit('app/docs/guide.md', 'move_after', 'mdsec_a1', referenceId: 'mdsec_b2');
-     * @see structure()
-     */
-    public function structureEdit(
-        string $path,
-        string $action,
-        string $sectionId,
-        ?string $markdown = null,
-        ?string $referenceId = null,
-    ): array {
-        [$virtualPath, $realPath, $source] = $this->resolveFile($path);
-        if (!$this->canEdit($virtualPath, $source)) {
-            throw new RuntimeException('AI filesystem file is not editable: ' . $virtualPath);
-        }
-
-        $content = $this->readTextFile($realPath, $virtualPath);
-        $editor = $this->structuredEditorFor($realPath, $content);
-        $updated = $editor->applyStructure(
-            $virtualPath,
-            $content,
-            $action,
-            $sectionId,
-            $markdown,
-            $referenceId,
-        );
-
-        return $this->writeEditedContent($virtualPath, $realPath, $content, $updated);
     }
 
     /**
@@ -857,28 +770,6 @@ final class AiFileSystem
         }
 
         return $content;
-    }
-
-    private function editorFor(string $path, string $content): FileEditorInterface
-    {
-        foreach ($this->editors as $editor) {
-            if ($editor->supports($path, $content)) {
-                return $editor;
-            }
-        }
-
-        throw new RuntimeException('No AI filesystem editor supports file: ' . $path);
-    }
-
-    private function structuredEditorFor(string $path, string $content): StructuredFileEditorInterface
-    {
-        foreach ($this->editors as $editor) {
-            if ($editor instanceof StructuredFileEditorInterface && $editor->supports($path, $content)) {
-                return $editor;
-            }
-        }
-
-        throw new RuntimeException('No structured AI filesystem editor supports file: ' . $path);
     }
 
     private function writeEditedContent(
