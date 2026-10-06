@@ -13,6 +13,10 @@ final class SqliteRevisionStore implements RevisionStoreInterface
 
     public function __construct(string $databasePath)
     {
+        if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
+            throw new RuntimeException('PDO SQLite is required for SqliteRevisionStore.');
+        }
+
         $this->db = new PDO('sqlite:' . $databasePath);
         $this->db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $this->db->exec(
@@ -28,10 +32,21 @@ final class SqliteRevisionStore implements RevisionStoreInterface
 
     public function save(string $fileSystemId, string $path, string $content): int
     {
+        $latest = $this->db->prepare(
+            'SELECT id, content FROM ai_file_revisions '
+            . 'WHERE filesystem_id = ? AND path = ? ORDER BY id DESC LIMIT 1'
+        );
+        $latest->execute([$fileSystemId, $path]);
+        $row = $latest->fetch(PDO::FETCH_ASSOC);
+        if (is_array($row) && is_string($row['content']) && $row['content'] === $content) {
+            return (int) $row['id'];
+        }
+
         $statement = $this->db->prepare(
             'INSERT INTO ai_file_revisions(filesystem_id, path, content, created_at) VALUES(?, ?, ?, ?)'
         );
         $statement->execute([$fileSystemId, $path, $content, gmdate('c')]);
+
         return (int) $this->db->lastInsertId();
     }
 
@@ -47,7 +62,10 @@ final class SqliteRevisionStore implements RevisionStoreInterface
         $statement->execute();
 
         return array_map(
-            static fn (array $row): array => ['id' => (int) $row['id'], 'createdAt' => $row['created_at']],
+            static fn (array $row): array => [
+                'id' => (int) $row['id'],
+                'createdAt' => (string) $row['created_at'],
+            ],
             $statement->fetchAll(PDO::FETCH_ASSOC),
         );
     }
@@ -59,12 +77,14 @@ final class SqliteRevisionStore implements RevisionStoreInterface
         );
         $statement->execute([$fileSystemId, $path, $revisionId]);
         $content = $statement->fetchColumn();
+
         if ($content === false) {
             return null;
         }
         if (!is_string($content)) {
             throw new RuntimeException('Invalid revision content for ' . $path);
         }
+
         return $content;
     }
 }

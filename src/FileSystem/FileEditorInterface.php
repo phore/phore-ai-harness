@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace Phore\AiHarness\FileSystem;
 
-use Phore\AiHarness\AiContext;
-
 interface FileEditorInterface
 {
-    public function supports(string $path): bool;
+    public function supports(string $path, string $content): bool;
 
-    public function edit(string $path, string $instruction, AiContext $context): string;
+    /**
+     * Apply exact edits to one immutable text snapshot.
+     *
+     * @param list<array{search: string|null, replacement: string}> $edits
+     */
+    public function apply(string $path, string $content, array $edits): string;
 }
