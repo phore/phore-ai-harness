@@ -45,7 +45,7 @@ final class AiFileSystemToolSet implements AiToolSet
             new CallbackTool(
                 [$this, 'editFile'],
                 'filesystem_edit',
-                'Apply exact search/replacement edits to one editable file.',
+                'Apply exact replacements or one full rewrite to an editable UTF-8 text file.',
             ),
             new CallbackTool(
                 [$this, 'createFile'],
@@ -56,16 +56,6 @@ final class AiFileSystemToolSet implements AiToolSet
                 [$this, 'deleteFile'],
                 'filesystem_delete',
                 'Delete one UTF-8 text file when its source and policy explicitly allow deletion.',
-            ),
-            new CallbackTool(
-                [$this, 'structure'],
-                'filesystem_structure',
-                'Inspect a file through its specialized structural editor, for example Markdown heading sections.',
-            ),
-            new CallbackTool(
-                [$this, 'structureEdit'],
-                'filesystem_structure_edit',
-                'Apply one specialized structural edit using stable element IDs returned by filesystem_structure.',
             ),
             new CallbackTool(
                 [$this, 'history'],
@@ -229,36 +219,6 @@ final class AiFileSystemToolSet implements AiToolSet
         return $this->call(
             $fileSystemId,
             static fn (AiFileSystem $fileSystem): array => $fileSystem->delete($path),
-        );
-    }
-
-    /** @return array<string, mixed> */
-    public function structure(string $fileSystemId, string $path): array
-    {
-        return $this->call(
-            $fileSystemId,
-            static fn (AiFileSystem $fileSystem): array => $fileSystem->structure($path),
-        );
-    }
-
-    /** @return array<string, mixed> */
-    public function structureEdit(
-        string $fileSystemId,
-        string $path,
-        string $action,
-        string $sectionId,
-        ?string $markdown = null,
-        ?string $referenceId = null,
-    ): array {
-        return $this->call(
-            $fileSystemId,
-            static fn (AiFileSystem $fileSystem): array => $fileSystem->structureEdit(
-                $path,
-                $action,
-                $sectionId,
-                $markdown,
-                $referenceId,
-            ),
         );
     }
 
