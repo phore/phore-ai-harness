@@ -15,6 +15,7 @@ use Throwable;
 final class AiFileSystem
 {
     private ?string $root = null;
+    private readonly AiContext $context;
 
     /** @var array<string, string> */
     private array $files = [];
@@ -37,34 +38,36 @@ final class AiFileSystem
     public readonly ?string $description;
 
     /**
-     * Bind a controlled filesystem to an AI context.
+     * Create a controlled filesystem and bind it to an AI context.
      *
-     * The constructor registers this instance in the context's shared
-     * AiFileSystemToolSet. One optional root can be supplied here or added
-     * later with addRoot(); paths below it are always relative to that root.
-     * Explicit files can be added independently with addFile().
+     * The root is the primary argument. When no context is supplied, the
+     * filesystem creates its own AiContext; pass an existing context when
+     * several AI capabilities should share one conversation. The filesystem
+     * registers itself in that context's shared AiFileSystemToolSet.
      *
-     * @param AiContext $context Context that receives the shared filesystem tools.
      * @param string|null $root Optional root directory; may also be set later with addRoot().
+     * @param AiContext|null $context Optional existing context; omitted creates a new context.
      * @param string|null $id Stable routing ID; generated when omitted.
      * @param string|null $alias Optional human-readable name.
      * @param string|null $description Optional purpose shown by filesystem_list_systems.
      * @param FileSystemPolicy|null $policy Optional path policy; omitted means all paths are allowed.
      * @param RevisionStoreInterface|null $revisionStore Optional history backend; defaults to memory.
      * @throws InvalidArgumentException For invalid IDs, aliases or descriptions.
-     * @example $fs = new AiFileSystem($context, root: '/srv/app', id: 'app');
+     * @example $fs = new AiFileSystem('/srv/app', id: 'app');
+     * @see getContext()
      * @see addRoot()
      * @see addFile()
      */
     public function __construct(
-        private readonly AiContext $context,
         ?string $root = null,
+        ?AiContext $context = null,
         ?string $id = null,
         ?string $alias = null,
         ?string $description = null,
         ?FileSystemPolicy $policy = null,
         ?RevisionStoreInterface $revisionStore = null,
     ) {
+        $this->context = $context ?? new AiContext();
         $this->id = $this->normalizeId($id ?? 'fs_' . bin2hex(random_bytes(8)));
         $this->alias = $this->normalizeOptionalText($alias, 'alias');
         $this->description = $this->normalizeOptionalText($description, 'description');
@@ -75,10 +78,10 @@ final class AiFileSystem
             $this->addRoot($root);
         }
 
-        $toolSet = $context->getToolSet(AiFileSystemToolSet::class);
+        $toolSet = $this->context->getToolSet(AiFileSystemToolSet::class);
         if ($toolSet === null) {
             $toolSet = new AiFileSystemToolSet();
-            $context->addToolSet($toolSet);
+            $this->context->addToolSet($toolSet);
         }
         $toolSet->addFileSystem($this);
     }
