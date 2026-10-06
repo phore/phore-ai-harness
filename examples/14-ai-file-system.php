@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Phore\AiHarness\AiContext;
 use Phore\AiHarness\FileSystem\AiFileSystem;
 use Phore\AiHarness\FileSystem\FileOperationContext;
 use Phore\AiHarness\FileSystem\FileSystemPolicy;
