@@ -66,6 +66,7 @@ final class AiContext
     /** @var list<array{name: ?string, responseId: ?string}> */
     private array $checkpoints = [];
     private bool $running = false;
+    private ?string $lastLoggedSkillCatalogHash = null;
 
     /**
      * Prepare reusable prompt/tool context and common defaults without a request.
@@ -468,6 +469,19 @@ final class AiContext
 
             // Daten-Prompts werden beim Root geladen; Tools/Systemprompts bleiben request-lokal aktiv.
             $items = $this->withContextItems($items);
+            foreach ($this->prompts as $prepared) {
+                if ($prepared instanceof SkillCollection) {
+                    $catalog = $prepared->list();
+                    $hash = hash('sha256', Toolkit::jsonEncode($catalog));
+                    $announce = ($effective['debug_log'] ?? false) !== false
+                        && $hash !== $this->lastLoggedSkillCatalogHash;
+                    $ai = $ai->withSkillCatalog($catalog, $announce);
+                    if ($announce) {
+                        $this->lastLoggedSkillCatalogHash = $hash;
+                    }
+                    break;
+                }
+            }
             $ai = $ai->with(...$items)->withPreviousResponseId($this->responseId);
             if ($format !== null) {
                 $ai = $ai->withOutput($format);

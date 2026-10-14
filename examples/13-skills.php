@@ -14,14 +14,15 @@ $skillsDir = '/project/.agents/skills';
 
 // 1. Default: discover all nested skills; only names/descriptions are sent
 // initially. The agent can load instructions, references and assets on demand.
-$context = new AiContext();
+// Optional debug_log reports the concise skill list and subsequent skill actions.
+$context = new AiContext(options: ['debug_log' => true]);
 $context->skills()->addDirectory($skillsDir);
 $answer = $context->text('Use the appropriate skill to review my PHP code.');
 print_r($context->skills()->list());
 
 // 2. Alternatively prepare a collection explicitly, with one eager skill.
 $skills = new SkillCollection();
-$skills->add($skillsDir . '/coding-basis', initialLoad: true);
+$skills->add($skillsDir . '/coding-basis', options: ['initialLoad' => true]);
 $skills->add($skillsDir . '/php-style');
 $prepared = new AiContext(prompts: [$skills]);
 $review = $prepared->text('Review the coding conventions.');

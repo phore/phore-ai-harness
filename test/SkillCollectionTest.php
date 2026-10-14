@@ -7,6 +7,11 @@ namespace Phore\AiHarness\Test;
 use InvalidArgumentException;
 use Phore\AiHarness\AiContext;
 use Phore\AiHarness\Context\AiContextRegistry;
+use Phore\AiHarness\Client\OpenAiClient;
+use Phore\AiHarness\Logging\LogEvent;
+use Phore\AiHarness\Logging\LoggerInterface;
+use Phore\AiHarness\Logging\RunContext;
+use Phore\AiHarness\PhoreAi;
 use Phore\AiHarness\Skill\SkillCollection;
 use PHPUnit\Framework\TestCase;
 
@@ -72,10 +77,19 @@ final class SkillCollectionTest extends TestCase
     public function testInitialLoadAndWildcardDiscovery(): void
     {
         $skills = new SkillCollection();
-        $skills->add($this->root . '/*', initialLoad: true);
+        $skills->add($this->root . '/*', options: ['initialLoad' => true]);
 
         self::assertCount(2, $skills->list());
         self::assertStringContainsString('# pdf-tools', $skills->prompt()->text);
+        self::assertTrue($skills->get('pdf-tools')->initialLoad);
+
+        $separate = new SkillCollection();
+        $separate->add($this->root . '/pdf-tools');
+        self::assertFalse($separate->get('pdf-tools')->initialLoad);
+
+        $directory = new SkillCollection();
+        $directory->addDirectory($this->root, ['initialLoad' => true]);
+        self::assertTrue($directory->get('themejs-edit')->initialLoad);
     }
 
     public function testDuplicateNamesThrowWithoutPartialRegistration(): void
@@ -124,6 +138,61 @@ final class SkillCollectionTest extends TestCase
             ['exitCode' => 0, 'stdout' => 'works', 'stderr' => ''],
             $pdf->exec('scripts/hello.php', ['works']),
         );
+    }
+
+    public function testSkillAccessLoggingSummarizesActionsWithoutOutputs(): void
+    {
+        if (!function_exists('proc_open')) {
+            self::markTestSkipped('proc_open unavailable.');
+        }
+        $skills = new SkillCollection();
+        $skills->add($this->root . '/pdf-tools', options: ['allowExec' => true]);
+        $tools = [];
+        foreach ($skills->tools() as $tool) {
+            $tools[$tool->name()] = $tool;
+        }
+
+        $logger = new class implements LoggerInterface {
+            /** @var list<LogEvent> */
+            public array $events = [];
+
+            public function log(LogEvent $event): void
+            {
+                $this->events[] = $event;
+            }
+        };
+        $context = new RunContext($logger, 'gpt-test');
+        $ai = new PhoreAi(new OpenAiClient('fixture-key'));
+        $callback = new \ReflectionMethod($ai, 'invokeLoggedCallback');
+
+        foreach ([
+            ['skill_load', ['skill' => 'pdf-tools']],
+            ['skill_list_references', ['skill' => 'pdf-tools']],
+            ['skill_read_reference', ['skill' => 'pdf-tools', 'path' => 'references/help.md']],
+            ['skill_list_assets', ['skill' => 'pdf-tools']],
+            ['skill_read_asset', ['skill' => 'pdf-tools', 'path' => 'assets/data.bin']],
+            ['skill_exec', ['skill' => 'pdf-tools', 'script' => 'scripts/hello.php', 'args' => ['private-input']]],
+        ] as $index => [$name, $arguments]) {
+            $callback->invoke($ai, $tools[$name], json_encode($arguments, JSON_THROW_ON_ERROR), 'call_' . $index, $context);
+        }
+
+        self::assertSame(
+            ['skill_loaded', 'skill_references_listed', 'skill_reference_read',
+                'skill_assets_listed', 'skill_asset_read', 'skill_executed'],
+            array_column($logger->events, 'type'),
+        );
+        self::assertSame('references/help.md', $logger->events[2]->context['path']);
+        self::assertSame('assets/data.bin', $logger->events[4]->context['path']);
+        self::assertSame(0, $logger->events[5]->context['exitCode']);
+        foreach ($logger->events as $event) {
+            self::assertArrayNotHasKey('args', $event->context);
+            self::assertArrayNotHasKey('stdout', $event->context);
+            self::assertArrayNotHasKey('content', $event->context);
+        }
+        self::assertStringNotContainsString('private-input', json_encode(
+            array_map(static fn (LogEvent $event): array => $event->context, $logger->events),
+            JSON_THROW_ON_ERROR,
+        ));
     }
 
     public function testCannotReadOrExecuteOutsideSkillSubdirectories(): void

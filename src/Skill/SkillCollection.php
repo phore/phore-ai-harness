@@ -29,21 +29,21 @@ final class SkillCollection implements PromptType
      * A path without SKILL.md is recursively searched like addDirectory().
      * The entire operation rejects duplicate names before registering entries.
      *
-     * @param array{allowExec?: bool} $options
+     * @param array{initialLoad?: bool, allowExec?: bool} $options
      * @return $this
      * @throws InvalidArgumentException For duplicate names or invalid options.
-     * @example $skills->add('/project/skills/pdf', initialLoad: true);
+     * @example $skills->add('/project/skills/pdf', options: ['initialLoad' => true]);
      * @see addDirectory()
      */
-    public function add(string $path, bool $initialLoad = false, array $options = []): self
+    public function add(string $path, array $options = []): self
     {
-        $this->validateOptions($options, ['allowExec']);
+        $this->validateOptions($options, ['initialLoad', 'allowExec']);
         $paths = strpbrk($path, '*?[') === false ? [$path] : (glob($path, GLOB_ONLYDIR) ?: []);
         if ($paths === []) {
             throw new RuntimeException('No skill directories match: ' . $path);
         }
 
-        return $this->register($paths, $initialLoad, $options['allowExec'] ?? false);
+        return $this->register($paths, $options['initialLoad'] ?? false, $options['allowExec'] ?? false);
     }
 
     /**

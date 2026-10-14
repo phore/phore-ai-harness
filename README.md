@@ -122,8 +122,11 @@ $context->skills()->addDirectory(
 ```
 
 `add()` also supports explicit skills and wildcards, with optional
-`initialLoad: true`. Names must be unique. References/assets are readable
+`options: ['initialLoad' => true]`. Names must be unique. References/assets are readable
 without granting execution. A single generic set of tools supports all skills.
+With `debug_log` enabled, a brief catalog of skill names and one concise
+lifecycle event per skill load, resource read or script execution are logged;
+contents and command output are omitted.
 See [`examples/13-skills.php`](examples/13-skills.php) and the
 [`AI Usage Info`](.ai-usage-info.md) for the complete API and permissions.
 
