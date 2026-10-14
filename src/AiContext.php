@@ -21,6 +21,7 @@ use Phore\AiHarness\Helper\Toolkit;
 use Phore\AiHarness\OutputFormat\OutputFormat;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\PromptType\SystemPrompt;
+use Phore\AiHarness\Skill\SkillCollection;
 use Phore\AiHarness\ToolType\CallbackTool;
 use Phore\AiHarness\ToolType\ToolType;
 
@@ -159,6 +160,31 @@ final class AiContext
     }
 
     /**
+     * Return the sole mutable SkillCollection, creating it on first access.
+     * It can be extended after a conversation has started; updates are visible
+     * to the agent on the next request without resetting the provider cursor.
+     *
+     * @return SkillCollection The context's unique skill registry.
+     * @throws LogicException During an active AI request.
+     * @example $context->skills()->addDirectory('/project/.agents/skills');
+     * @see SkillCollection::addDirectory()
+     */
+    public function skills(): SkillCollection
+    {
+        $this->assertIdle();
+        foreach ($this->prompts as $item) {
+            if ($item instanceof SkillCollection) {
+                return $item;
+            }
+        }
+
+        $collection = new SkillCollection();
+        $this->prompts[] = $collection;
+
+        return $collection;
+    }
+
+    /**
      * Return content registered under an exact unique ID.
      *
      * @return AiContent|null Null when the ID is not part of this context.
@@ -286,6 +312,11 @@ final class AiContext
     {
         $this->assertIdle();
         $items = $this->normalizeContextItems(Toolkit::normalizePromptItems($prompts));
+        foreach ($items as $item) {
+            if ($item instanceof SkillCollection) {
+                throw new InvalidArgumentException('Add SkillCollection as prepared context, not source content.');
+            }
+        }
         $clone = clone $this;
         $clone->registerContentItems($items);
 
@@ -462,8 +493,12 @@ final class AiContext
     {
         $callbacks = [];
         $normalized = [];
+        $collections = 0;
 
         foreach ($items as $item) {
+            if ($item instanceof SkillCollection && ++$collections > 1) {
+                throw new InvalidArgumentException('Only one SkillCollection may be attached to an AI context.');
+            }
             if ($item instanceof CallbackTool) {
                 $name = $item->name();
                 if (in_array($name, ['write_text', 'write_files'], true)) {
@@ -511,23 +546,31 @@ final class AiContext
             ? $this->prompts
             : array_values(array_filter(
                 $this->prompts,
-                static fn (PromptType|ToolType $item): bool => $item instanceof ToolType || $item instanceof SystemPrompt,
+                static fn (PromptType|ToolType $item): bool => $item instanceof ToolType
+                    || $item instanceof SystemPrompt
+                    || $item instanceof SkillCollection,
             ));
 
         $callbacks = [];
         $merged = [];
         foreach ([...$contextItems, ...$this->pendingPrompts, ...$items] as $item) {
-            if ($item instanceof CallbackTool) {
-                $name = $item->name();
-                if (isset($callbacks[$name])) {
-                    if ($callbacks[$name] === $item) {
-                        continue;
+            // A collection stays mutable and must resolve on every request.
+            $expanded = $item instanceof SkillCollection
+                ? [$item->prompt(), ...$item->tools()]
+                : [$item];
+            foreach ($expanded as $resolved) {
+                if ($resolved instanceof CallbackTool) {
+                    $name = $resolved->name();
+                    if (isset($callbacks[$name])) {
+                        if ($callbacks[$name] === $resolved) {
+                            continue;
+                        }
+                        throw new InvalidArgumentException('Duplicate callback tool name: ' . $name);
                     }
-                    throw new InvalidArgumentException('Duplicate callback tool name: ' . $name);
+                    $callbacks[$name] = $resolved;
                 }
-                $callbacks[$name] = $item;
+                $merged[] = $resolved;
             }
-            $merged[] = $item;
         }
 
         return $merged;
