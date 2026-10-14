@@ -121,12 +121,15 @@ $context->skills()->addDirectory(
 );
 ```
 
-`add()` also supports explicit skills and wildcards, with optional
-`options: ['initialLoad' => true]`. Names must be unique. References/assets are readable
+The same collection can also be registered explicitly with
+`$context->addToolSet($skills)`. `add()` supports explicit skills and wildcards
+with optional `options: ['initialLoad' => true]`. Names must be unique. References/assets are readable
 without granting execution. A single generic set of tools supports all skills.
 With `debug_log` enabled, a brief catalog of skill names and one concise
 lifecycle event per skill load, resource read or script execution are logged;
-contents and command output are omitted.
+contents and command output are omitted. Both `add()` and `addDirectory()`
+accept `options: ['execTimeout' => 60]` (seconds; default 30) to terminate
+long-running skill scripts and report a timeout error.
 See [`examples/15-skills.php`](examples/15-skills.php) and the
 [`AI Usage Info`](.ai-usage-info.md) for the complete API and permissions.
 

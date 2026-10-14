@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace Phore\AiHarness\Skill;
 
 use InvalidArgumentException;
-use Phore\AiHarness\PromptType\PromptType;
+use Phore\AiHarness\ToolType\AiToolSet;
 use Phore\AiHarness\PromptType\SystemPrompt;
 use Phore\AiHarness\ToolType\CallbackTool;
 use RuntimeException;
@@ -18,10 +18,13 @@ use RuntimeException;
  *
  * @see \Phore\AiHarness\AiContext::skills()
  */
-final class SkillCollection implements PromptType
+final class SkillCollection implements AiToolSet
 {
     /** @var array<string, Skill> */
     private array $skills = [];
+
+    /** @var list<CallbackTool>|null */
+    private ?array $tools = null;
 
     /**
      * Add one skill directory or a glob of skill directories.
@@ -29,7 +32,7 @@ final class SkillCollection implements PromptType
      * A path without SKILL.md is recursively searched like addDirectory().
      * The entire operation rejects duplicate names before registering entries.
      *
-     * @param array{initialLoad?: bool, allowExec?: bool} $options
+     * @param array{initialLoad?: bool, allowExec?: bool, execTimeout?: int} $options
      * @return $this
      * @throws InvalidArgumentException For duplicate names or invalid options.
      * @example $skills->add('/project/skills/pdf', options: ['initialLoad' => true]);
@@ -37,20 +40,20 @@ final class SkillCollection implements PromptType
      */
     public function add(string $path, array $options = []): self
     {
-        $this->validateOptions($options, ['initialLoad', 'allowExec']);
+        $this->validateOptions($options);
         $paths = strpbrk($path, '*?[') === false ? [$path] : (glob($path, GLOB_ONLYDIR) ?: []);
         if ($paths === []) {
             throw new RuntimeException('No skill directories match: ' . $path);
         }
 
-        return $this->register($paths, $options['initialLoad'] ?? false, $options['allowExec'] ?? false);
+        return $this->register($paths, $options['initialLoad'] ?? false, $options['allowExec'] ?? false, $options['execTimeout'] ?? 30);
     }
 
     /**
      * Discover SKILL.md files recursively, including the root itself.
      * Nested files under an already discovered skill are not treated as skills.
      *
-     * @param array{initialLoad?: bool, allowExec?: bool} $options
+     * @param array{initialLoad?: bool, allowExec?: bool, execTimeout?: int} $options
      * @return $this
      * @throws InvalidArgumentException For duplicate names or invalid options.
      * @example $skills->addDirectory('/project/.agents/skills', ['allowExec' => true]);
@@ -58,12 +61,13 @@ final class SkillCollection implements PromptType
      */
     public function addDirectory(string $directory, array $options = []): self
     {
-        $this->validateOptions($options, ['allowExec', 'initialLoad']);
+        $this->validateOptions($options);
 
         return $this->register(
             [$directory],
             $options['initialLoad'] ?? false,
             $options['allowExec'] ?? false,
+            $options['execTimeout'] ?? 30,
         );
     }
 
@@ -83,7 +87,7 @@ final class SkillCollection implements PromptType
     /**
      * Inspect registered names, descriptions and execution flags locally.
      *
-     * @return list<array{name: string, description: string, initialLoad: bool, allowExec: bool}>
+     * @return list<array{name: string, description: string, initialLoad: bool, allowExec: bool, execTimeout: int}>
      * @example $catalogue = $skills->list();
      * @see get()
      */
@@ -95,6 +99,7 @@ final class SkillCollection implements PromptType
                 'description' => $skill->description,
                 'initialLoad' => $skill->initialLoad,
                 'allowExec' => $skill->allowExec,
+                'execTimeout' => $skill->execTimeout,
             ],
             $this->skills,
         ));
@@ -122,12 +127,12 @@ final class SkillCollection implements PromptType
      * Eight generic tools serve all registered skills; none depend on a name.
      *
      * @return list<CallbackTool>
-     * @example $tools = $skills->tools();
+     * @example $tools = $skills->getTools();
      * @see prompt()
      */
-    public function tools(): array
+    public function getTools(): array
     {
-        return [
+        return $this->tools ??= [
             new CallbackTool(
                 /** @return string JSON list of discovered skill metadata. */
                 fn (): string => $this->encode($this->list()),
@@ -168,6 +173,7 @@ final class SkillCollection implements PromptType
                 /** @param string $skill The exact skill name. */
                 fn (string $skill): string => $this->encode([
                     'allowExec' => $this->get($skill)->allowExec,
+                    'execTimeout' => $this->get($skill)->execTimeout,
                     'scripts' => $this->get($skill)->listFiles('scripts'),
                     'bin' => $this->get($skill)->listFiles('bin'),
                 ]),
@@ -188,7 +194,7 @@ final class SkillCollection implements PromptType
         ];
     }
 
-    /** A marker; AiContext expands it to its SystemPrompt and CallbackTools. */
+    /** A stable metadata signature used by AiContext when exporting state. */
     public function type(): string
     {
         return 'skill_collection';
@@ -209,6 +215,7 @@ final class SkillCollection implements PromptType
                     'directory' => $skill->directory,
                     'initialLoad' => $skill->initialLoad,
                     'allowExec' => $skill->allowExec,
+                    'execTimeout' => $skill->execTimeout,
                 ],
                 $this->skills,
             ),
@@ -216,12 +223,12 @@ final class SkillCollection implements PromptType
     }
 
     /** @param list<string> $roots */
-    private function register(array $roots, bool $initialLoad, bool $allowExec): self
+    private function register(array $roots, bool $initialLoad, bool $allowExec, int $execTimeout): self
     {
         $found = [];
         foreach ($roots as $root) {
             foreach ($this->discover($root) as $directory) {
-                $skill = new Skill($directory, $initialLoad, $allowExec);
+                $skill = new Skill($directory, $initialLoad, $allowExec, $execTimeout);
                 if (isset($this->skills[$skill->name]) || isset($found[$skill->name])) {
                     throw new InvalidArgumentException(
                         'Duplicate skill name: ' . $skill->name . ' (' . $directory . ')',
@@ -277,13 +284,17 @@ final class SkillCollection implements PromptType
         return $found;
     }
 
-    /** @param array<string, mixed> $options @param list<string> $allowed */
-    private function validateOptions(array $options, array $allowed): void
+    /** @param array<string, mixed> $options */
+    private function validateOptions(array $options): void
     {
         foreach ($options as $key => $value) {
-            if (!in_array($key, $allowed, true) || !is_bool($value)) {
-                throw new InvalidArgumentException('Invalid skill option: ' . (string) $key);
+            if (in_array($key, ['initialLoad', 'allowExec'], true) && is_bool($value)) {
+                continue;
             }
+            if ($key === 'execTimeout' && is_int($value) && $value > 0) {
+                continue;
+            }
+            throw new InvalidArgumentException('Invalid skill option: ' . (string) $key);
         }
     }
 

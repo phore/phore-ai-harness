@@ -33,7 +33,12 @@ final readonly class Skill
         string $directory,
         public bool $initialLoad = false,
         public bool $allowExec = false,
+        public int $execTimeout = 30,
     ) {
+        if ($this->execTimeout <= 0) {
+            throw new InvalidArgumentException('execTimeout must be a positive number of seconds.');
+        }
+
         $canonical = realpath($directory);
         if ($canonical === false || !is_dir($canonical)) {
             throw new RuntimeException('Skill directory does not exist: ' . $directory);
@@ -216,10 +221,13 @@ final readonly class Skill
                 if (strlen($stdout) + strlen($stderr) > 1024 * 1024) {
                     throw new RuntimeException('Skill script output exceeds 1 MiB: ' . $file);
                 }
-                if (microtime(true) - $started > 30) {
-                    throw new RuntimeException('Skill script timed out after 30 seconds: ' . $file);
-                }
                 $status = proc_get_status($process);
+                if ($status['running'] && microtime(true) - $started >= $this->execTimeout) {
+                    $unit = $this->execTimeout === 1 ? ' second: ' : ' seconds: ';
+                    throw new RuntimeException(
+                        'Skill script timed out after ' . $this->execTimeout . $unit . $file,
+                    );
+                }
                 if ($status['running']) {
                     usleep(20000);
                 }
@@ -231,7 +239,16 @@ final readonly class Skill
                 throw new RuntimeException('Skill script output exceeds 1 MiB: ' . $file);
             }
         } catch (RuntimeException $error) {
+            // Timeout oder Output-Limit: laufenden Prozess erst beenden,
+            // danach nur kurz auf das saubere Herunterfahren warten.
             proc_terminate($process);
+            $deadline = microtime(true) + 0.3;
+            while (proc_get_status($process)['running'] && microtime(true) < $deadline) {
+                usleep(20000);
+            }
+            if (proc_get_status($process)['running']) {
+                proc_terminate($process, 9);
+            }
             throw $error;
         } finally {
             fclose($pipes[1]);

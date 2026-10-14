@@ -24,19 +24,22 @@ print_r($context->skills()->list());
 $skills = new SkillCollection();
 $skills->add($skillsDir . '/coding-basis', options: ['initialLoad' => true]);
 $skills->add($skillsDir . '/php-style');
-$prepared = new AiContext(prompts: [$skills]);
+$prepared = new AiContext();
+$prepared->addToolSet($skills);
 $review = $prepared->text('Review the coding conventions.');
 
 // 3. A separate collection may discover skills through glob patterns.
 $fromPackages = new SkillCollection();
 $fromPackages->add('/project/vendor/*/skills/*');
-$packageContext = new AiContext(prompts: [$fromPackages]);
+$packageContext = new AiContext();
+$packageContext->addToolSet($fromPackages);
 
 // 4. Executables are disabled by default. This alternative context explicitly
 // allows any script inside bin/ and scripts/ of every discovered skill.
 $executableContext = new AiContext();
 $executableContext->skills()->addDirectory($skillsDir, options: [
     'allowExec' => true,
+    'execTimeout' => 60, // The default is 30 seconds.
 ]);
 $extracted = $executableContext->text('Use the PDF skill to extract the invoice.');
 

@@ -229,14 +229,13 @@ final class AiContext
     public function skills(): SkillCollection
     {
         $this->assertIdle();
-        foreach ($this->prompts as $item) {
-            if ($item instanceof SkillCollection) {
-                return $item;
-            }
+        $registered = $this->getToolSet(SkillCollection::class);
+        if ($registered !== null) {
+            return $registered;
         }
 
         $collection = new SkillCollection();
-        $this->prompts[] = $collection;
+        $this->addToolSet($collection);
 
         return $collection;
     }
@@ -369,11 +368,6 @@ final class AiContext
     {
         $this->assertIdle();
         $items = $this->normalizeContextItems(Toolkit::normalizePromptItems($prompts));
-        foreach ($items as $item) {
-            if ($item instanceof SkillCollection) {
-                throw new InvalidArgumentException('Add SkillCollection as prepared context, not source content.');
-            }
-        }
         $clone = clone $this;
         $clone->registerContentItems($items);
 
@@ -525,17 +519,15 @@ final class AiContext
 
             // Daten-Prompts werden beim Root geladen; Tools/Systemprompts bleiben request-lokal aktiv.
             $items = $this->withContextItems($items);
-            foreach ($this->prompts as $prepared) {
-                if ($prepared instanceof SkillCollection) {
-                    $catalog = $prepared->list();
-                    $hash = hash('sha256', Toolkit::jsonEncode($catalog));
-                    $announce = ($effective['debug_log'] ?? false) !== false
-                        && $hash !== $this->lastLoggedSkillCatalogHash;
-                    $ai = $ai->withSkillCatalog($catalog, $announce);
-                    if ($announce) {
-                        $this->lastLoggedSkillCatalogHash = $hash;
-                    }
-                    break;
+            $skillSet = $this->getToolSet(SkillCollection::class);
+            if ($skillSet !== null) {
+                $catalog = $skillSet->list();
+                $hash = hash('sha256', Toolkit::jsonEncode($catalog));
+                $announce = ($effective['debug_log'] ?? false) !== false
+                    && $hash !== $this->lastLoggedSkillCatalogHash;
+                $ai = $ai->withSkillCatalog($catalog, $announce);
+                if ($announce) {
+                    $this->lastLoggedSkillCatalogHash = $hash;
                 }
             }
             $ai = $ai->with(...$items)->withPreviousResponseId($this->responseId);
@@ -563,12 +555,8 @@ final class AiContext
     {
         $callbacks = [];
         $normalized = [];
-        $collections = 0;
 
         foreach ($items as $item) {
-            if ($item instanceof SkillCollection && ++$collections > 1) {
-                throw new InvalidArgumentException('Only one SkillCollection may be attached to an AI context.');
-            }
             if ($item instanceof CallbackTool) {
                 $name = $item->name();
                 if (in_array($name, ['write_text', 'write_files'], true)) {
@@ -616,31 +604,30 @@ final class AiContext
             ? $this->prompts
             : array_values(array_filter(
                 $this->prompts,
-                static fn (PromptType|ToolType $item): bool => $item instanceof ToolType
-                    || $item instanceof SystemPrompt
-                    || $item instanceof SkillCollection,
+                static fn (PromptType|ToolType $item): bool => $item instanceof ToolType || $item instanceof SystemPrompt,
             ));
+
+        // AiToolSet verwaltet die stabilen CallbackTools. Nur der Skill-Katalog
+        // wird bei jeder Anfrage als aktueller SystemPrompt ergänzt.
+        $skillSet = $this->getToolSet(SkillCollection::class);
+        if ($skillSet !== null) {
+            $contextItems[] = $skillSet->prompt();
+        }
 
         $callbacks = [];
         $merged = [];
         foreach ([...$contextItems, ...$this->pendingPrompts, ...$items] as $item) {
-            // A collection stays mutable and must resolve on every request.
-            $expanded = $item instanceof SkillCollection
-                ? [$item->prompt(), ...$item->tools()]
-                : [$item];
-            foreach ($expanded as $resolved) {
-                if ($resolved instanceof CallbackTool) {
-                    $name = $resolved->name();
-                    if (isset($callbacks[$name])) {
-                        if ($callbacks[$name] === $resolved) {
-                            continue;
-                        }
-                        throw new InvalidArgumentException('Duplicate callback tool name: ' . $name);
+            if ($item instanceof CallbackTool) {
+                $name = $item->name();
+                if (isset($callbacks[$name])) {
+                    if ($callbacks[$name] === $item) {
+                        continue;
                     }
-                    $callbacks[$name] = $resolved;
+                    throw new InvalidArgumentException('Duplicate callback tool name: ' . $name);
                 }
-                $merged[] = $resolved;
+                $callbacks[$name] = $item;
             }
+            $merged[] = $item;
         }
 
         return $merged;
@@ -749,6 +736,11 @@ final class AiContext
                     ? $item->toArray(self::STATE_PROVIDER)
                     : $item->toArray(),
             ];
+        }
+
+        $skillSet = $this->getToolSet(SkillCollection::class);
+        if ($skillSet !== null) {
+            $items[] = ['class' => SkillCollection::class, 'config' => $skillSet->toArray()];
         }
 
         return hash('sha256', Toolkit::jsonEncode($items));

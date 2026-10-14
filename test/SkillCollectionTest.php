@@ -51,6 +51,7 @@ final class SkillCollectionTest extends TestCase
         file_put_contents($path . '/references/help.md', 'Reference content');
         file_put_contents($path . '/assets/data.bin', "\0\1\2");
         file_put_contents($path . '/scripts/hello.php', '<?php echo $argv[1];');
+        file_put_contents($path . '/scripts/delay.php', '<?php sleep(3);');
     }
 
     public function testRecursiveDiscoveryReadAndDefaultNoExecution(): void
@@ -111,15 +112,18 @@ final class SkillCollectionTest extends TestCase
     {
         $skills = new SkillCollection();
         $skills->add($this->root . '/pdf-tools');
-        $context = new AiContext(prompts: [$skills]);
+        $context = new AiContext();
+        $context->addToolSet($skills);
         self::assertSame($skills, $context->skills());
+        self::assertSame($skills, $context->getToolSet(SkillCollection::class));
+        self::assertSame($skills->getTools(), $skills->getTools());
 
         $id = AiContextRegistry::resolve(['ai_context' => 'skill-context']);
         $id->skills()->add($this->root . '/themejs-edit');
         self::assertSame($id->skills(), AiContextRegistry::get('skill-context')->skills());
 
         $this->expectException(InvalidArgumentException::class);
-        new AiContext(prompts: [$skills, new SkillCollection()]);
+        $context->addToolSet(new SkillCollection());
     }
 
     public function testAllScriptsAllowedWhenExplicitlyEnabled(): void
@@ -133,11 +137,59 @@ final class SkillCollectionTest extends TestCase
         $pdf = $skills->get('pdf-tools');
 
         self::assertTrue($pdf->allowExec);
-        self::assertSame(['scripts/hello.php'], $pdf->listFiles('scripts'));
+        self::assertSame(['scripts/delay.php', 'scripts/hello.php'], $pdf->listFiles('scripts'));
         self::assertSame(
             ['exitCode' => 0, 'stdout' => 'works', 'stderr' => ''],
             $pdf->exec('scripts/hello.php', ['works']),
         );
+    }
+
+    public function testExecTimeoutDefaultsToThirtySecondsAndCanBeOverridden(): void
+    {
+        $defaults = new SkillCollection();
+        $defaults->add($this->root . '/pdf-tools');
+        self::assertSame(30, $defaults->get('pdf-tools')->execTimeout);
+
+        $configured = new SkillCollection();
+        $configured->add($this->root . '/pdf-tools', options: [
+            'allowExec' => true,
+            'execTimeout' => 1,
+        ]);
+        self::assertSame(1, $configured->get('pdf-tools')->execTimeout);
+        self::assertSame(1, $configured->toArray()['skills']['pdf-tools']['execTimeout']);
+
+        $byDirectory = new SkillCollection();
+        $byDirectory->addDirectory($this->root, ['execTimeout' => 4]);
+        self::assertSame(4, $byDirectory->get('themejs-edit')->execTimeout);
+
+        foreach ([0, -1, 1.5, '30', true] as $invalid) {
+            try {
+                (new SkillCollection())->add($this->root . '/pdf-tools', options: ['execTimeout' => $invalid]);
+                self::fail('Expected invalid execTimeout to fail.');
+            } catch (InvalidArgumentException $error) {
+                self::assertStringContainsString('execTimeout', $error->getMessage());
+            }
+        }
+    }
+
+    public function testExecTimeoutTerminatesRunningProcess(): void
+    {
+        if (!function_exists('proc_open')) {
+            self::markTestSkipped('proc_open unavailable.');
+        }
+        $skills = new SkillCollection();
+        $skills->addDirectory($this->root, [
+            'allowExec' => true,
+            'execTimeout' => 1,
+        ]);
+        $started = microtime(true);
+        try {
+            $skills->get('pdf-tools')->exec('scripts/delay.php');
+            self::fail('A three-second script must hit the one-second timeout.');
+        } catch (\RuntimeException $error) {
+            self::assertStringContainsString('timed out after 1 second', $error->getMessage());
+        }
+        self::assertLessThan(2.8, microtime(true) - $started);
     }
 
     public function testSkillAccessLoggingSummarizesActionsWithoutOutputs(): void
@@ -148,7 +200,7 @@ final class SkillCollectionTest extends TestCase
         $skills = new SkillCollection();
         $skills->add($this->root . '/pdf-tools', options: ['allowExec' => true]);
         $tools = [];
-        foreach ($skills->tools() as $tool) {
+        foreach ($skills->getTools() as $tool) {
             $tools[$tool->name()] = $tool;
         }
 
