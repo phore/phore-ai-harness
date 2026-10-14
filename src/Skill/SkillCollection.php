@@ -119,7 +119,7 @@ final class SkillCollection implements PromptType
     }
 
     /**
-     * Seven generic tools serve all registered skills; none depend on a name.
+     * Eight generic tools serve all registered skills; none depend on a name.
      *
      * @return list<CallbackTool>
      * @example $tools = $skills->tools();
@@ -234,6 +234,7 @@ final class SkillCollection implements PromptType
         foreach ($found as $name => $skill) {
             $this->skills[$name] = $skill;
         }
+        ksort($this->skills, SORT_STRING);
 
         return $this;
     }
