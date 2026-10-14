@@ -21,6 +21,7 @@ use Phore\AiHarness\Helper\Toolkit;
 use Phore\AiHarness\OutputFormat\OutputFormat;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\PromptType\SystemPrompt;
+use Phore\AiHarness\Skill\SkillCollection;
 use Phore\AiHarness\ToolType\AiToolSet;
 use Phore\AiHarness\ToolType\CallbackTool;
 use Phore\AiHarness\ToolType\ToolType;
@@ -68,6 +69,7 @@ final class AiContext
     /** @var list<array{name: ?string, responseId: ?string}> */
     private array $checkpoints = [];
     private bool $running = false;
+    private ?string $lastLoggedSkillCatalogHash = null;
 
     /**
      * Prepare reusable prompt/tool context and common defaults without a request.
@@ -212,6 +214,30 @@ final class AiContext
     public function getResponseId(): ?string
     {
         return $this->responseId;
+    }
+
+    /**
+     * Return the sole mutable SkillCollection, creating it on first access.
+     * It can be extended after a conversation has started; updates are visible
+     * to the agent on the next request without resetting the provider cursor.
+     *
+     * @return SkillCollection The context's unique skill registry.
+     * @throws LogicException During an active AI request.
+     * @example $context->skills()->addDirectory('/project/.agents/skills');
+     * @see SkillCollection::addDirectory()
+     */
+    public function skills(): SkillCollection
+    {
+        $this->assertIdle();
+        $registered = $this->getToolSet(SkillCollection::class);
+        if ($registered !== null) {
+            return $registered;
+        }
+
+        $collection = new SkillCollection();
+        $this->addToolSet($collection);
+
+        return $collection;
     }
 
     /**
@@ -493,6 +519,17 @@ final class AiContext
 
             // Daten-Prompts werden beim Root geladen; Tools/Systemprompts bleiben request-lokal aktiv.
             $items = $this->withContextItems($items);
+            $skillSet = $this->getToolSet(SkillCollection::class);
+            if ($skillSet !== null) {
+                $catalog = $skillSet->list();
+                $hash = hash('sha256', Toolkit::jsonEncode($catalog));
+                $announce = ($effective['debug_log'] ?? false) !== false
+                    && $hash !== $this->lastLoggedSkillCatalogHash;
+                $ai = $ai->withSkillCatalog($catalog, $announce);
+                if ($announce) {
+                    $this->lastLoggedSkillCatalogHash = $hash;
+                }
+            }
             $ai = $ai->with(...$items)->withPreviousResponseId($this->responseId);
             if ($format !== null) {
                 $ai = $ai->withOutput($format);
@@ -569,6 +606,13 @@ final class AiContext
                 $this->prompts,
                 static fn (PromptType|ToolType $item): bool => $item instanceof ToolType || $item instanceof SystemPrompt,
             ));
+
+        // AiToolSet verwaltet die stabilen CallbackTools. Nur der Skill-Katalog
+        // wird bei jeder Anfrage als aktueller SystemPrompt ergänzt.
+        $skillSet = $this->getToolSet(SkillCollection::class);
+        if ($skillSet !== null) {
+            $contextItems[] = $skillSet->prompt();
+        }
 
         $callbacks = [];
         $merged = [];
@@ -692,6 +736,11 @@ final class AiContext
                     ? $item->toArray(self::STATE_PROVIDER)
                     : $item->toArray(),
             ];
+        }
+
+        $skillSet = $this->getToolSet(SkillCollection::class);
+        if ($skillSet !== null) {
+            $items[] = ['class' => SkillCollection::class, 'config' => $skillSet->toArray()];
         }
 
         return hash('sha256', Toolkit::jsonEncode($items));

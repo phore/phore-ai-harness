@@ -41,6 +41,9 @@ final class PhoreAi
     public const MAX_CALLBACK_ROUNDS = 5;
 
     private OpenAiClient $openAiClient;
+    /** @var list<array{name:string, initialLoad:bool}> */
+    private array $skillCatalog = [];
+    private bool $announceSkillCatalog = true;
 
     /** @var array<string, mixed>|null */
     private ?array $reasoning = ['effort' => 'low'];
@@ -55,6 +58,21 @@ final class PhoreAi
         }
 
         $this->openAiClient = $this->createClientFromDsn($client);
+    }
+
+    /**
+     * Supply metadata for concise skill lifecycle logging.
+     * Used by AiContext; it never adds instructions or tools itself.
+     *
+     * @param list<array{name:string, initialLoad:bool}> $skills
+     * @param bool $announce Whether to emit the catalog and eager-load events.
+     * @return self A new configured facade.
+     * @example $ai = $ai->withSkillCatalog([['name' => 'pdf-tools', 'initialLoad' => false]]);
+     * @see \Phore\AiHarness\Skill\SkillCollection::list()
+     */
+    public function withSkillCatalog(array $skills, bool $announce = true): self
+    {
+        return clone($this, ['skillCatalog' => $skills, 'announceSkillCatalog' => $announce]);
     }
 
     public function getOpenAiClient(): OpenAiClient
@@ -500,6 +518,15 @@ final class PhoreAi
         $status = 'failed';
         try {
             $context?->emit('run_start');
+            if ($context !== null && $this->announceSkillCatalog && $this->skillCatalog !== []) {
+                $names = array_column($this->skillCatalog, 'name');
+                $context->emit('skills_available', ['count' => count($names), 'names' => $names]);
+                foreach ($this->skillCatalog as $skill) {
+                    if ($skill['initialLoad']) {
+                        $context->emit('skill_loaded', ['skill' => $skill['name'], 'source' => 'initial']);
+                    }
+                }
+            }
             $result = $run($context);
             $status = 'ok';
             return $result;
@@ -559,7 +586,20 @@ final class PhoreAi
     private function invokeLoggedCallback(CallbackTool $tool, string $json, string $callId, RunContext $context): string
     {
         $details = ['tool' => $tool->name(), 'call_id' => $callId];
-        $context->emit('tool_start', [...$details, 'args' => Redactor::arguments($json)]);
+        $skillEvent = match ($tool->name()) {
+            'skill_list' => 'skills_listed',
+            'skill_load' => 'skill_loaded',
+            'skill_list_references' => 'skill_references_listed',
+            'skill_read_reference' => 'skill_reference_read',
+            'skill_list_assets' => 'skill_assets_listed',
+            'skill_read_asset' => 'skill_asset_read',
+            'skill_list_scripts' => 'skill_scripts_listed',
+            'skill_exec' => 'skill_executed',
+            default => null,
+        };
+        if ($skillEvent === null) {
+            $context->emit('tool_start', [...$details, 'args' => Redactor::arguments($json)]);
+        }
         $context->toolCalls++;
         $started = hrtime(true);
         $status = 'failed';
@@ -579,7 +619,9 @@ final class PhoreAi
             // Serialization failures are internal errors, not a reason to repeat a side effect.
             $output = is_string($result) ? $result : Toolkit::jsonEncode($result);
             $status = 'ok';
-            $context->emit('tool_result', [...$details, 'bytes' => strlen($output)]);
+            if ($skillEvent === null) {
+                $context->emit('tool_result', [...$details, 'bytes' => strlen($output)]);
+            }
             return $output;
         } catch (\Throwable $error) {
             $context->error($error, $details);
@@ -587,7 +629,29 @@ final class PhoreAi
         } finally {
             $duration = (hrtime(true) - $started) / 1e9;
             $context->durationTools += $duration;
-            $context->emit('tool_end', [...$details, 'status' => $status, 'duration' => $duration]);
+            if ($skillEvent !== null) {
+                $input = json_decode($json, true);
+                $summary = [];
+                if (is_array($input)) {
+                    foreach (['skill', 'path', 'script'] as $key) {
+                        if (isset($input[$key]) && is_string($input[$key])) {
+                            $summary[$key] = $input[$key];
+                        }
+                    }
+                }
+                if ($skillEvent === 'skill_executed' && isset($output)) {
+                    $result = json_decode($output, true);
+                    if (is_array($result) && isset($result['exitCode']) && is_int($result['exitCode'])) {
+                        $summary['exitCode'] = $result['exitCode'];
+                        if ($result['exitCode'] !== 0) {
+                            $status = 'failed';
+                        }
+                    }
+                }
+                $context->emit($skillEvent, [...$summary, 'status' => $status, 'duration' => $duration]);
+            } else {
+                $context->emit('tool_end', [...$details, 'status' => $status, 'duration' => $duration]);
+            }
         }
     }
 

@@ -99,6 +99,40 @@ $summary = $context->text('Summarize the corrections that are needed.');
 From this point on, the detailed examples use `AiContext`; the helper functions
 delegate to the same operations and do not need a parallel explanation.
 
+### Agent Skills
+
+An `AiContext` supports a single mutable `SkillCollection`. Discover local
+`SKILL.md` directories recursively; the model receives names and descriptions
+first and can load the full instructions, references and assets when necessary:
+
+```php
+$context = new \Phore\AiHarness\AiContext();
+$context->skills()->addDirectory(__DIR__ . '/.agents/skills');
+echo $context->text('Use the relevant skill to complete this task.');
+```
+
+By default scripts cannot execute. For trusted skills only, enable *all*
+executables under their `bin/` and `scripts/` directories:
+
+```php
+$context->skills()->addDirectory(
+    __DIR__ . '/trusted-skills',
+    options: ['allowExec' => true],
+);
+```
+
+The same collection can also be registered explicitly with
+`$context->addToolSet($skills)`. `add()` supports explicit skills and wildcards
+with optional `options: ['initialLoad' => true]`. Names must be unique. References/assets are readable
+without granting execution. A single generic set of tools supports all skills.
+With `debug_log` enabled, a brief catalog of skill names and one concise
+lifecycle event per skill load, resource read or script execution are logged;
+contents and command output are omitted. Both `add()` and `addDirectory()`
+accept `options: ['execTimeout' => 60]` (seconds; default 30) to terminate
+long-running skill scripts and report a timeout error.
+See [`examples/15-skills.php`](examples/15-skills.php) and the
+[`AI Usage Info`](.ai-usage-info.md) for the complete API and permissions.
+
 ### State, checkpoints and sessions
 
 `setCheckpoint()` and `rollback()` move only the conversation cursor. They do

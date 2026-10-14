@@ -86,6 +86,33 @@ final class DebugLoggingTest extends TestCase
         return new OpenAiClient('fixture-key', baseUrl: self::$baseUrl . '/' . $scenario, timeout: 2);
     }
 
+    public function testAvailableSkillsAndEagerLoadsAreLoggedWithoutContent(): void
+    {
+        $logger = new RecordingDebugLogger();
+        $ai = (new PhoreAi($this->client('text')))
+            ->withLogger($logger)
+            ->withSkillCatalog([
+                ['name' => 'pdf-tools', 'initialLoad' => true],
+                ['name' => 'php-style', 'initialLoad' => false],
+            ]);
+        self::assertSame("First line\nSecond line", $ai->run());
+
+        $available = array_values(array_filter(
+            $logger->events,
+            static fn (LogEvent $event): bool => $event->type === 'skills_available',
+        ));
+        self::assertCount(1, $available);
+        self::assertSame(['pdf-tools', 'php-style'], $available[0]->context['names']);
+        self::assertSame(2, $available[0]->context['count']);
+        $loaded = array_values(array_filter(
+            $logger->events,
+            static fn (LogEvent $event): bool => $event->type === 'skill_loaded',
+        ));
+        self::assertCount(1, $loaded);
+        self::assertSame('pdf-tools', $loaded[0]->context['skill']);
+        self::assertSame('initial', $loaded[0]->context['source']);
+    }
+
     public function testDefaultIsNonStreamingAndLoggerConfigurationIsImmutable(): void
     {
         $ai = new PhoreAi($this->client('mode'));
