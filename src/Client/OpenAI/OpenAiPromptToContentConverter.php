@@ -51,6 +51,9 @@ final readonly class OpenAiPromptToContentConverter
     public function convertPrompt(PromptType $prompt): array
     {
         $this->validateRequiredAliases([$prompt]);
+        if ($prompt instanceof TextPrompt) {
+            return ['type' => 'input_text', 'text' => $this->convertTextPrompt($prompt)];
+        }
         return $this->convertPromptToSections($prompt)[0];
     }
 
@@ -170,10 +173,10 @@ final readonly class OpenAiPromptToContentConverter
 
     private function convertTextPrompt(TextPrompt $prompt): string
     {
-        return $this->convertTextPromptMetadata($prompt) . "\n" . $prompt->text;
+        return $this->convertTextPromptMetadata($prompt, true) . "\n" . $prompt->text;
     }
 
-    private function convertTextPromptMetadata(TextPrompt $prompt): string
+    private function convertTextPromptMetadata(TextPrompt $prompt, bool $inline = false): string
     {
         return Toolkit::jsonEncode([
             'type' => 'harness_text',
@@ -182,7 +185,9 @@ final readonly class OpenAiPromptToContentConverter
             'contentFormat' => $prompt->type,
             'allowInstructions' => $prompt->allowInstructions,
             'sourcePolicy' => $this->sourcePolicy($prompt->allowInstructions),
-            'contentBoundary' => 'Only the next input_text segment contains raw source content; every character belongs to it.',
+            'contentBoundary' => $inline
+                ? 'Raw source content begins immediately after the newline following this JSON metadata line; every subsequent character belongs to it.'
+                : 'Only the next input_text segment contains raw source content; every character belongs to it.',
         ]);
     }
 
