@@ -7,9 +7,9 @@ namespace Phore\AiHarness\Usage;
 use InvalidArgumentException;
 
 /**
- * Approximate text-token prices, USD per million tokens (checked 2026-09-11).
+ * Approximate text-token prices, USD per million tokens (checked 2026-10-15).
  * Sources: https://developers.openai.com/api/docs/pricing and model pages.
- * GPT-6/5.6 and GPT-5.5 use published long-context standard rates conservatively.
+ * GPT-6, GPT-5.6 and GPT-5.5 use long-context standard rates conservatively.
  * Other exact entries use standard model-page rates. See README for the policy.
  * Excludes tool fees, image/audio generation, taxes and service-tier adjustments.
  */
@@ -22,6 +22,8 @@ final class CostEstimator
      */
     private const MODEL_PRICES_PER_MILLION_TOKENS_USD = [
         'gpt-6-astra' => ['input' => 20.000, 'cachedInput' => 2.000, 'output' => 75.00],
+        'gpt-6.1-sol' => ['input' => 4.000, 'cachedInput' => 0.200, 'output' => 15.00],
+        'gpt-6-luna' => ['input' => 0.200, 'cachedInput' => 0.020, 'output' => 0.75],
         'gpt-5.6-sol' => ['input' => 8.000, 'cachedInput' => 0.800, 'output' => 30.00],
         'gpt-5.6-terra' => ['input' => 4.000, 'cachedInput' => 0.400, 'output' => 18.00],
         'gpt-5.6-luna' => ['input' => 0.400, 'cachedInput' => 0.040, 'output' => 1.80],

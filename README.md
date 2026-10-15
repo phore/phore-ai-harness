@@ -320,8 +320,9 @@ Reading stats returns a detached snapshot and never clears the counters.
 State lasts for the PHP runtime (one request in typical PHP-FPM, whole execution
 in CLI/long-lived workers); separate processes are not combined.
 
-`Phore\AiHarness\Usage\CostEstimator` uses a price snapshot checked on 2026-09-11.
-Sources: [OpenAI pricing](https://developers.openai.com/api/docs/pricing),
+`Phore\AiHarness\Usage\CostEstimator` uses a price snapshot checked on 2026-10-15.
+Sources: [OpenAI pricing](https://developers.openai.com/api/docs/pricing)
+(including GPT-6.1 Sol, GPT-6 Luna and GPT-6 Astra),
 [GPT-5.5](https://developers.openai.com/api/docs/models/gpt-5.5),
 [GPT-5.5 Pro](https://developers.openai.com/api/docs/models/gpt-5.5-pro),
 [GPT-5.4](https://developers.openai.com/api/docs/models/gpt-5.4),
@@ -347,12 +348,14 @@ Sources: [OpenAI pricing](https://developers.openai.com/api/docs/pricing),
 | gpt-5.6-sol | 8 | 0.8 | 30 |
 | gpt-5.6-terra | 4 | 0.4 | 18 |
 | gpt-6-astra | 20 | 2 | 75 |
+| gpt-6.1-sol | 4 | 0.2 | 15 |
+| gpt-6-luna | 0.2 | 0.02 | 0.75 |
 | gpt-5 | 1.25 | 0.125 | 10 |
 | gpt-5-mini | 0.25 | 0.025 | 2 |
 | gpt-5-nano | 0.05 | 0.005 | 0.40 |
 
-GPT-6 Astra, GPT-5.6 Sol/Terra/Luna and GPT-5.5 deliberately use their higher
-long-context standard rates even for short requests. Other named entries use
+GPT-6 Astra, GPT-6.1 Sol, GPT-6 Luna, GPT-5.6 Sol/Terra/Luna and GPT-5.5
+deliberately use their higher long-context standard rates even for short requests. Other named entries use
 published standard rates. These are budgeting estimates, not exact billing.
 
 Resolution order: explicit model/override, dated snapshot, then case-insensitive
