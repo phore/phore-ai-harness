@@ -9,7 +9,7 @@ use InvalidArgumentException;
 /** Exact, byte-preserving replacements shared by text and file operations. */
 final class TextEditEngine
 {
-    public const INSTRUCTIONS = 'Use edits containing search and replacement. Each non-null search must be non-empty, exact and unique in the original target, and edits must not overlap. All searches refer to the same original text, not to earlier replacements. Keep search blocks small but unique. search=null means a complete rewrite and must be the only edit for that target. Never mix a rewrite with targeted edits. An empty edits list means no change. Do not invent or silently normalize whitespace.';
+    public const INSTRUCTIONS = 'Use edit for precise changes (search must match exactly). When changing multiple separate locations in one target, use one write_text call with multiple edits instead of multiple calls. Each non-null search is matched against the original target, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit. Keep search as small as possible while still being unique in the target. Do not pad with large unchanged regions. All bytes outside the explicitly replaced regions must remain exactly identical to the original target, byte for byte. Use search=null only for complete rewrites and as the sole edit. When rewriting existing text, preserve all content not intended to change, byte for byte. An empty edits list means no change.';
 
     /**
      * Apply pairs to one immutable input snapshot, returning the assembled text.
