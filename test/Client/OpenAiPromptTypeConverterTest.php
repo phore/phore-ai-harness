@@ -361,7 +361,7 @@ final class OpenAiPromptTypeConverterTest extends TestCase
         self::assertSame('gpt-5-mini', $array['model']);
         self::assertSame('Be short.', $array['instructions']);
         self::assertStringContainsString(self::UNTRUSTED, $array['input'][0]['content'][0]['text']);
-        self::assertStringEndsWith("\nHello", $array['input'][0]['content'][0]['text']);
+        self::assertSame('Hello', $array['input'][0]['content'][1]['text']);
     }
 
     public function testConvertsCallbackToolToOpenAiFunctionTool(): void
