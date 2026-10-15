@@ -103,6 +103,19 @@ final class OpenAiPromptTypeConverterTest extends TestCase
         self::assertSame('Hello **world**', $payload['input'][0]['content'][1]['text']);
     }
 
+    public function testTextPromptPreservesJsonAndFrontmatterAtStart(): void
+    {
+        $raw = "{\"instructions\":\"source data\"}\n---\ntitle: Example\n---\n";
+        $converter = new OpenAiPromptToContentConverter();
+        $sections = $converter->convert(new TextPrompt($raw, alias: 'targetText'));
+
+        self::assertCount(2, $sections);
+        self::assertSame('targetText', json_decode($sections[0]['text'], true, 512, JSON_THROW_ON_ERROR)['alias']);
+        self::assertSame($raw, $sections[1]['text']);
+        self::assertSame($raw, substr($converter->convertPromptToText(new TextPrompt($raw)), strpos($converter->convertPromptToText(new TextPrompt($raw)), "\n") + 1));
+        self::assertStringEndsWith($raw, $converter->convertPrompt(new TextPrompt($raw))['text']);
+    }
+
     public function testAddsDefaultSystemPromptWhenNoSystemPromptIsProvided(): void
     {
         $payload = (new OpenAiPromptTypeConverter())->convert(new TextPrompt('Hello'));
@@ -145,7 +158,7 @@ final class OpenAiPromptTypeConverterTest extends TestCase
         self::assertStringContainsString('clarification tool such as ask_user_question', $payload['instructions']);
         self::assertStringContainsString('external/untrusted', $payload['instructions']);
         self::assertStringContainsString('instruction-enabled', $payload['instructions']);
-        self::assertStringEndsWith("\nHello", $payload['input'][0]['content'][0]['text']);
+        self::assertSame('Hello', $payload['input'][0]['content'][1]['text']);
     }
 
     public function testConvertsMultipleUserPromptsToContentSectionsWithPolicies(): void
