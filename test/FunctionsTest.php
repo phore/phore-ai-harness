@@ -101,9 +101,9 @@ final class FunctionsTest extends TestCase
             self::assertStringContainsString('"search"', $parameters);
             self::assertStringContainsString('"replacement"', $parameters);
             self::assertSame('input_text', $request->input[0]['content'][2]['type'] ?? null);
-            self::assertStringContainsString('First original', $request->input[0]['content'][2]['text'] ?? '');
+            self::assertStringContainsString('First original', $request->input[0]['content'][3]['text'] ?? '');
             self::assertSame('input_text', $request->input[0]['content'][4]['type'] ?? null);
-            self::assertStringContainsString('Second original', $request->input[0]['content'][4]['text'] ?? '');
+            self::assertStringContainsString('Second original', $request->input[0]['content'][5]['text'] ?? '');
             self::assertStringNotContainsString('get_file_content', $request->instructions ?? '');
             self::assertStringContainsString('targetFileN aliases', $request->instructions ?? '');
         } finally {
@@ -130,7 +130,7 @@ final class FunctionsTest extends TestCase
             $request = get_last_ai_request();
             self::assertNotNull($request);
             self::assertSame('input_text', $request->input[0]['content'][2]['type'] ?? null);
-            self::assertSame('File: ' . basename($fileName) . "\n\n", $request->input[0]['content'][2]['text'] ?? null);
+            self::assertSame('File: ' . basename($fileName) . "\n\n", $request->input[0]['content'][3]['text'] ?? null);
             self::assertFileDoesNotExist($fileName);
         }
     }

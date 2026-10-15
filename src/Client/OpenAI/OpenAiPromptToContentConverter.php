@@ -51,6 +51,9 @@ final readonly class OpenAiPromptToContentConverter
     public function convertPrompt(PromptType $prompt): array
     {
         $this->validateRequiredAliases([$prompt]);
+        if ($prompt instanceof TextPrompt) {
+            return ['type' => 'input_text', 'text' => $this->convertTextPrompt($prompt)];
+        }
         return $this->convertPromptToSections($prompt)[0];
     }
 
@@ -63,10 +66,10 @@ final readonly class OpenAiPromptToContentConverter
         return match (true) {
             $prompt instanceof AiContent => $this->convert($prompt->toPromptType()),
             $prompt instanceof PromptFile => $this->convert($prompt->segments()),
-            $prompt instanceof TextPrompt => [[
-                'type' => 'input_text',
-                'text' => $this->convertTextPrompt($prompt),
-            ]],
+            $prompt instanceof TextPrompt => [
+                ['type' => 'input_text', 'text' => $this->convertTextPromptMetadata($prompt)],
+                ['type' => 'input_text', 'text' => $prompt->text],
+            ],
             $prompt instanceof SystemPrompt => [[
                 'type' => 'input_text',
                 'text' => $prompt->text,
@@ -170,25 +173,22 @@ final readonly class OpenAiPromptToContentConverter
 
     private function convertTextPrompt(TextPrompt $prompt): string
     {
-        $parts = [];
+        return $this->convertTextPromptMetadata($prompt, true) . "\n" . $prompt->text;
+    }
 
-        if ($prompt->alias !== null) {
-            $parts[] = "Reference alias: {$prompt->alias}\nOther prompts may refer to this text as `{$prompt->alias}`.";
-        }
-
-        if ($prompt->instructions !== null) {
-            $parts[] = "Text instructions:\n{$prompt->instructions}";
-        }
-
-        $parts[] = $this->sourcePolicy($prompt->allowInstructions);
-
-        $content = $prompt->type !== null
-            ? "```{$prompt->type}\n{$prompt->text}\n```"
-            : $prompt->text;
-
-        $parts[] = $content;
-
-        return implode("\n", $parts);
+    private function convertTextPromptMetadata(TextPrompt $prompt, bool $inline = false): string
+    {
+        return Toolkit::jsonEncode([
+            'type' => 'harness_text',
+            'alias' => $prompt->alias,
+            'instructions' => $prompt->instructions,
+            'contentFormat' => $prompt->type,
+            'allowInstructions' => $prompt->allowInstructions,
+            'sourcePolicy' => $this->sourcePolicy($prompt->allowInstructions),
+            'contentBoundary' => $inline
+                ? 'Raw source content begins immediately after the newline following this JSON metadata line; every subsequent character belongs to it.'
+                : 'Only the next input_text segment contains raw source content; every character belongs to it.',
+        ]);
     }
 
     /**
