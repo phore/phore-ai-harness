@@ -162,6 +162,31 @@ final readonly class ContentType
         return self::FILE_MIME_TYPES;
     }
 
+    /**
+     * Whether a FilePrompt MIME type is forwarded verbatim as input_text.
+     *
+     * Other supported file formats, such as PDF or DOCX, are uploaded as
+     * binary input_file objects and do not provide verbatim text segments.
+     *
+     * @param string $contentType Input-file MIME type.
+     * @return bool True only when every source byte remains visible as text.
+     * @see \Phore\AiHarness\Client\OpenAI\OpenAiPromptToContentConverter
+     *
+     * @example $preserved = ContentType::isVerbatimTextFile('text/plain');
+     */
+    public static function isVerbatimTextFile(string $contentType): bool
+    {
+        $contentType = strtolower($contentType);
+
+        return str_starts_with($contentType, 'text/')
+            || in_array($contentType, [
+                'application/json',
+                'application/typescript',
+                'application/xml',
+                'application/x-sh',
+            ], true);
+    }
+
     public function mimeType(): string
     {
         return $this->mimeType;

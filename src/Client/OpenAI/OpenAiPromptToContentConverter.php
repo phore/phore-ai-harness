@@ -116,7 +116,7 @@ final readonly class OpenAiPromptToContentConverter
         $sections = $this->segmentInstructions($prompt, 'file');
         $fileName = basename(str_replace('\\', '/', $prompt->fileName));
 
-        if ($this->isTextFileContentType($prompt->contentType)) {
+        if (ContentType::isVerbatimTextFile($prompt->contentType)) {
             $sections[] = [
                 'type' => 'input_text',
                 'text' => "File: {$fileName}\n\n{$prompt->content}",
@@ -130,17 +130,6 @@ final readonly class OpenAiPromptToContentConverter
             'file_data' => (new DataUrl($prompt->content, $prompt->contentType))->toString(),
         ];
         return $sections;
-    }
-
-    private function isTextFileContentType(string $contentType): bool
-    {
-        return str_starts_with(strtolower($contentType), 'text/')
-            || in_array(strtolower($contentType), [
-                'application/json',
-                'application/typescript',
-                'application/xml',
-                'application/x-sh',
-            ], true);
     }
 
     /**
