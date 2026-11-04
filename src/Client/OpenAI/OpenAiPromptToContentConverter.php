@@ -12,6 +12,7 @@ use Phore\AiHarness\Helper\DataUrl;
 use Phore\AiHarness\Helper\Toolkit;
 use Phore\AiHarness\PromptType\AudioPrompt;
 use Phore\AiHarness\PromptType\FilePrompt;
+use Phore\AiHarness\PromptType\PromptDirectory;
 use Phore\AiHarness\PromptType\PromptFile;
 use Phore\AiHarness\PromptType\ImagePrompt;
 use Phore\AiHarness\PromptType\PromptType;
@@ -65,7 +66,7 @@ final readonly class OpenAiPromptToContentConverter
     {
         return match (true) {
             $prompt instanceof AiContent => $this->convert($prompt->toPromptType()),
-            $prompt instanceof PromptFile => $this->convert($prompt->segments()),
+            $prompt instanceof PromptFile || $prompt instanceof PromptDirectory => $this->convert($prompt->segments()),
             $prompt instanceof TextPrompt => [
                 ['type' => 'input_text', 'text' => $this->convertTextPromptMetadata($prompt)],
                 ['type' => 'input_text', 'text' => $prompt->text],
@@ -147,7 +148,7 @@ final readonly class OpenAiPromptToContentConverter
      */
     public function convertPromptToText(PromptType $prompt): string
     {
-        if ($prompt instanceof PromptFile) {
+        if ($prompt instanceof PromptFile || $prompt instanceof PromptDirectory) {
             $this->validateRequiredAliases([$prompt]);
             $parts = [];
             foreach ($this->expandPrompts([$prompt]) as $segment) {
@@ -296,7 +297,7 @@ final readonly class OpenAiPromptToContentConverter
     private function expandPrompts(iterable $prompts): iterable
     {
         foreach ($prompts as $prompt) {
-            if ($prompt instanceof PromptFile) {
+            if ($prompt instanceof PromptFile || $prompt instanceof PromptDirectory) {
                 yield from $this->expandPrompts($prompt->segments());
                 continue;
             }

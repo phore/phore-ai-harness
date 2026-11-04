@@ -52,6 +52,30 @@ $summary = phore_ai_text([
 ]);
 ```
 
+### Mixed source directories
+
+Use `PromptDirectory` to attach all supported files in a folder, including
+PDFs, Office documents, images and audio. The optional description is
+trusted metadata about the collection; file contents are untrusted by default.
+Entries are sorted by relative path. Unknown binary assets contribute only
+their filename, while UTF-8 files retain their complete original content.
+
+```php
+use Phore\AiHarness\AiContext;
+use Phore\AiHarness\PromptType\PromptDirectory;
+
+$context = new AiContext(prompts: [
+    new PromptDirectory('/project/feedback', 'Customer attachments'),
+]);
+$summary = $context->text('Summarize the feedback and note the attached assets.');
+```
+
+For one file, `SourcePrompt::fromFile('/project/feedback.pdf')` selects the
+same source type. `SourcePrompt::fromRaw('feedback.pdf', $bytes)` works when
+the caller already has the bytes from its own filesystem abstraction.
+Set `recursive: false` to load only direct children; missing and unreadable
+directories or files raise an exception, and embedded instructions remain
+untrusted unless explicitly enabled.
 ## When several requests belong together
 
 The functional API can share a conversation by repeating exactly the same
