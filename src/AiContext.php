@@ -217,7 +217,7 @@ final class AiContext
     }
 
     /**
-     * Set a trusted provider response ID directly, or null to start a new root.
+     * Resume a conversation from a trusted provider response ID, or null for a new root.
      *
      * The caller must rebuild the matching prompt/tool configuration and verify
      * ownership of the ID. Unlike importState(), this does not verify a setup
@@ -229,11 +229,11 @@ final class AiContext
      * @return $this
      * @throws InvalidArgumentException For an empty response ID.
      * @throws LogicException While an operation is running.
-     * @example $context->setResponseId($trustedResponseId);
+     * @example $context->resumeFromResponseId($trustedResponseId);
      * @see getResponseId()
      * @see importState()
      */
-    public function setResponseId(?string $responseId): self
+    public function resumeFromResponseId(?string $responseId): self
     {
         $this->assertIdle();
         if ($responseId !== null && trim($responseId) === '') {

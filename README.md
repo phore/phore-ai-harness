@@ -202,14 +202,14 @@ $context = new AiContext(
     prompts: [new SystemPrompt('You assist a source code editor.')],
     options: ['model' => 'gpt-5-mini', 'timeout' => 30],
 );
-$context->setResponseId($baseId);
+$context->resumeFromResponseId($baseId);
 $suggestion = $context->text('Complete this expression: const value =');
 $latestId = $context->getResponseId();
 $usage = get_last_ai_response()?->getUsage()->toArray();
 ```
 
 Keep `$baseId` to fork independent suggestions; save `$latestId` to continue
-the conversation. Passing null starts a fresh root. Directly setting the ID
+the conversation. Passing null starts a fresh root. Resuming from the ID
 clears checkpoints and queued source prompts, and does not validate the
 setup hash. Use export/import for checkpoint persistence and setup validation.
 Only use IDs authorized by your application for the current user/scope.
@@ -217,6 +217,24 @@ Provider retention and context limits still apply; reusing an ID does not
 guarantee cached input. The usage export includes `cachedInputTokens` for the
 last provider response only, not all tool rounds. `get_ai_usage_stats()`
 reports process-wide totals.
+
+For a normal chatbot, return the latest response ID with each answer and send
+it back alongside the next user message. No conversation transcript needs to
+be stored or resent by the application. The provider retains the conversation
+within its retention and context limits. The ID is not an authorization token.
+
+See [example 16: HTTP chatbot](examples/16-chatbot.php) for a runnable PHP
+endpoint and browser frontend. It uses a session only to authorize the last
+issued response ID, never to store the message history. Run locally with
+configured credentials:
+
+```bash
+php -S 127.0.0.1:8080 -t examples
+```
+
+Open `http://127.0.0.1:8080/16-chatbot.php`. Each new turn replaces the
+previous ID with the latest one. Use only as a local example; a deployed
+application also needs its own authentication, authorization and rate limits.
 
 ### Callbacks and `do()`
 

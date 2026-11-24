@@ -395,6 +395,29 @@ Ein bereits gehaltenes Objekt bleibt nach `forget()` gültig. Ein einzelner
 Kontext darf nicht gleichzeitig oder reentrant verwendet werden. Für
 unabhängige Ausführungspfade wird er vorher geklont.
 
+## Chatbot über HTTP mit einer Response-ID
+
+`resumeFromResponseId()` setzt eine bereits konfigurierte Conversation
+ab einer vertrauenswürdigen Provider-Response fort. Bei jedem HTTP-Request
+wird der gleiche Context mit seinen Prompts, Optionen und Tools aufgebaut.
+Das Frontend übermittelt nur die neue Nachricht und die letzte Response-ID.
+Nach `text()` liefert `getResponseId()` die nächste ID.
+
+```php
+$context->resumeFromResponseId($authorizedResponseId);
+$answer = $context->text($message);
+$responseId = $context->getResponseId();
+```
+
+Null startet einen neuen Root. Die Methode übernimmt keine Checkpoints,
+löscht ausstehende Source-Prompts und prüft keinen Setup-Hash.
+Der Aufrufer muss die ID dem Benutzer oder Scope zuordnen. Für vollständigen
+State mit Checkpoints und Setup-Prüfung bleibt Export/Import vorgesehen.
+Die Provider-Aufbewahrung und das Context Window begrenzen die Fortsetzung.
+
+Das ausführbare [Chatbot-Beispiel](../examples/16-chatbot.php) zeigt die
+HTTP-Schnittstelle und den Browser ohne eigene Nachrichtenhistorie im Backend.
+
 ## Vorbereitete Prompts und Tools
 
 Der Constructor nimmt unter `prompts` dieselben Strings, `PromptType`- und
