@@ -318,6 +318,42 @@ for two independent contexts connected by a simulated JSON roundtrip.
 Run `php examples/16-chat-resume-conversation.php` with configured credentials.
 An actual HTTP endpoint must authorize incoming IDs before resuming them.
 
+### System prompts on follow-up requests
+
+`AiContext` automatically includes prepared `SystemPrompt` instructions again
+on subsequent requests, including requests that continue via
+`previous_response_id`. The OpenAI Responses API does **not** automatically
+carry top-level `instructions` forward when a previous response ID is used.
+The harness therefore supplies the currently prepared system instructions
+again; callers do not need to repeat them manually. This also applies to the
+current skill catalog, which is added as a system prompt for each request.
+
+Keep system prompts **as short as possible and as detailed as necessary**:
+include only essential behavioral rules and output requirements. Put extensive
+reference material, project data and the current task into the appropriate
+regular context/input instead. System instructions sent on every request count
+toward input usage; prompt-cache hits can lower cost but are not guaranteed.
+`previous_response_id` is conversation continuation, **not** a cache key and
+does not make input tokens free.
+
+For example, the same prepared instructions apply to both calls:
+
+```php
+use Phore\AiHarness\AiContext;
+use Phore\AiHarness\PromptType\SystemPrompt;
+
+$context = new AiContext(prompts: [
+    new SystemPrompt('Answer concisely. Use plain text.'),
+]);
+$first = $context->text('Explain HTTP caching.');
+$second = $context->text('Summarize that in one sentence.');
+// The harness sends the prepared SystemPrompt again for this follow-up.
+```
+
+When restoring a context using `importState()`, rebuild the same prepared
+prompts and tools first: exported state contains the response cursor, **not**
+the system prompt or other prepared instructions.
+
 ### Callbacks and `do()`
 
 `CallbackTool` is just another prepared tool on the context:
