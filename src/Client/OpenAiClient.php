@@ -14,7 +14,7 @@ use RuntimeException;
 use Phore\AiHarness\Usage\GlobalUsage;
 
 /**
- * CURL based client for the OpenAI Responses API.
+ * CURL based client for the OpenAI Responses and Audio Transcriptions APIs.
  */
 final class OpenAiClient
 {
@@ -74,6 +74,99 @@ final class OpenAiClient
 
             $failed = false;
             return $response;
+        } finally {
+            $usage->finish($call, $response?->body, $failed);
+            unset($curl);
+        }
+    }
+
+    /**
+     * Transcribes a completed audio recording in its original language.
+     *
+     * The audio is sent directly to the transcription endpoint, not to a
+     * Responses API conversation. No prompt type or conversation ID is needed.
+     *
+     * @param string $audio Raw binary audio data (not base64).
+     * @param string $format File extension, e.g. webm, m4a, wav or mp3.
+     * @param string $model Transcription model ID.
+     * @param string|null $prompt Optional transcription vocabulary/context.
+     * @return string The provider's transcript.
+     * @throws InvalidArgumentException For empty, oversized or unsupported audio.
+     * @throws AiRequestException On transport or provider failure.
+     * @throws RuntimeException If the provider does not return text.
+     * @see https://developers.openai.com/api/docs/guides/speech-to-text
+     * @example $text = $client->speechToText($audioBytes, 'webm');
+     */
+    public function speechToText(
+        string $audio,
+        string $format,
+        string $model = 'gpt-transcribe',
+        ?string $prompt = null,
+    ): string {
+        if ($audio === '' || strlen($audio) > 25_000_000) {
+            throw new InvalidArgumentException('Audio must contain between 1 and 25000000 bytes.');
+        }
+
+        $format = strtolower($format);
+        $mime = match ($format) {
+            'flac' => 'audio/flac',
+            'mp3', 'mpeg', 'mpga' => 'audio/mpeg',
+            'mp4', 'm4a' => 'audio/mp4',
+            'ogg' => 'audio/ogg',
+            'wav' => 'audio/wav',
+            'webm' => 'audio/webm',
+            default => throw new InvalidArgumentException('Unsupported transcription format: ' . $format),
+        };
+
+        // Die Aufnahme wird direkt als Multipart-Datei übertragen.
+        $fields = [
+            'file' => new \CURLStringFile($audio, 'recording.' . $format, $mime),
+            'model' => $model,
+            'response_format' => 'json',
+        ];
+        if ($prompt !== null) {
+            $fields['prompt'] = $prompt;
+        }
+
+        $usage = GlobalUsage::instance();
+        $call = $usage->begin($model);
+        $response = null;
+        $failed = true;
+        $headers = [];
+        try {
+            $curl = curl_init($this->baseUrl . '/audio/transcriptions');
+            if ($curl === false) {
+                throw new RuntimeException('Could not initialize curl.');
+            }
+
+            curl_setopt_array($curl, [
+                CURLOPT_POST => true,
+                CURLOPT_HTTPHEADER => $this->buildRequestHeaders(false, true),
+                CURLOPT_POSTFIELDS => $fields,
+                CURLOPT_TIMEOUT => $this->timeout,
+                CURLOPT_CONNECTTIMEOUT => $this->connectTimeout,
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_HEADERFUNCTION => function (CurlHandle $curl, string $line) use (&$headers): int {
+                    $this->parseHeaderLine($headers, $line);
+                    return strlen($line);
+                },
+            ]);
+
+            // Fehler und Usage werden wie bei den übrigen API-Aufrufen erfasst.
+            $rawBody = curl_exec($curl);
+            if ($rawBody === false) {
+                throw AiRequestException::fromCurlError('OpenAI transcription failed', curl_error($curl));
+            }
+
+            $response = $this->buildJsonResponse($curl, $headers, $rawBody);
+            $this->assertSuccessfulResponse($response);
+            $text = $response->body['text'] ?? null;
+            if (!is_string($text)) {
+                throw new RuntimeException('OpenAI transcription response does not contain text.');
+            }
+
+            $failed = false;
+            return $text;
         } finally {
             $usage->finish($call, $response?->body, $failed);
             unset($curl);
@@ -245,13 +338,16 @@ final class OpenAiClient
     /**
      * @return list<string>
      */
-    private function buildRequestHeaders(bool $stream): array
+    private function buildRequestHeaders(bool $stream, bool $multipart = false): array
     {
         $headers = [
             'Authorization: Bearer ' . $this->apiKey,
-            'Content-Type: application/json',
             'Accept: ' . ($stream ? 'text/event-stream' : 'application/json'),
         ];
+
+        if (!$multipart) {
+            $headers[] = 'Content-Type: application/json';
+        }
 
         if ($this->organization !== null) {
             $headers[] = 'OpenAI-Organization: ' . $this->organization;
@@ -261,6 +357,9 @@ final class OpenAiClient
         }
 
         foreach ($this->defaultHeaders as $name => $value) {
+            if ($multipart && strcasecmp($name, 'Content-Type') === 0) {
+                continue; // cURL sets the multipart boundary.
+            }
             $headers[] = $name . ': ' . $value;
         }
 
