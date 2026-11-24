@@ -217,6 +217,37 @@ final class AiContext
     }
 
     /**
+     * Set a trusted provider response ID directly, or null to start a new root.
+     *
+     * The caller must rebuild the matching prompt/tool configuration and verify
+     * ownership of the ID. Unlike importState(), this does not verify a setup
+     * hash or restore checkpoints. Existing checkpoints and queued source
+     * prompts are cleared. No provider call is made and a cache hit is not
+     * guaranteed.
+     *
+     * @param string|null $responseId Provider response cursor, not a registry ID.
+     * @return $this
+     * @throws InvalidArgumentException For an empty response ID.
+     * @throws LogicException While an operation is running.
+     * @example $context->setResponseId($trustedResponseId);
+     * @see getResponseId()
+     * @see importState()
+     */
+    public function setResponseId(?string $responseId): self
+    {
+        $this->assertIdle();
+        if ($responseId !== null && trim($responseId) === '') {
+            throw new InvalidArgumentException('AI context response ID must not be empty.');
+        }
+
+        $this->responseId = $responseId;
+        $this->checkpoints = [];
+        $this->pendingPrompts = [];
+
+        return $this;
+    }
+
+    /**
      * Return the sole mutable SkillCollection, creating it on first access.
      * It can be extended after a conversation has started; updates are visible
      * to the agent on the next request without resetting the provider cursor.

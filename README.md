@@ -23,6 +23,22 @@ echo phore_ai_text('Write a four-line poem about a rainy autumn morning.', [
 Normally omit options you do not need. `client => null` resolves the configured
 default client/credentials; the default reasoning setting is low effort.
 
+### API credentials
+
+The default Keystore discovers OpenAI credentials from the environment or
+`/var/run/secrets/open_ai` (usually also accessible as `/run/secrets/open_ai`).
+To use an application-configured secret file instead, configure the Keystore
+before the first AI call:
+
+```php
+use Phore\AiHarness\Keystore\Keystore;
+
+Keystore::instance()->addKeyFromFile('/run/secrets/open_ai');
+```
+
+No OpenAiClient construction is needed. Existing clients keep their original
+credentials; configure the key before creating or using a context.
+
 ### Convenience functions
 
 Use the helpers for isolated one- or two-shot work:
@@ -158,6 +174,43 @@ $_SESSION['ai_state'] = $context->exportState();
 The export contains provider/cursor metadata and checkpoints, not prompts,
 tools, client or model. Provider/setup mismatches fail by default; provider-side
 response retention still limits how long a cursor can be resumed.
+
+### Resume a single response ID
+
+If the application stores only a trusted provider response ID, rebuild the
+same context configuration and set the cursor directly:
+
+```php
+use Phore\AiHarness\AiContext;
+use Phore\AiHarness\PromptType\SystemPrompt;
+
+$context = new AiContext(
+    prompts: [new SystemPrompt('You assist a source code editor.')],
+    options: ['model' => 'gpt-5-mini', 'timeout' => 30],
+);
+$context->text('Initialize the editor context.');
+$baseId = $context->getResponseId();
+
+// In another HTTP request, rebuild the same configuration first.
+$context = new AiContext(
+    prompts: [new SystemPrompt('You assist a source code editor.')],
+    options: ['model' => 'gpt-5-mini', 'timeout' => 30],
+);
+$context->setResponseId($baseId);
+$suggestion = $context->text('Complete this expression: const value =');
+$latestId = $context->getResponseId();
+$usage = get_last_ai_response()?->getUsage()->toArray();
+```
+
+Keep `$baseId` to fork independent suggestions; save `$latestId` to continue
+the conversation. Passing null starts a fresh root. Directly setting the ID
+clears checkpoints and queued source prompts, and does not validate the
+setup hash. Use export/import for checkpoint persistence and setup validation.
+Only use IDs authorized by your application for the current user/scope.
+Provider retention and context limits still apply; reusing an ID does not
+guarantee cached input. The usage export includes `cachedInputTokens` for the
+last provider response only, not all tool rounds. `get_ai_usage_stats()`
+reports process-wide totals.
 
 ### Callbacks and `do()`
 
