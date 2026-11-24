@@ -23,6 +23,12 @@ echo phore_ai_text('Write a four-line poem about a rainy autumn morning.', [
 Normally omit options you do not need. `client => null` resolves the configured
 default client/credentials; the default reasoning setting is low effort.
 
+Optional context or per-call options are `max_output_tokens` (positive
+integer), `store` (boolean) and `prompt_cache_key` (non-empty string). Null
+or omitted values leave provider defaults. Keep storage enabled when a
+response must be reused as a conversation parent, including tool-call
+continuations. A cache key assists routing but does not guarantee a hit.
+
 ### API credentials
 
 The default Keystore discovers OpenAI credentials from the environment or

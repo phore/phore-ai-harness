@@ -47,6 +47,7 @@ final class PhoreAi
 
     /** @var array<string, mixed>|null */
     private ?array $reasoning = ['effort' => 'low'];
+    private array $responseOptions = [];
 
     public function __construct(OpenAiClient|string|null $client = null, private string $model = 'gpt-5-mini', private ?LoggerInterface $logger = null)
     {
@@ -93,6 +94,35 @@ final class PhoreAi
     public function withReasoning(?array $reasoning): self
     {
         return clone($this, ['reasoning' => $reasoning]);
+    }
+
+    /**
+     * Configure optional provider output limits, response storage and cache routing.
+     *
+     * Null values retain provider defaults. Storage must remain enabled for
+     * responses that will be used as parents, including callback continuations.
+     *
+     * @throws InvalidArgumentException For invalid token limits or empty cache keys.
+     * @example $ai = $ai->withResponseOptions(maxOutputTokens: 256, store: false);
+     * @see AiOptions
+     */
+    public function withResponseOptions(
+        ?int $maxOutputTokens = null,
+        ?bool $store = null,
+        ?string $promptCacheKey = null,
+    ): self {
+        if ($maxOutputTokens !== null && $maxOutputTokens <= 0) {
+            throw new InvalidArgumentException('max_output_tokens must be a positive integer.');
+        }
+        if ($promptCacheKey !== null && trim($promptCacheKey) === '') {
+            throw new InvalidArgumentException('prompt_cache_key must not be empty.');
+        }
+
+        return clone($this, ['responseOptions' => array_filter([
+            'max_output_tokens' => $maxOutputTokens,
+            'store' => $store,
+            'prompt_cache_key' => $promptCacheKey,
+        ], static fn (mixed $value): bool => $value !== null)]);
     }
 
     public function withModel(string $model): self
@@ -542,6 +572,10 @@ final class PhoreAi
     {
         if ($this->reasoning !== null) {
             $request = $request->withExtraBody(['reasoning' => $this->reasoning]);
+        }
+
+        if ($this->responseOptions !== []) {
+            $request = $request->withExtraBody($this->responseOptions);
         }
 
         if ($context === null) {
