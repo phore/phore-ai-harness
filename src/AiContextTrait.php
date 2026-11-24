@@ -384,6 +384,25 @@ trait AiContextTrait
     }
 
     /**
+     * Resume the bound context from an application-authorized response ID.
+     *
+     * The matching prompt/tool setup must already be prepared. Null starts a
+     * new root; checkpoints and queued source prompts are discarded.
+     * @param string|null $responseId Trusted provider response cursor.
+     * @return $this
+     * @throws \InvalidArgumentException For an empty response ID.
+     * @throws LogicException During an active AI operation.
+     * @example $chat->ai_resume_from_response_id($responseId);
+     * @see AiContext::resumeFromResponseId()
+     */
+    public function ai_resume_from_response_id(?string $responseId): static
+    {
+        $this->ai_context()->resumeFromResponseId($responseId);
+
+        return $this;
+    }
+
+    /**
      * Return the current provider response cursor.
      *
      * @example $responseId = $mail->ai_get_response_id();

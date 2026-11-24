@@ -209,6 +209,143 @@ Funktion setzt den vollständigen Ergebnistext lokal zusammen und gibt ihn als
 String zurück. Sie gibt nicht die abschließende Bestätigung des Modells zurück.
 Es gibt keine zusätzliche `editText()`-Methode.
 
+
+### Text bearbeiten und gleichzeitig eine Antwort erhalten
+
+Wenn neben dem bearbeiteten Text eine normale AI-Antwort benötigt wird,
+übergib ein `EditableTextPrompt` direkt im Prompt-Array statt über
+`options['input']`:
+
+```php
+use Phore\AiHarness\PromptType\EditableTextPrompt;
+
+$draft = new EditableTextPrompt('Herzlich wilkommen.', alias: 'draft');
+$message = phore_ai_text([
+    'Korrigiere draft und erkläre die Änderung.',
+    $draft,
+]);
+echo $message;
+echo $draft->getContent(); // Erwartet: Herzlich willkommen.
+echo $draft->getOriginalContent(); // Herzlich wilkommen.
+```
+
+Falls keine Textantwort benötigt wird, kann derselbe Input mit
+`phore_ai_do()` bearbeitet werden. Der Rückgabewert ist ein Erfolgsstatus:
+
+```php
+$ok = phore_ai_do(['Formuliere draft freundlicher.', $draft]);
+echo $draft->getContent();
+```
+
+Ein expliziter Context ist nicht erforderlich. Bei weiteren Aufrufen
+dasselbe Input-Objekt erneut übergeben; für einen fortlaufenden Chat kann
+zusätzlich derselbe `ai_context` gewählt werden.
+
+### Mehrere Texte bearbeiten und einen strukturierten Bericht erhalten
+
+`EditableTextPrompt` ist besonders nützlich, wenn mehrere Texte innerhalb
+einer AI-Aufgabe geändert werden sollen und die Anwendung zusätzlich eine
+auswertbare Rückmeldung benötigt. Jeder Text bleibt in seinem eigenen
+Input-Objekt; die Rückgabe von `phore_ai_struct()` kann unabhängig davon einen
+Status, die Zahl erfolgreich bearbeiteter Texte und offene Aufgaben enthalten.
+
+Das vollständige [Example 17](../examples/17-text-edit-tool.php) definiert dazu
+einen `TextEditReport` mit `completedCount`, `message` und `pending`
+(eine Liste aus Alias und Grund). Es übergibt drei bearbeitbare Texte in einem
+Aufruf: Einleitung, Footer und Kontaktdaten. Zwei Texte lassen sich korrigieren,
+die fehlende verifizierte Telefonnummer bleibt als offene Aufgabe erhalten.
+
+Die Anwendung liest die aktuellen Inhalte mit `getContent()` aus und kann
+offene Aufgaben separat anzeigen, manuell bearbeiten oder an einen weiteren
+Prozess übergeben. Die AI berichtet den fachlichen Erfolg; `hasChanges()`
+prüft unabhängig davon die tatsächliche Änderung eines Textes. Technische
+Fehler können Exceptions auslösen und bereits ausgeführte Edits bleiben
+wirksam. Eine gemeinsame Anfrage ist keine Transaktion über alle Texte.
+
+## Bearbeitbare Text-Inputs im Chat
+
+`EditableTextPrompt` trennt den bearbeiteten Text von der normalen
+AI-Antwort. Jeder Input besitzt einen eindeutigen Alias, optionale
+`instructions` und `type` sowie `allowInstructions` (standardmäßig
+`false`, wie bei `TextPrompt`).
+
+```php
+use Phore\AiHarness\AiContext;
+use Phore\AiHarness\PromptType\EditableTextPrompt;
+
+$intro = new EditableTextPrompt(
+    'Willkommen in unserer Praxix.',
+    alias: 'intro',
+    instructions: 'Einleitung der Startseite.',
+    type: 'markdown',
+);
+$footer = new EditableTextPrompt('Kontaktieren Sie uns.', alias: 'footer');
+$context = new AiContext(prompts: [$intro, $footer]);
+
+$message = $context->text('Korrigiere intro und erkläre die Änderung.');
+echo $message;
+echo $intro->getContent(); // Erwartet: Willkommen in unserer Praxis.
+echo $intro->getOriginalContent(); // Willkommen in unserer Praxix.
+
+$message = $context->text('Formuliere intro und footer freundlicher.');
+echo $intro->getContent();
+echo $footer->getContent();
+```
+
+Im Constructor vorbereitete Inputs bleiben für alle Folgeaufrufe verfügbar. In einem bereits laufenden Context können neue Inputs
+auch direkt für einen einzelnen Aufruf übergeben werden:
+
+```php
+$headline = new EditableTextPrompt('Unsere Praxis', alias: 'headline');
+$message = $context->text(['Formuliere headline einladender.', $headline]);
+echo $headline->getContent();
+```
+
+Für eine weitere Bearbeitung eines solchen Inputs muss dasselbe Objekt erneut
+übergeben werden.
+
+Pro Anfrage werden automatisch gemeinsame Tools zum Lesen und Bearbeiten
+registriert, unabhängig von der Anzahl der Inputs. Der aktuelle Text wird
+bei Folgeaufrufen erneut als Quelle eingebunden. Die AI adressiert das Ziel
+per Alias; ein einzelner Edit mit `search: null` schreibt den ganzen String
+neu. Fehlerhafte Batches lassen das betroffene Ziel unverändert und sind
+korrigierbar. Erfolgreiche Batches werden sofort wirksam, auch wenn die
+Anfrage später abbricht. Fragen müssen keine Änderung auslösen.
+
+`getContent()` liefert den aktuellen Inhalt, `getOriginalContent()` den
+unveränderten Ausgangstext. `hasChanges()` vergleicht beide exakt.
+Mit `setContent($text)` kann die Anwendung den aktuellen Stand ersetzen,
+mit `reset()` den Originaltext wiederherstellen. Keine Dateizugriffe.
+
+Für einen neuen PHP-Request müssen Originaltext, aktueller Text und
+Conversation-ID bzw. der exportierte Context-State getrennt gespeichert
+werden. Beim Wiederaufbau die gleichen Metadaten verwenden:
+
+```php
+$responseId = $context->getResponseId();
+$original = $intro->getOriginalContent();
+$current = $intro->getContent();
+
+// In einem neuen Request, hier für eine Conversation mit nur einem Ziel:
+$intro = new EditableTextPrompt(
+    $original,
+    alias: 'intro',
+    instructions: 'Einleitung der Startseite.',
+    type: 'markdown',
+);
+$intro->setContent($current);
+$context = new AiContext(prompts: [$intro]);
+$context->resumeFromResponseId($responseId);
+$message = $context->text('Kürze intro.');
+$current = $intro->getContent();
+```
+
+Bei mehreren Zielen sind alle weiterhin benötigten Inputs wieder anzulegen.
+Context-Checkpoints und Klonen setzen den Text nicht zurück; geklonte
+Contexts teilen dieselben Input-Objekte. Der exportierte Context-State
+enthält keine Textinhalte; der Setup-Hash berücksichtigt die Metadaten,
+nicht den veränderlichen Text. Siehe [Example 17](../examples/17-text-edit-tool.php).
+
 ## Eine oder mehrere Dateien bearbeiten
 
 Die globale Funktion behält ihre bisherigen Argumente einschließlich der
@@ -394,6 +531,34 @@ AiContextRegistry::clear(); // beispielsweise an einer Job-Grenze
 Ein bereits gehaltenes Objekt bleibt nach `forget()` gültig. Ein einzelner
 Kontext darf nicht gleichzeitig oder reentrant verwendet werden. Für
 unabhängige Ausführungspfade wird er vorher geklont.
+
+## Chatbot über HTTP mit einer Response-ID
+
+`resumeFromResponseId()` setzt eine bereits konfigurierte Conversation
+ab einer vertrauenswürdigen Provider-Response fort. Bei jedem HTTP-Request
+wird der gleiche Context mit seinen Prompts, Optionen und Tools aufgebaut.
+Das Frontend übermittelt nur die neue Nachricht und die letzte Response-ID.
+Nach `text()` liefert `getResponseId()` die nächste ID.
+
+```php
+$context->resumeFromResponseId($authorizedResponseId);
+$answer = $context->text($message);
+$responseId = $context->getResponseId();
+```
+
+Null startet einen neuen Root. Die Methode übernimmt keine Checkpoints,
+löscht ausstehende Source-Prompts und prüft keinen Setup-Hash.
+Der Aufrufer muss die ID dem Benutzer oder Scope zuordnen. Für vollständigen
+State mit Checkpoints und Setup-Prüfung bleibt Export/Import vorgesehen.
+Die Provider-Aufbewahrung und das Context Window begrenzen die Fortsetzung.
+
+Der Harness verwendet die standardmäßige Speicherung der Responses bei
+OpenAI (`store: true`, normalerweise 30 Tage, abhängig von der
+Datenrichtlinie). Sie ermöglicht spätere Fortsetzungen per Response-ID
+und ist unabhängig vom Prompt Caching.
+
+[Chat and Resume Conversation](../examples/16-chat-resume-conversation.php)
+zeigt einen simulierten JSON-Roundtrip ohne HTTP- oder UI-Boilerplate.
 
 ## Vorbereitete Prompts und Tools
 

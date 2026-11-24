@@ -19,11 +19,13 @@ use Phore\AiHarness\Context\Traits\StructTrait;
 use Phore\AiHarness\Context\Traits\TextTrait;
 use Phore\AiHarness\Helper\Toolkit;
 use Phore\AiHarness\OutputFormat\OutputFormat;
+use Phore\AiHarness\PromptType\EditableTextPrompt;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\PromptType\SystemPrompt;
 use Phore\AiHarness\Skill\SkillCollection;
 use Phore\AiHarness\ToolType\AiToolSet;
 use Phore\AiHarness\ToolType\CallbackTool;
+use Phore\AiHarness\ToolType\TextEditToolSet;
 use Phore\AiHarness\ToolType\ToolType;
 
 /**
@@ -214,6 +216,37 @@ final class AiContext
     public function getResponseId(): ?string
     {
         return $this->responseId;
+    }
+
+    /**
+     * Resume a conversation from a trusted provider response ID, or null for a new root.
+     *
+     * The caller must rebuild the matching prompt/tool configuration and verify
+     * ownership of the ID. Unlike importState(), this does not verify a setup
+     * hash or restore checkpoints. Existing checkpoints and queued source
+     * prompts are cleared. No provider call is made and a cache hit is not
+     * guaranteed.
+     *
+     * @param string|null $responseId Provider response cursor, not a registry ID.
+     * @return $this
+     * @throws InvalidArgumentException For an empty response ID.
+     * @throws LogicException While an operation is running.
+     * @example $context->resumeFromResponseId($trustedResponseId);
+     * @see getResponseId()
+     * @see importState()
+     */
+    public function resumeFromResponseId(?string $responseId): self
+    {
+        $this->assertIdle();
+        if ($responseId !== null && trim($responseId) === '') {
+            throw new InvalidArgumentException('AI context response ID must not be empty.');
+        }
+
+        $this->responseId = $responseId;
+        $this->checkpoints = [];
+        $this->pendingPrompts = [];
+
+        return $this;
     }
 
     /**
@@ -604,7 +637,8 @@ final class AiContext
             ? $this->prompts
             : array_values(array_filter(
                 $this->prompts,
-                static fn (PromptType|ToolType $item): bool => $item instanceof ToolType || $item instanceof SystemPrompt,
+                static fn (PromptType|ToolType $item): bool => $item instanceof ToolType || $item instanceof SystemPrompt
+                    || $item instanceof EditableTextPrompt,
             ));
 
         // AiToolSet verwaltet die stabilen CallbackTools. Nur der Skill-Katalog
@@ -614,9 +648,31 @@ final class AiContext
             $contextItems[] = $skillSet->prompt();
         }
 
+        // Pro Anfrage alle aktiven Editierziele sammeln und genau einen Satz
+        // gemeinsamer Tools registrieren. Vorbereitete Texte bleiben aktuell,
+        // auch wenn der Provider bereits eine ältere Version im Verlauf kennt.
+        $activeItems = [...$contextItems, ...$this->pendingPrompts, ...$items];
+        $editableTexts = [];
+        foreach ($activeItems as $item) {
+            if ($item instanceof EditableTextPrompt) {
+                $editableTexts[] = $item;
+            }
+        }
+        if ($editableTexts !== []) {
+            $activeItems = [...$activeItems, ...(new TextEditToolSet($editableTexts))->getTools()];
+        }
+
         $callbacks = [];
         $merged = [];
-        foreach ([...$contextItems, ...$this->pendingPrompts, ...$items] as $item) {
+        $seenEditableTexts = [];
+        foreach ($activeItems as $item) {
+            if ($item instanceof EditableTextPrompt) {
+                if (isset($seenEditableTexts[$item->alias])) {
+                    continue;
+                }
+                $seenEditableTexts[$item->alias] = true;
+                $item = $item->toTextPrompt();
+            }
             if ($item instanceof CallbackTool) {
                 $name = $item->name();
                 if (isset($callbacks[$name])) {
@@ -730,12 +786,14 @@ final class AiContext
     {
         $items = [];
         foreach ($this->prompts as $item) {
-            $items[] = [
-                'class' => $item::class,
-                'config' => $item instanceof ToolType
-                    ? $item->toArray(self::STATE_PROVIDER)
-                    : $item->toArray(),
-            ];
+            $config = $item instanceof ToolType
+                ? $item->toArray(self::STATE_PROVIDER)
+                : $item->toArray();
+            if ($item instanceof EditableTextPrompt) {
+                // Mutable text is application state, not prepared setup.
+                unset($config['text']);
+            }
+            $items[] = ['class' => $item::class, 'config' => $config];
         }
 
         $skillSet = $this->getToolSet(SkillCollection::class);

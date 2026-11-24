@@ -58,6 +58,35 @@ final class Keystore
         return $this;
     }
 
+    /**
+     * Load an API key from an explicitly configured secret file.
+     *
+     * Overrides automatic environment/default-file discovery for the provider.
+     * The file must contain only the key; surrounding whitespace is removed.
+     * The key is never included in an exception message.
+     *
+     * @param string $fileName Trusted application-configured secret file path.
+     * @param string $provider Provider name, default open_ai.
+     * @return $this
+     * @throws RuntimeException If the file cannot be read or is empty.
+     * @throws InvalidArgumentException If the provider name is invalid.
+     * @example Keystore::instance()->addKeyFromFile('/run/secrets/open_ai');
+     * @see addKey()
+     */
+    public function addKeyFromFile(string $fileName, string $provider = 'open_ai'): self
+    {
+        $provider = $this->normalizeProvider($provider);
+        $key = @file_get_contents($fileName);
+        if ($key === false || trim($key) === '') {
+            throw new RuntimeException('Could not read a non-empty API key from secret file: ' . $fileName);
+        }
+
+        $this->addKey($key, $provider);
+        $this->loadedProviders[$provider] = true;
+
+        return $this;
+    }
+
     public function hasKey(string $provider = 'open_ai'): bool
     {
         $provider = $this->normalizeProvider($provider);

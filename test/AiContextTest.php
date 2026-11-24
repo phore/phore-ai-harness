@@ -15,6 +15,7 @@ use Phore\AiHarness\Logging\ConsoleLogger;
 use Phore\AiHarness\Logging\LogEvent;
 use Phore\AiHarness\Logging\LoggerInterface;
 use Phore\AiHarness\PhoreAi;
+use Phore\AiHarness\PromptType\EditableTextPrompt;
 use Phore\AiHarness\PromptType\TextPrompt;
 use Phore\AiHarness\ResumeOptions;
 use Phore\AiHarness\ResumeStateException;
@@ -118,6 +119,31 @@ final class AiContextTest extends TestCase
     private function lastRequest(): array
     {
         return get_last_ai_response()->body['fixture_request'];
+    }
+
+    public function testEditableTextPromptsShareToolsAndRefreshOnFollowUp(): void
+    {
+        $intro = new EditableTextPrompt('Original introduction', alias: 'intro');
+        $footer = new EditableTextPrompt('Original footer', alias: 'footer');
+        $context = $this->context(prompts: [$intro, $footer]);
+
+        self::assertSame('ready', $context->text('Read the current drafts.'));
+        $request = $this->lastRequest();
+        $names = array_column($request['tools'], 'name');
+        self::assertSame(1, count(array_keys($names, 'text_edit_read', true)));
+        self::assertSame(1, count(array_keys($names, 'text_edit_apply', true)));
+        self::assertStringContainsString('Original introduction', json_encode($request['input']));
+        self::assertStringContainsString('Original footer', json_encode($request['input']));
+        $responseId = $context->getResponseId();
+
+        $intro->setContent('Updated introduction');
+        self::assertSame('ready', $context->text('Read the updated drafts.'));
+        $request = $this->lastRequest();
+        self::assertSame($responseId, $request['previous_response_id']);
+        self::assertStringContainsString('Updated introduction', json_encode($request['input']));
+        self::assertStringNotContainsString('Original introduction', json_encode($request['input']));
+        self::assertStringContainsString('Original footer', json_encode($request['input']));
+        self::assertSame(1, count(array_keys(array_column($request['tools'], 'name'), 'text_edit_apply', true)));
     }
 
     public function testRegistryResolvesNullNamesAndInstancesWithoutAProviderCall(): void
