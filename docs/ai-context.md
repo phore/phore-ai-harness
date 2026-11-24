@@ -415,8 +415,8 @@ Der Aufrufer muss die ID dem Benutzer oder Scope zuordnen. Für vollständigen
 State mit Checkpoints und Setup-Prüfung bleibt Export/Import vorgesehen.
 Die Provider-Aufbewahrung und das Context Window begrenzen die Fortsetzung.
 
-Das ausführbare [Chatbot-Beispiel](../examples/16-chatbot.php) zeigt die
-HTTP-Schnittstelle und den Browser ohne eigene Nachrichtenhistorie im Backend.
+[Chat and Resume Conversation](../examples/16-chat-resume-conversation.php)
+zeigt einen simulierten JSON-Roundtrip ohne HTTP- oder UI-Boilerplate.
 
 ## Vorbereitete Prompts und Tools
 
