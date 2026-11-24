@@ -24,10 +24,16 @@ Normally omit options you do not need. `client => null` resolves the configured
 default client/credentials; the default reasoning setting is low effort.
 
 Optional context or per-call options are `max_output_tokens` (positive
-integer), `store` (boolean) and `prompt_cache_key` (non-empty string). Null
-or omitted values leave provider defaults. Keep storage enabled when a
-response must be reused as a conversation parent, including tool-call
-continuations. A cache key assists routing but does not guarantee a hit.
+integer) and `store` (boolean). Null or omitted values use provider defaults.
+
+`store` controls whether OpenAI retains the response for later retrieval and
+continuation by response ID. The default is `true`, with a normal retention
+period of 30 days, subject to the provider's data retention settings.
+Use `store: false` only for terminal operations that do not need to resume
+from the resulting ID or perform callback continuations. A request may still
+use an already stored parent while disabling storage of its own result.
+This option is independent of prompt caching and does not disable all
+provider data retention. See [OpenAI conversation state](https://developers.openai.com/api/docs/guides/conversation-state).
 
 ### API credentials
 

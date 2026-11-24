@@ -415,6 +415,14 @@ Der Aufrufer muss die ID dem Benutzer oder Scope zuordnen. Für vollständigen
 State mit Checkpoints und Setup-Prüfung bleibt Export/Import vorgesehen.
 Die Provider-Aufbewahrung und das Context Window begrenzen die Fortsetzung.
 
+Die Context- bzw. Per-Call-Option `store` bestimmt, ob OpenAI die erzeugte
+Response für spätere Abrufe und Fortsetzungen speichert. Ohne Angabe gilt
+`true` (normalerweise 30 Tage, vorbehaltlich der Datenrichtlinie). Mit
+`['store' => false]` kann ein abschließender Aufruf von einer gespeicherten
+Response abzweigen, ohne sein eigenes Ergebnis für spätere Fortsetzungen
+zu speichern. Nicht für Chat-Turns oder Aufrufe mit weiteren Callback-Runden
+verwenden. `store` steuert nicht das Prompt Caching.
+
 [Chat and Resume Conversation](../examples/16-chat-resume-conversation.php)
 zeigt einen simulierten JSON-Roundtrip ohne HTTP- oder UI-Boilerplate.
 

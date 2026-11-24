@@ -28,7 +28,6 @@ final readonly class AiOptions
         'debug_log',
         'max_output_tokens',
         'store',
-        'prompt_cache_key',
     ];
 
     /**
@@ -46,13 +45,9 @@ final readonly class AiOptions
         public bool|LoggerInterface $debugLog = false,
         public ?int $maxOutputTokens = null,
         public ?bool $store = null,
-        public ?string $promptCacheKey = null,
     ) {
         if ($maxOutputTokens !== null && $maxOutputTokens <= 0) {
             throw new InvalidArgumentException('max_output_tokens must be a positive integer.');
-        }
-        if ($promptCacheKey !== null && trim($promptCacheKey) === '') {
-            throw new InvalidArgumentException('prompt_cache_key must not be empty.');
         }
         if ($timeout !== null && $timeout <= 0) {
             throw new InvalidArgumentException('timeout must be a positive integer.');
@@ -119,15 +114,11 @@ final readonly class AiOptions
 
         $maxOutputTokens = $options['max_output_tokens'] ?? null;
         $store = $options['store'] ?? null;
-        $promptCacheKey = $options['prompt_cache_key'] ?? null;
         if ($maxOutputTokens !== null && !is_int($maxOutputTokens)) {
             throw new InvalidArgumentException('max_output_tokens must be an integer or null.');
         }
         if ($store !== null && !is_bool($store)) {
             throw new InvalidArgumentException('store must be a boolean or null.');
-        }
-        if ($promptCacheKey !== null && !is_string($promptCacheKey)) {
-            throw new InvalidArgumentException('prompt_cache_key must be a string or null.');
         }
 
         return new self(
@@ -139,14 +130,13 @@ final readonly class AiOptions
             debugLog: $debugLog,
             maxOutputTokens: $maxOutputTokens,
             store: $store,
-            promptCacheKey: $promptCacheKey,
         );
     }
 
     /**
      * Convert to the existing common helper option names.
      *
-     * @return array{client: OpenAiClient|string|null, model: ?string, reasoning: array<string, mixed>|null, timeout: ?int, connect_timeout: ?int, debug_log: bool|LoggerInterface, max_output_tokens: ?int, store: ?bool, prompt_cache_key: ?string}
+     * @return array{client: OpenAiClient|string|null, model: ?string, reasoning: array<string, mixed>|null, timeout: ?int, connect_timeout: ?int, debug_log: bool|LoggerInterface, max_output_tokens: ?int, store: ?bool}
      * @example $array = $options->toArray();
      * @see fromArray()
      */
@@ -161,7 +151,6 @@ final readonly class AiOptions
             'debug_log' => $this->debugLog,
             'max_output_tokens' => $this->maxOutputTokens,
             'store' => $this->store,
-            'prompt_cache_key' => $this->promptCacheKey,
         ];
     }
 }
