@@ -294,9 +294,11 @@ An `EditableTextPrompt` is a mutable input object. Add one or more to an
 use Phore\AiHarness\AiContext;
 use Phore\AiHarness\PromptType\EditableTextPrompt;
 
+$context = new AiContext();
+
 $intro = new EditableTextPrompt('Welcome to our practce.', alias: 'intro');
 $footer = new EditableTextPrompt('Contact us.', alias: 'footer');
-$context = new AiContext(prompts: [$intro, $footer]);
+$context = $context->withPrepared([$intro, $footer]);
 
 $message = $context->text('Correct the spelling of intro and summarize.');
 echo $message;
@@ -312,7 +314,9 @@ The model can apply exact replacements or a single full rewrite
 (`search: null`). Each target is addressed by its unique alias; no files are
 read or written. `hasChanges()`, `setContent()` and `reset()` allow
 application-managed change detection and undo. Keep the same objects for
-follow-up calls. Persist text separately from the response ID or exported
+follow-up calls. `withPrepared()` returns a new context before the conversation
+starts. For a running conversation, pass the editable input directly in the
+`text()` prompt array for that call. Persist text separately from the response ID or exported
 context state when resuming in a new PHP request.
 See [example 17](examples/17-text-edit-tool.php) and
 [context documentation](docs/ai-context.md#bearbeitbare-text-inputs-im-chat).

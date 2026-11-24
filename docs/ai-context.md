@@ -221,6 +221,8 @@ AI-Antwort. Jeder Input besitzt einen eindeutigen Alias, optionale
 use Phore\AiHarness\AiContext;
 use Phore\AiHarness\PromptType\EditableTextPrompt;
 
+$context = new AiContext();
+
 $intro = new EditableTextPrompt(
     'Willkommen in unserer Praxix.',
     alias: 'intro',
@@ -228,7 +230,7 @@ $intro = new EditableTextPrompt(
     type: 'markdown',
 );
 $footer = new EditableTextPrompt('Kontaktieren Sie uns.', alias: 'footer');
-$context = new AiContext(prompts: [$intro, $footer]);
+$context = $context->withPrepared([$intro, $footer]);
 
 $message = $context->text('Korrigiere intro und erkläre die Änderung.');
 echo $message;
@@ -240,10 +242,19 @@ echo $intro->getContent();
 echo $footer->getContent();
 ```
 
-Alternativ können die Inputs mit `$context = $context->withPrepared([$intro,
-$footer])` vorbereitet werden. `withPrepared()` liefert einen neuen Context.
-Bei direkt an `text()` übergebenen Inputs sind die Edit-Tools nur für diesen
-Aufruf verfügbar; vorbereitete Inputs bleiben für alle Folgeaufrufe verfügbar.
+`withPrepared()` liefert einen neuen Context und setzt voraus, dass die
+Conversation noch nicht gestartet wurde. Vorbereitete Inputs bleiben für alle
+Folgeaufrufe verfügbar. In einem bereits laufenden Context können neue Inputs
+auch direkt für einen einzelnen Aufruf übergeben werden:
+
+```php
+$headline = new EditableTextPrompt('Unsere Praxis', alias: 'headline');
+$message = $context->text(['Formuliere headline einladender.', $headline]);
+echo $headline->getContent();
+```
+
+Für eine weitere Bearbeitung eines solchen Inputs muss dasselbe Objekt erneut
+übergeben werden.
 
 Pro Anfrage werden automatisch gemeinsame Tools zum Lesen und Bearbeiten
 registriert, unabhängig von der Anzahl der Inputs. Der aktuelle Text wird
