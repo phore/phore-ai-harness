@@ -23,17 +23,8 @@ echo phore_ai_text('Write a four-line poem about a rainy autumn morning.', [
 Normally omit options you do not need. `client => null` resolves the configured
 default client/credentials; the default reasoning setting is low effort.
 
-Optional context or per-call options are `max_output_tokens` (positive
-integer) and `store` (boolean). Null or omitted values use provider defaults.
-
-`store` controls whether OpenAI retains the response for later retrieval and
-continuation by response ID. The default is `true`, with a normal retention
-period of 30 days, subject to the provider's data retention settings.
-Use `store: false` only for terminal operations that do not need to resume
-from the resulting ID or perform callback continuations. A request may still
-use an already stored parent while disabling storage of its own result.
-This option is independent of prompt caching and does not disable all
-provider data retention. See [OpenAI conversation state](https://developers.openai.com/api/docs/guides/conversation-state).
+Use the optional context or per-call option `max_output_tokens` (positive
+integer) to limit output. Null or omission uses the provider default.
 
 ### API credentials
 
@@ -228,6 +219,9 @@ For a normal chatbot, return the latest response ID with each answer and send
 it back alongside the next user message. No conversation transcript needs to
 be stored or resent by the application. The provider retains the conversation
 within its retention and context limits. The ID is not an authorization token.
+The Harness leaves response storage at the OpenAI default (`store: true`),
+which normally retains responses for 30 days, subject to provider data
+retention settings. Storage is independent of prompt caching.
 
 See [example 16: Chat and Resume Conversation](examples/16-chat-resume-conversation.php)
 for two independent contexts connected by a simulated JSON roundtrip.

@@ -99,7 +99,7 @@ final class Toolkit
     /**
      * Creates a configured `PhoreAi` facade from common function options.
      *
-     * @param array{client?: OpenAiClient|string|null, model?: string, reasoning?: array<string, mixed>|null, timeout?: int, connect_timeout?: int, debug_log?: bool|LoggerInterface, max_output_tokens?: ?int, store?: ?bool} $options
+     * @param array{client?: OpenAiClient|string|null, model?: string, reasoning?: array<string, mixed>|null, timeout?: int, connect_timeout?: int, debug_log?: bool|LoggerInterface, max_output_tokens?: ?int} $options
      */
     public static function createAi(array $options = []): PhoreAi
     {
@@ -130,7 +130,6 @@ final class Toolkit
 
         return $ai->withResponseOptions(
             $options['max_output_tokens'] ?? null,
-            $options['store'] ?? null,
         );
     }
 

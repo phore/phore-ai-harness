@@ -97,19 +97,16 @@ final class PhoreAi
     }
 
     /**
-     * Configure optional provider output limits and response storage.
+     * Configure an optional provider output-token limit.
      *
-     * Null values retain provider defaults. OpenAI defaults to storing responses.
-     * Disable storage only for terminal requests that will not be resumed or
-     * require callback continuations. Storage is independent of prompt caching.
+     * Null retains the provider's default output-token limit.
      *
      * @throws InvalidArgumentException For invalid token limits.
-     * @example $ai = $ai->withResponseOptions(maxOutputTokens: 256, store: false);
+     * @example $ai = $ai->withResponseOptions(maxOutputTokens: 256);
      * @see AiOptions
      */
     public function withResponseOptions(
         ?int $maxOutputTokens = null,
-        ?bool $store = null,
     ): self {
         if ($maxOutputTokens !== null && $maxOutputTokens <= 0) {
             throw new InvalidArgumentException('max_output_tokens must be a positive integer.');
@@ -117,7 +114,6 @@ final class PhoreAi
 
         return clone($this, ['responseOptions' => array_filter([
             'max_output_tokens' => $maxOutputTokens,
-            'store' => $store,
         ], static fn (mixed $value): bool => $value !== null)]);
     }
 
