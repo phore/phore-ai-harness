@@ -47,6 +47,7 @@ final class PhoreAi
 
     /** @var array<string, mixed>|null */
     private ?array $reasoning = ['effort' => 'low'];
+    private array $responseOptions = [];
 
     public function __construct(OpenAiClient|string|null $client = null, private string $model = 'gpt-5-mini', private ?LoggerInterface $logger = null)
     {
@@ -93,6 +94,27 @@ final class PhoreAi
     public function withReasoning(?array $reasoning): self
     {
         return clone($this, ['reasoning' => $reasoning]);
+    }
+
+    /**
+     * Configure an optional provider output-token limit.
+     *
+     * Null retains the provider's default output-token limit.
+     *
+     * @throws InvalidArgumentException For invalid token limits.
+     * @example $ai = $ai->withResponseOptions(maxOutputTokens: 256);
+     * @see AiOptions
+     */
+    public function withResponseOptions(
+        ?int $maxOutputTokens = null,
+    ): self {
+        if ($maxOutputTokens !== null && $maxOutputTokens <= 0) {
+            throw new InvalidArgumentException('max_output_tokens must be a positive integer.');
+        }
+
+        return clone($this, ['responseOptions' => array_filter([
+            'max_output_tokens' => $maxOutputTokens,
+        ], static fn (mixed $value): bool => $value !== null)]);
     }
 
     public function withModel(string $model): self
@@ -542,6 +564,10 @@ final class PhoreAi
     {
         if ($this->reasoning !== null) {
             $request = $request->withExtraBody(['reasoning' => $this->reasoning]);
+        }
+
+        if ($this->responseOptions !== []) {
+            $request = $request->withExtraBody($this->responseOptions);
         }
 
         if ($context === null) {

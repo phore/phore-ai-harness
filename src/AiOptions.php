@@ -26,6 +26,7 @@ final readonly class AiOptions
         'timeout',
         'connect_timeout',
         'debug_log',
+        'max_output_tokens',
     ];
 
     /**
@@ -41,7 +42,11 @@ final readonly class AiOptions
         public ?int $timeout = null,
         public ?int $connectTimeout = null,
         public bool|LoggerInterface $debugLog = false,
+        public ?int $maxOutputTokens = null,
     ) {
+        if ($maxOutputTokens !== null && $maxOutputTokens <= 0) {
+            throw new InvalidArgumentException('max_output_tokens must be a positive integer.');
+        }
         if ($timeout !== null && $timeout <= 0) {
             throw new InvalidArgumentException('timeout must be a positive integer.');
         }
@@ -105,6 +110,11 @@ final readonly class AiOptions
             throw new InvalidArgumentException('debug_log must be a boolean or LoggerInterface.');
         }
 
+        $maxOutputTokens = $options['max_output_tokens'] ?? null;
+        if ($maxOutputTokens !== null && !is_int($maxOutputTokens)) {
+            throw new InvalidArgumentException('max_output_tokens must be an integer or null.');
+        }
+
         return new self(
             client: $client,
             model: $model,
@@ -112,13 +122,14 @@ final readonly class AiOptions
             timeout: $timeout,
             connectTimeout: $connectTimeout,
             debugLog: $debugLog,
+            maxOutputTokens: $maxOutputTokens,
         );
     }
 
     /**
      * Convert to the existing common helper option names.
      *
-     * @return array{client: OpenAiClient|string|null, model: ?string, reasoning: array<string, mixed>|null, timeout: ?int, connect_timeout: ?int, debug_log: bool|LoggerInterface}
+     * @return array{client: OpenAiClient|string|null, model: ?string, reasoning: array<string, mixed>|null, timeout: ?int, connect_timeout: ?int, debug_log: bool|LoggerInterface, max_output_tokens: ?int}
      * @example $array = $options->toArray();
      * @see fromArray()
      */
@@ -131,6 +142,7 @@ final readonly class AiOptions
             'timeout' => $this->timeout,
             'connect_timeout' => $this->connectTimeout,
             'debug_log' => $this->debugLog,
+            'max_output_tokens' => $this->maxOutputTokens,
         ];
     }
 }
