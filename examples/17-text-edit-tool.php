@@ -59,3 +59,43 @@ $ok = phore_ai_do([
 ]);
 var_dump($ok);
 echo $draft->getContent() . PHP_EOL;
+
+// 4. Edit multiple texts in one task and return a typed report instead of the
+// full text. An unavailable fact leaves one target pending, without blocking
+// independent edits. The report describes the work; the input objects hold it.
+class PendingTextEdit
+{
+    public string $alias;
+    public string $reason;
+}
+
+class TextEditReport
+{
+    public int $completedCount;
+    public string $message;
+
+    /** @var PendingTextEdit[] */
+    public array $pending;
+}
+
+$intro = new EditableTextPrompt('Welcome to our practce.', alias: 'intro');
+$footer = new EditableTextPrompt('Contakt us.', alias: 'footer');
+$contact = new EditableTextPrompt('Phone: TBD', alias: 'contact');
+
+$report = phore_ai_struct([
+    'Correct intro and footer. Replace TBD in contact with our verified phone number. '
+    . 'Do not invent missing facts. Complete independent edits even if others are blocked. '
+    . 'Count targets whose requested edits were completed. Report unfinished targets by alias and reason.',
+    $intro,
+    $footer,
+    $contact,
+], TextEditReport::class);
+
+echo $intro->getContent() . PHP_EOL;   // Expected: Welcome to our practice.
+echo $footer->getContent() . PHP_EOL;  // Expected: Contact us.
+echo $contact->getContent() . PHP_EOL; // Expected: Phone: TBD
+echo $report->message . PHP_EOL;
+echo $report->completedCount . PHP_EOL; // Expected: 2
+foreach ($report->pending as $pending) {
+    echo $pending->alias . ': ' . $pending->reason . PHP_EOL;
+}

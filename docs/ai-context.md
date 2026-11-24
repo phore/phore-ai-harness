@@ -241,6 +241,27 @@ Ein expliziter Context ist nicht erforderlich. Bei weiteren Aufrufen
 dasselbe Input-Objekt erneut übergeben; für einen fortlaufenden Chat kann
 zusätzlich derselbe `ai_context` gewählt werden.
 
+### Mehrere Texte bearbeiten und einen strukturierten Bericht erhalten
+
+`EditableTextPrompt` ist besonders nützlich, wenn mehrere Texte innerhalb
+einer AI-Aufgabe geändert werden sollen und die Anwendung zusätzlich eine
+auswertbare Rückmeldung benötigt. Jeder Text bleibt in seinem eigenen
+Input-Objekt; die Rückgabe von `phore_ai_struct()` kann unabhängig davon einen
+Status, die Zahl erfolgreich bearbeiteter Texte und offene Aufgaben enthalten.
+
+Das vollständige [Example 17](../examples/17-text-edit-tool.php) definiert dazu
+einen `TextEditReport` mit `completedCount`, `message` und `pending`
+(eine Liste aus Alias und Grund). Es übergibt drei bearbeitbare Texte in einem
+Aufruf: Einleitung, Footer und Kontaktdaten. Zwei Texte lassen sich korrigieren,
+die fehlende verifizierte Telefonnummer bleibt als offene Aufgabe erhalten.
+
+Die Anwendung liest die aktuellen Inhalte mit `getContent()` aus und kann
+offene Aufgaben separat anzeigen, manuell bearbeiten oder an einen weiteren
+Prozess übergeben. Die AI berichtet den fachlichen Erfolg; `hasChanges()`
+prüft unabhängig davon die tatsächliche Änderung eines Textes. Technische
+Fehler können Exceptions auslösen und bereits ausgeführte Edits bleiben
+wirksam. Eine gemeinsame Anfrage ist keine Transaktion über alle Texte.
+
 ## Bearbeitbare Text-Inputs im Chat
 
 `EditableTextPrompt` trennt den bearbeiteten Text von der normalen

@@ -102,6 +102,65 @@ Both helpers automatically expose the shared editing tools for their inputs.
 No explicit context or file is required. Keep the object to retrieve the
 latest text or pass it to another call. See [example 17](examples/17-text-edit-tool.php).
 
+### Edit multiple texts and return a structured report
+
+Use `EditableTextPrompt` when an operation must modify one or more independent
+texts and also return a useful result for the application. For example, a
+website editor can update an introduction, footer and contact section in the
+same AI task, while returning a completion report for a UI or another process.
+The edited text stays in each input object; the response can be a message
+(`phore_ai_text()`), a success flag (`phore_ai_do()`), or a typed DTO
+(`phore_ai_struct()`). No need to return complete texts inside the DTO or parse
+them out of the model's explanation.
+
+```php
+class PendingTextEdit
+{
+    public string $alias;
+    public string $reason;
+}
+
+class TextEditReport
+{
+    public int $completedCount;
+    public string $message;
+
+    /** @var PendingTextEdit[] */
+    public array $pending;
+}
+
+$intro = new EditableTextPrompt('Welcome to our practce.', alias: 'intro');
+$footer = new EditableTextPrompt('Contakt us.', alias: 'footer');
+$contact = new EditableTextPrompt('Phone: TBD', alias: 'contact');
+
+$report = phore_ai_struct([
+    'Correct intro and footer. Replace TBD in contact with our verified phone number. '
+    . 'Do not invent missing facts. Complete independent edits even if others are blocked. '
+    . 'Count targets whose requested edits were completed. Report unfinished targets by alias and reason.',
+    $intro,
+    $footer,
+    $contact,
+], TextEditReport::class);
+
+echo $intro->getContent();   // Expected: Welcome to our practice.
+echo $footer->getContent();  // Expected: Contact us.
+echo $contact->getContent(); // Expected: Phone: TBD
+echo $report->message;
+echo $report->completedCount; // Expected: 2
+foreach ($report->pending as $pending) {
+    echo $pending->alias . ': ' . $pending->reason;
+}
+```
+
+In this example, two texts can be corrected and the contact section remains
+unchanged because no verified phone number was supplied. The expected report
+has `completedCount: 2` and a pending entry for `contact` with the reason.
+The application can present the report or forward pending tasks for manual
+completion or a later AI call. The report is model-generated; use
+`hasChanges()` and `getContent()` to inspect actual changes. A failed provider
+or invalid structured response can throw an exception; already applied edits
+are not automatically rolled back. See [example 17](examples/17-text-edit-tool.php).
+
 ## When several requests belong together
 
 The functional API can share a conversation by repeating exactly the same
