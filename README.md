@@ -285,34 +285,37 @@ See [`examples/01-basic-functions.php`](examples/01-basic-functions.php) first,
 then [`examples/02-context.php`](examples/02-context.php). The complete context
 contract is documented in [`docs/ai-context.md`](docs/ai-context.md).
 
-### Edit a text buffer while chatting
+### Edit multiple texts while chatting
 
-Register a `TextEditTool` to let the model edit a string through tools while
-`text()` still returns the normal chat response. The original PHP variable
-is not modified; the tool instance owns the current content.
+An `EditableTextPrompt` is a mutable input object. Add one or more to an
+`AiContext`; the context supplies one shared set of editing tools automatically.
 
 ```php
-use Phore\AiHarness\ToolType\TextEditTool;
+use Phore\AiHarness\AiContext;
+use Phore\AiHarness\PromptType\EditableTextPrompt;
 
-$buffer = new TextEditTool('Welcome to our practce.', 'intro.md');
-$context = new AiContext();
-$context->addToolSet($buffer);
+$intro = new EditableTextPrompt('Welcome to our practce.', alias: 'intro');
+$footer = new EditableTextPrompt('Contact us.', alias: 'footer');
+$context = new AiContext(prompts: [$intro, $footer]);
 
-$message = $context->text('Correct spelling and tell me what changed.');
+$message = $context->text('Correct the spelling of intro and summarize.');
 echo $message;
-echo $buffer->getContent(); // Expected: Welcome to our practice.
+echo $intro->getContent(); // Expected: Welcome to our practice.
+echo $intro->getOriginalContent(); // Welcome to our practce.
 
-$message = $context->text('Make the greeting shorter.');
-echo $buffer->getContent();
+$message = $context->text('Make both texts friendlier.');
+echo $intro->getContent();
+echo $footer->getContent();
 ```
 
 The model can apply exact replacements or a single full rewrite
-(`search: null`). No files are read or written by this tool. The same
-instance retains successful changes across calls; `setContent()` lets the
-application replace or restore the buffer. Save the current string separately
-from the response ID or exported context state when resuming in another request.
+(`search: null`). Each target is addressed by its unique alias; no files are
+read or written. `hasChanges()`, `setContent()` and `reset()` allow
+application-managed change detection and undo. Keep the same objects for
+follow-up calls. Persist text separately from the response ID or exported
+context state when resuming in a new PHP request.
 See [example 17](examples/17-text-edit-tool.php) and
-[context documentation](docs/ai-context.md#textpuffer-im-chat-bearbeiten).
+[context documentation](docs/ai-context.md#bearbeitbare-text-inputs-im-chat).
 
 ## Git Submodules
 

@@ -210,59 +210,82 @@ String zurück. Sie gibt nicht die abschließende Bestätigung des Modells zurü
 Es gibt keine zusätzliche `editText()`-Methode.
 
 
-## Textpuffer im Chat bearbeiten
+## Bearbeitbare Text-Inputs im Chat
 
-Anders als `text(..., input: $text)` trennt das registrierte
-`TextEditTool` die bearbeiteten Quelldaten von der abschließenden AI-Antwort.
+`EditableTextPrompt` trennt den bearbeiteten Text von der normalen
+AI-Antwort. Jeder Input besitzt einen eindeutigen Alias, optionale
+`instructions` und `type` sowie `allowInstructions` (standardmäßig
+`false`, wie bei `TextPrompt`).
 
 ```php
 use Phore\AiHarness\AiContext;
-use Phore\AiHarness\ToolType\TextEditTool;
+use Phore\AiHarness\PromptType\EditableTextPrompt;
 
-$original = 'Willkommen in unserer Praxix.';
-$buffer = new TextEditTool($original, 'index.md');
-$context = new AiContext();
-$context->addToolSet($buffer);
+$intro = new EditableTextPrompt(
+    'Willkommen in unserer Praxix.',
+    alias: 'intro',
+    instructions: 'Einleitung der Startseite.',
+    type: 'markdown',
+);
+$footer = new EditableTextPrompt('Kontaktieren Sie uns.', alias: 'footer');
+$context = new AiContext(prompts: [$intro, $footer]);
 
-$message = $context->text('Korrigiere die Rechtschreibung und erkläre die Änderung.');
+$message = $context->text('Korrigiere intro und erkläre die Änderung.');
 echo $message;
-echo $buffer->getContent(); // Erwartet: Willkommen in unserer Praxis.
+echo $intro->getContent(); // Erwartet: Willkommen in unserer Praxis.
+echo $intro->getOriginalContent(); // Willkommen in unserer Praxix.
 
-$message = $context->text('Formuliere die Begrüßung freundlicher.');
-$current = $buffer->getContent();
-$responseId = $context->getResponseId();
+$message = $context->text('Formuliere intro und footer freundlicher.');
+echo $intro->getContent();
+echo $footer->getContent();
 ```
 
-Das Modell liest den aktuellen String mit `text_edit_read` und wendet
-mit `text_edit_apply` exakte Search/Replacement-Paare an. Ein einzelnes
-Paar mit `search: null` schreibt den gesamten String neu. Fehlerhafte
-Batches verändern den String nicht und können vom Modell korrigiert
-werden. Jeder erfolgreiche Batch bleibt sofort wirksam; ein späterer
-Abbruch der AI-Anfrage macht ihn nicht rückgängig. Bei reinen Fragen
-muss das Modell keinen Schreib-Callback aufrufen.
+Alternativ können die Inputs mit `$context = $context->withPrepared([$intro,
+$footer])` vorbereitet werden. `withPrepared()` liefert einen neuen Context.
+Bei direkt an `text()` übergebenen Inputs sind die Edit-Tools nur für diesen
+Aufruf verfügbar; vorbereitete Inputs bleiben für alle Folgeaufrufe verfügbar.
 
-Der ursprüngliche PHP-String bleibt unverändert. Der Zustand liegt auf der
-ToolSet-Instanz und ist über `getContent()` jederzeit abrufbar.
-`setContent($original)` erlaubt ein anwendungsseitiges Undo ohne AI-Aufruf.
-Dateiname ist nur ein Label, kein Dateipfad. Es erfolgen keine Dateizugriffe.
+Pro Anfrage werden automatisch gemeinsame Tools zum Lesen und Bearbeiten
+registriert, unabhängig von der Anzahl der Inputs. Der aktuelle Text wird
+bei Folgeaufrufen erneut als Quelle eingebunden. Die AI adressiert das Ziel
+per Alias; ein einzelner Edit mit `search: null` schreibt den ganzen String
+neu. Fehlerhafte Batches lassen das betroffene Ziel unverändert und sind
+korrigierbar. Erfolgreiche Batches werden sofort wirksam, auch wenn die
+Anfrage später abbricht. Fragen müssen keine Änderung auslösen.
 
-Für einen neuen PHP-Request müssen der aktuelle String und die Gesprächs-ID
-bzw. der exportierte Context-State separat gespeichert werden. Nach Aufbau
-derselben Tool-Konfiguration kann die Conversation fortgesetzt werden:
+`getContent()` liefert den aktuellen Inhalt, `getOriginalContent()` den
+unveränderten Ausgangstext. `hasChanges()` vergleicht beide exakt.
+Mit `setContent($text)` kann die Anwendung den aktuellen Stand ersetzen,
+mit `reset()` den Originaltext wiederherstellen. Keine Dateizugriffe.
+
+Für einen neuen PHP-Request müssen Originaltext, aktueller Text und
+Conversation-ID bzw. der exportierte Context-State getrennt gespeichert
+werden. Beim Wiederaufbau die gleichen Metadaten verwenden:
 
 ```php
-$buffer = new TextEditTool($current, 'index.md');
-$context = new AiContext();
-$context->addToolSet($buffer);
+$responseId = $context->getResponseId();
+$original = $intro->getOriginalContent();
+$current = $intro->getContent();
+
+// In einem neuen Request, hier für eine Conversation mit nur einem Ziel:
+$intro = new EditableTextPrompt(
+    $original,
+    alias: 'intro',
+    instructions: 'Einleitung der Startseite.',
+    type: 'markdown',
+);
+$intro->setContent($current);
+$context = new AiContext(prompts: [$intro]);
 $context->resumeFromResponseId($responseId);
-$message = $context->text('Kürze den Text noch etwas.');
-$current = $buffer->getContent();
+$message = $context->text('Kürze intro.');
+$current = $intro->getContent();
 ```
 
-Ein Context-Checkpoint oder ein geklonter Context erzeugt keinen separaten
-Textpuffer und stellt dessen Inhalt nicht wieder her. Für unabhängige
-Bearbeitungen sind getrennte ToolSet-Instanzen und Contexts erforderlich.
-Siehe [Example 17](../examples/17-text-edit-tool.php).
+Bei mehreren Zielen sind alle weiterhin benötigten Inputs wieder anzulegen.
+Context-Checkpoints und Klonen setzen den Text nicht zurück; geklonte
+Contexts teilen dieselben Input-Objekte. Der exportierte Context-State
+enthält keine Textinhalte; der Setup-Hash berücksichtigt die Metadaten,
+nicht den veränderlichen Text. Siehe [Example 17](../examples/17-text-edit-tool.php).
 
 ## Eine oder mehrere Dateien bearbeiten
 

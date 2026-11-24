@@ -3,26 +3,32 @@
 declare(strict_types=1);
 
 use Phore\AiHarness\AiContext;
-use Phore\AiHarness\ToolType\TextEditTool;
+use Phore\AiHarness\PromptType\EditableTextPrompt;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
 
-// With the configured API credentials, edit an in-memory draft and chat about it.
-$original = 'Welcome to our practce.';
-$buffer = new TextEditTool($original, 'intro.md');
-$context = new AiContext();
-$context->addToolSet($buffer);
+// With configured API credentials, prepare two independent editable inputs.
+$intro = new EditableTextPrompt('Welcome to our practce.', alias: 'intro', type: 'markdown');
+$footer = new EditableTextPrompt('Contact us for more information.', alias: 'footer');
 
-$message = $context->text('Correct the spelling using the text editing tool and summarize the change.');
-echo $message . PHP_EOL;
-echo $buffer->getContent() . PHP_EOL; // Expected: Welcome to our practice.
+$context = new AiContext(prompts: [$intro, $footer]);
 
-// The same instance retains changes across subsequent conversational requests.
-$message = $context->text('Now rewrite the entire introduction as a short, friendly greeting. Explain what changed.');
+// The context provides shared editing tools automatically. text() returns the chat reply.
+$message = $context->text('Correct the spelling in intro and summarize the change.');
 echo $message . PHP_EOL;
-echo $buffer->getContent() . PHP_EOL;
+echo $intro->getContent() . PHP_EOL; // Expected: Welcome to our practice.
+echo $intro->getOriginalContent() . PHP_EOL; // Welcome to our practce.
+echo $footer->getContent() . PHP_EOL; // Unchanged.
+
+// The same objects receive subsequent replacements or complete rewrites.
+$message = $context->text('Rewrite intro as a friendly greeting and shorten footer. Explain both changes.');
+echo $message . PHP_EOL;
+echo $intro->getContent() . PHP_EOL;
+echo $footer->getContent() . PHP_EOL;
 $responseId = $context->getResponseId();
 
-// Application-controlled undo does not require another AI request.
-$buffer->setContent($original);
-echo $buffer->getContent() . PHP_EOL; // Welcome to our practce.
+// Keep the objects for change detection and application-managed undo.
+if ($intro->hasChanges()) {
+    $intro->reset(); // Restore original; no AI call.
+}
+echo $intro->getContent() . PHP_EOL;

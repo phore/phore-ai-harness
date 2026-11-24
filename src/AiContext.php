@@ -19,11 +19,13 @@ use Phore\AiHarness\Context\Traits\StructTrait;
 use Phore\AiHarness\Context\Traits\TextTrait;
 use Phore\AiHarness\Helper\Toolkit;
 use Phore\AiHarness\OutputFormat\OutputFormat;
+use Phore\AiHarness\PromptType\EditableTextPrompt;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\PromptType\SystemPrompt;
 use Phore\AiHarness\Skill\SkillCollection;
 use Phore\AiHarness\ToolType\AiToolSet;
 use Phore\AiHarness\ToolType\CallbackTool;
+use Phore\AiHarness\ToolType\TextEditToolSet;
 use Phore\AiHarness\ToolType\ToolType;
 
 /**
@@ -635,7 +637,8 @@ final class AiContext
             ? $this->prompts
             : array_values(array_filter(
                 $this->prompts,
-                static fn (PromptType|ToolType $item): bool => $item instanceof ToolType || $item instanceof SystemPrompt,
+                static fn (PromptType|ToolType $item): bool => $item instanceof ToolType || $item instanceof SystemPrompt
+                    || $item instanceof EditableTextPrompt,
             ));
 
         // AiToolSet verwaltet die stabilen CallbackTools. Nur der Skill-Katalog
@@ -645,9 +648,31 @@ final class AiContext
             $contextItems[] = $skillSet->prompt();
         }
 
+        // Pro Anfrage alle aktiven Editierziele sammeln und genau einen Satz
+        // gemeinsamer Tools registrieren. Vorbereitete Texte bleiben aktuell,
+        // auch wenn der Provider bereits eine ältere Version im Verlauf kennt.
+        $activeItems = [...$contextItems, ...$this->pendingPrompts, ...$items];
+        $editableTexts = [];
+        foreach ($activeItems as $item) {
+            if ($item instanceof EditableTextPrompt) {
+                $editableTexts[] = $item;
+            }
+        }
+        if ($editableTexts !== []) {
+            $activeItems = [...$activeItems, ...(new TextEditToolSet($editableTexts))->getTools()];
+        }
+
         $callbacks = [];
         $merged = [];
-        foreach ([...$contextItems, ...$this->pendingPrompts, ...$items] as $item) {
+        $seenEditableTexts = [];
+        foreach ($activeItems as $item) {
+            if ($item instanceof EditableTextPrompt) {
+                if (isset($seenEditableTexts[$item->alias])) {
+                    continue;
+                }
+                $seenEditableTexts[$item->alias] = true;
+                $item = $item->toTextPrompt();
+            }
             if ($item instanceof CallbackTool) {
                 $name = $item->name();
                 if (isset($callbacks[$name])) {
@@ -761,12 +786,14 @@ final class AiContext
     {
         $items = [];
         foreach ($this->prompts as $item) {
-            $items[] = [
-                'class' => $item::class,
-                'config' => $item instanceof ToolType
-                    ? $item->toArray(self::STATE_PROVIDER)
-                    : $item->toArray(),
-            ];
+            $config = $item instanceof ToolType
+                ? $item->toArray(self::STATE_PROVIDER)
+                : $item->toArray();
+            if ($item instanceof EditableTextPrompt) {
+                // Mutable text is application state, not prepared setup.
+                unset($config['text']);
+            }
+            $items[] = ['class' => $item::class, 'config' => $config];
         }
 
         $skillSet = $this->getToolSet(SkillCollection::class);
