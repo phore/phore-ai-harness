@@ -71,6 +71,96 @@ $summary = phore_ai_text([
 ]);
 ```
 
+### Edit text and return a separate reply
+
+For a simple string edit, `phore_ai_text()` with `options['input']`
+returns the edited string. To edit text and also receive a separate
+user-facing reply, pass an `EditableTextPrompt` in the prompt array:
+
+```php
+use Phore\AiHarness\PromptType\EditableTextPrompt;
+
+$draft = new EditableTextPrompt('Welcome to our practce.', alias: 'draft');
+$message = phore_ai_text([
+    'Correct the spelling in draft and explain what changed.',
+    $draft,
+]);
+echo $message; // AI's explanation.
+echo $draft->getContent(); // Expected: Welcome to our practice.
+echo $draft->getOriginalContent(); // Welcome to our practce.
+```
+
+When no conversational reply is needed, use the same editable input with
+`phore_ai_do()`. It returns a boolean success flag, not the edited text:
+
+```php
+$ok = phore_ai_do(['Rewrite draft as a friendly greeting.', $draft]);
+echo $draft->getContent();
+```
+
+Both helpers automatically expose the shared editing tools for their inputs.
+No explicit context or file is required. Keep the object to retrieve the
+latest text or pass it to another call. See [example 17](examples/17-text-edit-tool.php).
+
+### Edit multiple texts and return a structured report
+
+Use `EditableTextPrompt` when an operation must modify one or more independent
+texts and also return a useful result for the application. For example, a
+website editor can update an introduction, footer and contact section in the
+same AI task, while returning a completion report for a UI or another process.
+The edited text stays in each input object; the response can be a message
+(`phore_ai_text()`), a success flag (`phore_ai_do()`), or a typed DTO
+(`phore_ai_struct()`). No need to return complete texts inside the DTO or parse
+them out of the model's explanation.
+
+```php
+class PendingTextEdit
+{
+    public string $alias;
+    public string $reason;
+}
+
+class TextEditReport
+{
+    public int $completedCount;
+    public string $message;
+
+    /** @var PendingTextEdit[] */
+    public array $pending;
+}
+
+$intro = new EditableTextPrompt('Welcome to our practce.', alias: 'intro');
+$footer = new EditableTextPrompt('Contakt us.', alias: 'footer');
+$contact = new EditableTextPrompt('Phone: TBD', alias: 'contact');
+
+$report = phore_ai_struct([
+    'Correct intro and footer. Replace TBD in contact with our verified phone number. '
+    . 'Do not invent missing facts. Complete independent edits even if others are blocked. '
+    . 'Count targets whose requested edits were completed. Report unfinished targets by alias and reason.',
+    $intro,
+    $footer,
+    $contact,
+], TextEditReport::class);
+
+echo $intro->getContent();   // Expected: Welcome to our practice.
+echo $footer->getContent();  // Expected: Contact us.
+echo $contact->getContent(); // Expected: Phone: TBD
+echo $report->message;
+echo $report->completedCount; // Expected: 2
+foreach ($report->pending as $pending) {
+    echo $pending->alias . ': ' . $pending->reason;
+}
+```
+
+In this example, two texts can be corrected and the contact section remains
+unchanged because no verified phone number was supplied. The expected report
+has `completedCount: 2` and a pending entry for `contact` with the reason.
+The application can present the report or forward pending tasks for manual
+completion or a later AI call. The report is model-generated; use
+`hasChanges()` and `getContent()` to inspect actual changes. A failed provider
+or invalid structured response can throw an exception; already applied edits
+are not automatically rolled back. See [example 17](examples/17-text-edit-tool.php).
+
 ## When several requests belong together
 
 The functional API can share a conversation by repeating exactly the same
@@ -284,6 +374,40 @@ files in the batch may still be written; this is not a cross-file transaction.
 See [`examples/01-basic-functions.php`](examples/01-basic-functions.php) first,
 then [`examples/02-context.php`](examples/02-context.php). The complete context
 contract is documented in [`docs/ai-context.md`](docs/ai-context.md).
+
+### Edit multiple texts while chatting
+
+An `EditableTextPrompt` is a mutable input object. Add one or more to an
+`AiContext`; the context supplies one shared set of editing tools automatically.
+
+```php
+use Phore\AiHarness\AiContext;
+use Phore\AiHarness\PromptType\EditableTextPrompt;
+
+$intro = new EditableTextPrompt('Welcome to our practce.', alias: 'intro');
+$footer = new EditableTextPrompt('Contact us.', alias: 'footer');
+$context = new AiContext(prompts: [$intro, $footer]);
+
+$message = $context->text('Correct the spelling of intro and summarize.');
+echo $message;
+echo $intro->getContent(); // Expected: Welcome to our practice.
+echo $intro->getOriginalContent(); // Welcome to our practce.
+
+$message = $context->text('Make both texts friendlier.');
+echo $intro->getContent();
+echo $footer->getContent();
+```
+
+The model can apply exact replacements or a single full rewrite
+(`search: null`). Each target is addressed by its unique alias; no files are
+read or written. `hasChanges()`, `setContent()` and `reset()` allow
+application-managed change detection and undo. Keep the same objects for
+follow-up calls. For a running conversation, pass an additional editable input
+in the `text()` prompt array for that call. Persist text separately from the
+response ID or exported context state when resuming in a new PHP request.
+See [example 17](examples/17-text-edit-tool.php) and
+[context documentation](docs/ai-context.md#bearbeitbare-text-inputs-im-chat).
+
 ## Git Submodules
 
 Beim Klonen direkt mit auschecken:
