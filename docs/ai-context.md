@@ -210,6 +210,37 @@ String zurück. Sie gibt nicht die abschließende Bestätigung des Modells zurü
 Es gibt keine zusätzliche `editText()`-Methode.
 
 
+### Text bearbeiten und gleichzeitig eine Antwort erhalten
+
+Wenn neben dem bearbeiteten Text eine normale AI-Antwort benötigt wird,
+übergib ein `EditableTextPrompt` direkt im Prompt-Array statt über
+`options['input']`:
+
+```php
+use Phore\AiHarness\PromptType\EditableTextPrompt;
+
+$draft = new EditableTextPrompt('Herzlich wilkommen.', alias: 'draft');
+$message = phore_ai_text([
+    'Korrigiere draft und erkläre die Änderung.',
+    $draft,
+]);
+echo $message;
+echo $draft->getContent(); // Erwartet: Herzlich willkommen.
+echo $draft->getOriginalContent(); // Herzlich wilkommen.
+```
+
+Falls keine Textantwort benötigt wird, kann derselbe Input mit
+`phore_ai_do()` bearbeitet werden. Der Rückgabewert ist ein Erfolgsstatus:
+
+```php
+$ok = phore_ai_do(['Formuliere draft freundlicher.', $draft]);
+echo $draft->getContent();
+```
+
+Ein expliziter Context ist nicht erforderlich. Bei weiteren Aufrufen
+dasselbe Input-Objekt erneut übergeben; für einen fortlaufenden Chat kann
+zusätzlich derselbe `ai_context` gewählt werden.
+
 ## Bearbeitbare Text-Inputs im Chat
 
 `EditableTextPrompt` trennt den bearbeiteten Text von der normalen
@@ -221,8 +252,6 @@ AI-Antwort. Jeder Input besitzt einen eindeutigen Alias, optionale
 use Phore\AiHarness\AiContext;
 use Phore\AiHarness\PromptType\EditableTextPrompt;
 
-$context = new AiContext();
-
 $intro = new EditableTextPrompt(
     'Willkommen in unserer Praxix.',
     alias: 'intro',
@@ -230,7 +259,7 @@ $intro = new EditableTextPrompt(
     type: 'markdown',
 );
 $footer = new EditableTextPrompt('Kontaktieren Sie uns.', alias: 'footer');
-$context = $context->withPrepared([$intro, $footer]);
+$context = new AiContext(prompts: [$intro, $footer]);
 
 $message = $context->text('Korrigiere intro und erkläre die Änderung.');
 echo $message;
@@ -242,9 +271,7 @@ echo $intro->getContent();
 echo $footer->getContent();
 ```
 
-`withPrepared()` liefert einen neuen Context und setzt voraus, dass die
-Conversation noch nicht gestartet wurde. Vorbereitete Inputs bleiben für alle
-Folgeaufrufe verfügbar. In einem bereits laufenden Context können neue Inputs
+Im Constructor vorbereitete Inputs bleiben für alle Folgeaufrufe verfügbar. In einem bereits laufenden Context können neue Inputs
 auch direkt für einen einzelnen Aufruf übergeben werden:
 
 ```php

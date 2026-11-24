@@ -7,14 +7,11 @@ use Phore\AiHarness\PromptType\EditableTextPrompt;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
 
-// Create the context once (or use an existing, not yet started context).
-$context = new AiContext();
-
-// Attach two independent editable inputs to the context.
+// 1. Prepare two editable inputs for a conversation.
 $intro = new EditableTextPrompt('Welcome to our practce.', alias: 'intro', type: 'markdown');
 $footer = new EditableTextPrompt('Contact us for more information.', alias: 'footer');
 
-$context = $context->withPrepared([$intro, $footer]);
+$context = new AiContext(prompts: [$intro, $footer]);
 
 // The context provides shared editing tools automatically. text() returns the chat reply.
 $message = $context->text('Correct the spelling in intro and summarize the change.');
@@ -44,3 +41,21 @@ $message = $context->text([
 ]);
 echo $message . PHP_EOL;
 echo $headline->getContent() . PHP_EOL;
+
+// 2. Independent one-shot edit with a separate conversational reply.
+$draft = new EditableTextPrompt('Welcome to our practce.', alias: 'draft');
+$message = phore_ai_text([
+    'Correct the spelling in draft and explain what changed.',
+    $draft,
+]);
+echo $message . PHP_EOL;
+echo $draft->getContent() . PHP_EOL; // Expected: Welcome to our practice.
+echo $draft->getOriginalContent() . PHP_EOL; // Welcome to our practce.
+
+// 3. Edit without a conversational reply. do() returns a success flag.
+$ok = phore_ai_do([
+    'Rewrite draft as a short, friendly greeting.',
+    $draft,
+]);
+var_dump($ok);
+echo $draft->getContent() . PHP_EOL;
