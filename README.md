@@ -284,6 +284,36 @@ files in the batch may still be written; this is not a cross-file transaction.
 See [`examples/01-basic-functions.php`](examples/01-basic-functions.php) first,
 then [`examples/02-context.php`](examples/02-context.php). The complete context
 contract is documented in [`docs/ai-context.md`](docs/ai-context.md).
+
+### Edit a text buffer while chatting
+
+Register a `TextEditTool` to let the model edit a string through tools while
+`text()` still returns the normal chat response. The original PHP variable
+is not modified; the tool instance owns the current content.
+
+```php
+use Phore\AiHarness\ToolType\TextEditTool;
+
+$buffer = new TextEditTool('Welcome to our practce.', 'intro.md');
+$context = new AiContext();
+$context->addToolSet($buffer);
+
+$message = $context->text('Correct spelling and tell me what changed.');
+echo $message;
+echo $buffer->getContent(); // Expected: Welcome to our practice.
+
+$message = $context->text('Make the greeting shorter.');
+echo $buffer->getContent();
+```
+
+The model can apply exact replacements or a single full rewrite
+(`search: null`). No files are read or written by this tool. The same
+instance retains successful changes across calls; `setContent()` lets the
+application replace or restore the buffer. Save the current string separately
+from the response ID or exported context state when resuming in another request.
+See [example 17](examples/17-text-edit-tool.php) and
+[context documentation](docs/ai-context.md#textpuffer-im-chat-bearbeiten).
+
 ## Git Submodules
 
 Beim Klonen direkt mit auschecken:

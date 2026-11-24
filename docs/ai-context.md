@@ -209,6 +209,61 @@ Funktion setzt den vollständigen Ergebnistext lokal zusammen und gibt ihn als
 String zurück. Sie gibt nicht die abschließende Bestätigung des Modells zurück.
 Es gibt keine zusätzliche `editText()`-Methode.
 
+
+## Textpuffer im Chat bearbeiten
+
+Anders als `text(..., input: $text)` trennt das registrierte
+`TextEditTool` die bearbeiteten Quelldaten von der abschließenden AI-Antwort.
+
+```php
+use Phore\AiHarness\AiContext;
+use Phore\AiHarness\ToolType\TextEditTool;
+
+$original = 'Willkommen in unserer Praxix.';
+$buffer = new TextEditTool($original, 'index.md');
+$context = new AiContext();
+$context->addToolSet($buffer);
+
+$message = $context->text('Korrigiere die Rechtschreibung und erkläre die Änderung.');
+echo $message;
+echo $buffer->getContent(); // Erwartet: Willkommen in unserer Praxis.
+
+$message = $context->text('Formuliere die Begrüßung freundlicher.');
+$current = $buffer->getContent();
+$responseId = $context->getResponseId();
+```
+
+Das Modell liest den aktuellen String mit `text_edit_read` und wendet
+mit `text_edit_apply` exakte Search/Replacement-Paare an. Ein einzelnes
+Paar mit `search: null` schreibt den gesamten String neu. Fehlerhafte
+Batches verändern den String nicht und können vom Modell korrigiert
+werden. Jeder erfolgreiche Batch bleibt sofort wirksam; ein späterer
+Abbruch der AI-Anfrage macht ihn nicht rückgängig. Bei reinen Fragen
+muss das Modell keinen Schreib-Callback aufrufen.
+
+Der ursprüngliche PHP-String bleibt unverändert. Der Zustand liegt auf der
+ToolSet-Instanz und ist über `getContent()` jederzeit abrufbar.
+`setContent($original)` erlaubt ein anwendungsseitiges Undo ohne AI-Aufruf.
+Dateiname ist nur ein Label, kein Dateipfad. Es erfolgen keine Dateizugriffe.
+
+Für einen neuen PHP-Request müssen der aktuelle String und die Gesprächs-ID
+bzw. der exportierte Context-State separat gespeichert werden. Nach Aufbau
+derselben Tool-Konfiguration kann die Conversation fortgesetzt werden:
+
+```php
+$buffer = new TextEditTool($current, 'index.md');
+$context = new AiContext();
+$context->addToolSet($buffer);
+$context->resumeFromResponseId($responseId);
+$message = $context->text('Kürze den Text noch etwas.');
+$current = $buffer->getContent();
+```
+
+Ein Context-Checkpoint oder ein geklonter Context erzeugt keinen separaten
+Textpuffer und stellt dessen Inhalt nicht wieder her. Für unabhängige
+Bearbeitungen sind getrennte ToolSet-Instanzen und Contexts erforderlich.
+Siehe [Example 17](../examples/17-text-edit-tool.php).
+
 ## Eine oder mehrere Dateien bearbeiten
 
 Die globale Funktion behält ihre bisherigen Argumente einschließlich der
