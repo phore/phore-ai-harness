@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Phore\AiHarness\Context\Traits;
 
+use Phore\AiHarness\Result\AiInteractiveResult;
 use InvalidArgumentException;
 use Phore\AiHarness\Edit\TextEditEngine;
 use Phore\AiHarness\Helper\Toolkit;
@@ -32,7 +33,7 @@ trait TextTrait
      * @see \Phore\AiHarness\AiContext
      * @see TextEditEngine
      */
-    public function text(string|PromptType|ToolType|array $prompts, ?string $input = null, array $options = []): string
+    public function text(string|PromptType|ToolType|array $prompts, ?string $input = null, array $options = []): string|AiInteractiveResult
     {
         $items = Toolkit::normalizePromptItems($prompts);
         if ($input === null) {
@@ -61,7 +62,20 @@ trait TextTrait
             'write_text',
             'Apply all text changes in one batch. Use search=null only as the single operation for a full rewrite. Use an empty edits list for an unchanged result.',
         );
-        $this->executeAi($items, $options, static fn (PhoreAi $ai): string => $ai->run());
+        $step = $this->executeAi(
+            $items, $options, static fn (PhoreAi $ai): string => $ai->run(),
+            localState: static function (?array $state) use (&$result, &$written): array {
+                if ($state !== null) {
+                    $result = $state['result'];
+                    $written = $state['written'];
+                }
+                return ['result' => $result, 'written' => $written];
+            },
+            binding: hash('sha256', $input),
+        );
+        if ($step instanceof AiInteractiveResult) {
+            return $step;
+        }
         if (!$written) {
             throw new RuntimeException('AI response did not complete the text edit through write_text.');
         }

@@ -17,6 +17,7 @@ use Phore\AiHarness\Logging\LoggerInterface;
 use Phore\AiHarness\PhoreAi;
 use Phore\AiHarness\PromptType\EditableTextPrompt;
 use Phore\AiHarness\PromptType\TextPrompt;
+use Phore\AiHarness\Result\AiInteractiveResult;
 use Phore\AiHarness\ResumeOptions;
 use Phore\AiHarness\ResumeStateException;
 use Phore\AiHarness\ToolType\CallbackRoundLimitException;
@@ -123,6 +124,9 @@ final class AiContextTest extends TestCase
 
     public function testInteractiveStepsResumeAndSteerWithFreshContexts(): void
     {
+        if (!extension_loaded('sodium')) {
+            self::markTestSkipped('Interactive mode requires sodium.');
+        }
         $executed = [];
         $tool = new CallbackTool(
             static function (int $step) use (&$executed): string {
@@ -131,53 +135,100 @@ final class AiContextTest extends TestCase
             },
             name: 'record_step',
         );
-
-        $first = $this->context('interactive', [$tool])->doInteractive('Start.');
-        self::assertTrue($first->continue);
-        self::assertSame('resp_interactive_2', $first->responseId);
+        $options = ['interactive' => true];
+        $prompt = 'Start the original task.';
+        $first = $this->context('interactive', [$tool])->text($prompt, options: $options);
+        self::assertInstanceOf(AiInteractiveResult::class, $first);
+        self::assertSame('ai_continue', json_decode(json_encode($first), true)['type']);
         self::assertSame([['name' => 'record_step', 'callId' => 'call_1']], $first->toolCalls);
         self::assertSame([1], $executed);
 
-        $second = $this->context('interactive', [$tool])->doInteractive(
-            'Use the new direction.',
-            $first->responseId,
-        );
-        self::assertTrue($second->continue);
+        $options['interactive_continue_id'] = $first->continueId;
+        $options['interactive_steering_message'] = 'Use the new direction.';
+        $second = $this->context('interactive', [$tool])->text($prompt, options: $options);
+        self::assertInstanceOf(AiInteractiveResult::class, $second);
         self::assertSame([1, 2], $executed);
-        self::assertSame([['name' => 'record_step', 'callId' => 'call_2']], $second->toolCalls);
         $request = $this->lastRequest();
-        self::assertSame('resp_interactive_2', $request['previous_response_id']);
-        self::assertSame('function_call_output', $request['input'][0]['type']);
-        self::assertSame('call_2', $request['input'][0]['call_id']);
+        self::assertSame('resp_interactive_1', $request['previous_response_id']);
+        self::assertSame('call_1', $request['input'][0]['call_id']);
+        self::assertSame('recorded 1', $request['input'][0]['output']);
         self::assertSame('user', $request['input'][1]['role']);
-        self::assertStringContainsString('Use the new direction.', json_encode($request['input'][1]));
+        self::assertSame('Use the new direction.', $request['input'][1]['content']);
+        self::assertStringNotContainsString($prompt, json_encode($request['input']));
 
-        $context = $this->context('interactive', [$tool]);
-        $last = $context->doInteractive(responseId: $second->responseId);
-        self::assertFalse($last->continue);
-        self::assertSame('Finished.', $last->message);
-        self::assertSame([1, 2, 3], $executed);
-        self::assertSame($last->responseId, $context->getResponseId());
+        $options['interactive_continue_id'] = $second->continueId;
+        $options['interactive_steering_message'] = '';
+        $third = $this->context('interactive', [$tool])->text($prompt, options: $options);
+        self::assertInstanceOf(AiInteractiveResult::class, $third);
         self::assertCount(1, $this->lastRequest()['input']);
-
-        $next = $this->context('interactive', [$tool])->doInteractive('Another question.', $last->responseId);
-        self::assertFalse($next->continue);
-        self::assertSame([], $next->toolCalls);
         self::assertSame([1, 2, 3], $executed);
-        self::assertSame($last->responseId, $this->lastRequest()['previous_response_id']);
+
+        $options['interactive_continue_id'] = $third->continueId;
+        $options['interactive_steering_message'] = null;
+        $context = $this->context('interactive', [$tool]);
+        self::assertSame('Finished.', $context->text($prompt, options: $options));
+        self::assertSame('resp_interactive_4', $context->getResponseId());
+        self::assertCount(1, $this->lastRequest()['input']);
+        self::assertSame([1, 2, 3], $executed);
     }
 
-    public function testInteractiveRequiresInitialPrompt(): void
+    public function testInteractiveTextEditorRestoresWrittenState(): void
     {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->context()->doInteractive();
+        if (!extension_loaded('sodium')) {
+            self::markTestSkipped('Interactive mode requires sodium.');
+        }
+        $first = $this->context()->text('Edit.', 'one two', ['interactive' => true]);
+        self::assertInstanceOf(AiInteractiveResult::class, $first);
+        $result = $this->context()->text('Edit.', 'one two', [
+            'interactive' => true,
+            'interactive_continue_id' => $first->continueId,
+        ]);
+        self::assertSame('ONE TWO', $result);
     }
 
-    public function testInteractiveRejectsUnknownPendingTool(): void
+    public function testInteractiveFileEditorRetainsPartialSuccess(): void
     {
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('Unknown or malformed interactive callback');
-        $this->context('interactive')->doInteractive(responseId: 'resp_interactive_2');
+        if (!extension_loaded('sodium')) {
+            self::markTestSkipped('Interactive mode requires sodium.');
+        }
+        $firstPath = tempnam(sys_get_temp_dir(), 'ai-first-');
+        $secondPath = tempnam(sys_get_temp_dir(), 'ai-second-');
+        try {
+            file_put_contents($firstPath, 'one');
+            file_put_contents($secondPath, 'repeat two repeat');
+            $options = ['interactive' => true];
+            $paths = [$firstPath, $secondPath];
+            $first = $this->context('file-retry')->file('Edit.', $paths, $options);
+            self::assertInstanceOf(AiInteractiveResult::class, $first);
+            self::assertSame('ONE', file_get_contents($firstPath));
+            $options['interactive_continue_id'] = $first->continueId;
+            $second = $this->context('file-retry')->file('Edit.', $paths, $options);
+            self::assertInstanceOf(AiInteractiveResult::class, $second);
+            $options['interactive_continue_id'] = $second->continueId;
+            self::assertSame('ready', $this->context('file-retry')->file('Edit.', $paths, $options));
+            self::assertSame('ONE', file_get_contents($firstPath));
+            self::assertSame('fixed two repeat', file_get_contents($secondPath));
+        } finally {
+            unlink($firstPath);
+            unlink($secondPath);
+        }
+    }
+
+    public function testInteractiveStructuredOutputRetainsFinalType(): void
+    {
+        if (!extension_loaded('sodium')) {
+            self::markTestSkipped('Interactive mode requires sodium.');
+        }
+        $tool = new CallbackTool(static fn (int $step): string => 'recorded', name: 'record_step');
+        $options = ['interactive' => true];
+        for ($i = 0; $i < 3; $i++) {
+            $step = $this->context('interactive', [$tool])->struct('Extract.', ContextValue::class, $options);
+            self::assertInstanceOf(AiInteractiveResult::class, $step);
+            $options['interactive_continue_id'] = $step->continueId;
+        }
+        $result = $this->context('interactive', [$tool])->struct('Extract.', ContextValue::class, $options);
+        self::assertInstanceOf(ContextValue::class, $result);
+        self::assertSame('ready', $result->value);
     }
 
     public function testEditableTextPromptsShareToolsAndRefreshOnFollowUp(): void

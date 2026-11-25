@@ -1,51 +1,86 @@
-const form = document.querySelector('#chat');
-const input = document.querySelector('#prompt');
-const events = document.querySelector('#events');
+// A single connection handler owns the task, token, pending steering and request loop.
+class InteractiveClient {
+    task = null;
+    running = false;
+    waitingForAnswer = false;
+    pending = [];
 
-let responseId = null;
-let running = false;
-const pending = [];
+    constructor(onResult, onError) {
+        this.onResult = onResult;
+        this.onError = onError;
+    }
 
-async function run() {
-    running = true;
-    try {
-        let result;
-        do {
-            // New user input is consumed once. No repeated initial prompt.
-            const prompt = pending.shift() ?? null;
-            const response = await fetch(location.pathname, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ prompt, responseId }),
-            });
-            result = await response.json();
-            if (!response.ok) {
-                throw new Error(result.error ?? 'Request failed.');
+    submit(text) {
+        if (this.task === null) {
+            this.task = { prompt: text, interactive_continue_id: null };
+        } else {
+            this.pending.push(text);
+        }
+        this.waitingForAnswer = false;
+        if (!this.running) void this.run();
+    }
+
+    async run() {
+        this.running = true;
+        try {
+            while (this.task !== null && !this.waitingForAnswer) {
+                const request = {
+                    ...this.task,
+                    interactive_steering_message: this.pending.length
+                        ? this.pending.splice(0).join('\n')
+                        : null,
+                };
+                const response = await fetch(location.pathname, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(request),
+                });
+                const result = await response.json();
+                if (!response.ok) throw new Error(result.error ?? 'Request failed.');
+
+                // The fixed type is the only framework continuation discriminator.
+                if (result?.type !== 'ai_continue') {
+                    this.task = null;
+                    this.pending.length = 0;
+                    this.onResult(result);
+                    break;
+                }
+                this.task.interactive_continue_id = result.continueId;
+                this.waitingForAnswer = result.stop === true;
+                this.onResult(result);
+                // log_message continues automatically; ask_user waits for submit().
             }
-            responseId = result.responseId;
-            for (const call of result.toolCalls) {
-                events.textContent += 'Tool: ' + call.name + ' (' + call.callId + ')\n';
-            }
-            if (result.message !== null) {
-                events.textContent += 'AI: ' + result.message + '\n';
-            }
-        } while (result.continue || pending.length > 0);
-    } catch (error) {
-        // The server may have applied side effects. Never replay this step blindly.
-        pending.length = 0;
-        responseId = null;
-        events.textContent += 'Error: ' + error.message + '\nStart a new task after checking the previous outcome.\n';
-    } finally {
-        running = false;
+        } catch (error) {
+            this.task = null;
+            this.pending.length = 0;
+            this.onError(error);
+        } finally {
+            this.running = false;
+        }
     }
 }
 
+const form = document.querySelector('#chat');
+const input = document.querySelector('#prompt');
+const events = document.querySelector('#events');
+const append = text => { events.textContent += text + '\n'; };
+
+const client = new InteractiveClient(result => {
+    if (result?.type !== 'ai_continue') {
+        append('AI: ' + result);
+        return;
+    }
+    for (const call of result.toolCalls) append('Tool: ' + call.name);
+    for (const message of result.logMessages) append('Log: ' + message);
+    if (result.message !== null) append('AI: ' + result.message);
+    for (const question of result.questions) append('Question: ' + question);
+}, error => append('Error: ' + error.message));
+
 form.addEventListener('submit', event => {
     event.preventDefault();
-    const prompt = input.value.trim();
-    if (prompt === '') return;
-    pending.push(prompt);
+    const text = input.value.trim();
+    if (text === '') return;
     input.value = '';
-    events.textContent += 'You: ' + prompt + '\n';
-    if (!running) void run();
+    append('You: ' + text);
+    client.submit(text);
 });

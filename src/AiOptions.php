@@ -27,6 +27,9 @@ final readonly class AiOptions
         'connect_timeout',
         'debug_log',
         'max_output_tokens',
+        'interactive',
+        'interactive_continue_id',
+        'interactive_steering_message',
     ];
 
     /**
@@ -43,7 +46,16 @@ final readonly class AiOptions
         public ?int $connectTimeout = null,
         public bool|LoggerInterface $debugLog = false,
         public ?int $maxOutputTokens = null,
+        public bool $interactive = false,
+        public ?string $interactiveContinueId = null,
+        public ?string $interactiveSteeringMessage = null,
     ) {
+        if (!$interactive && ($interactiveContinueId !== null || ($interactiveSteeringMessage !== null && $interactiveSteeringMessage !== ''))) {
+            throw new InvalidArgumentException('Interactive options require interactive=true.');
+        }
+        if ($interactiveContinueId === '') {
+            throw new InvalidArgumentException('Interactive continue ID must not be empty.');
+        }
         if ($maxOutputTokens !== null && $maxOutputTokens <= 0) {
             throw new InvalidArgumentException('max_output_tokens must be a positive integer.');
         }
@@ -115,6 +127,14 @@ final readonly class AiOptions
             throw new InvalidArgumentException('max_output_tokens must be an integer or null.');
         }
 
+        $interactive = $options['interactive'] ?? false;
+        $continueId = $options['interactive_continue_id'] ?? null;
+        $steering = $options['interactive_steering_message'] ?? null;
+        if (!is_bool($interactive) || ($continueId !== null && !is_string($continueId))
+            || ($steering !== null && !is_string($steering))) {
+            throw new InvalidArgumentException('Invalid interactive options.');
+        }
+
         return new self(
             client: $client,
             model: $model,
@@ -123,6 +143,9 @@ final readonly class AiOptions
             connectTimeout: $connectTimeout,
             debugLog: $debugLog,
             maxOutputTokens: $maxOutputTokens,
+            interactive: $interactive,
+            interactiveContinueId: $continueId,
+            interactiveSteeringMessage: $steering,
         );
     }
 
@@ -143,6 +166,9 @@ final readonly class AiOptions
             'connect_timeout' => $this->connectTimeout,
             'debug_log' => $this->debugLog,
             'max_output_tokens' => $this->maxOutputTokens,
+            'interactive' => $this->interactive,
+            'interactive_continue_id' => $this->interactiveContinueId,
+            'interactive_steering_message' => $this->interactiveSteeringMessage,
         ];
     }
 }

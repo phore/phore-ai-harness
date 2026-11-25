@@ -16,6 +16,7 @@ final class FileBatchEditor
     private array $targets = [];
     private array $aliases = [];
     private array $outcomes = [];
+    private array $completedSnapshots = [];
 
     public function __construct(string|array $input)
     {
@@ -57,6 +58,30 @@ final class FileBatchEditor
             $this->targets[$path] = ['alias' => $alias, 'content' => $content, 'exists' => $exists];
             $this->aliases[$alias] = $path;
         }
+    }
+
+    /** @internal Preserve snapshots and outcomes without serializing PHP objects. */
+    public function exportInteractiveState(): array
+    {
+        return ['targets' => $this->targets, 'outcomes' => $this->outcomes, 'completedSnapshots' => $this->completedSnapshots];
+    }
+
+    /** @internal Reauthorize all paths via the constructor before restoring snapshots. */
+    public function importInteractiveState(array $state): void
+    {
+        if (array_keys($this->targets) !== array_keys($state['targets'])) {
+            throw new InvalidArgumentException('Interactive file targets changed.');
+        }
+        foreach ($state['completedSnapshots'] as $path => $snapshot) {
+            $current = $this->targets[$path] ?? null;
+            if ($current === null || $current['exists'] !== $snapshot['exists']
+                || !hash_equals($snapshot['hash'], hash('sha256', $current['content']))) {
+                throw new RuntimeException('Previously edited target changed: ' . $path);
+            }
+        }
+        $this->targets = $state['targets'];
+        $this->outcomes = $state['outcomes'];
+        $this->completedSnapshots = $state['completedSnapshots'];
     }
 
     public function prompts(): array
@@ -112,6 +137,7 @@ final class FileBatchEditor
                 if (!$unchanged) {
                     $this->persist($path, $content, $target);
                 }
+                $this->completedSnapshots[$path] = ['exists' => !$unchanged || $target['exists'], 'hash' => hash('sha256', $content)];
                 $this->outcomes[$path] = ['filename' => $target['alias'], 'path' => $path, 'status' => $unchanged ? 'unchanged' : 'applied', 'edits' => count($edits), 'bytes' => strlen($content)];
             } catch (InvalidArgumentException $error) {
                 $this->outcomes[$path] = ['filename' => $target['alias'], 'path' => $path, 'status' => 'failed', 'retryable' => true, 'error' => $error->getMessage()];

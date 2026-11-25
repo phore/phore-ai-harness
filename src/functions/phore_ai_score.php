@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Phore\AiHarness\Context\AiContextRegistry;
+use Phore\AiHarness\Result\AiInteractiveResult;
 
 /**
  * Score the current task/context from 0.0 to 1.0.
@@ -12,7 +13,7 @@ use Phore\AiHarness\Context\AiContextRegistry;
  * task error is surfaced.
  *
  * @param array<string, mixed> $options Common helper options plus optional ai_context.
- * @return float|null
+ * @return float|null|AiInteractiveResult
  * @example $score = phore_ai_score('How relevant is it?', options: ['ai_context' => 'article']);
  * @see \Phore\AiHarness\AiContext::score()
  */
@@ -20,7 +21,7 @@ function phore_ai_score(
     ?string $prompt,
     bool $allowNull = false,
     array $options = [],
-): ?float {
+): float|AiInteractiveResult|null {
     $context = AiContextRegistry::resolve($options);
     unset($options['ai_context']);
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Phore\AiHarness\Context\Traits;
 
+use Phore\AiHarness\Result\AiInteractiveResult;
 use Phore\AiHarness\Helper\Toolkit;
 use Phore\AiHarness\PhoreAi;
 use Phore\AiHarness\PromptType\PromptType;
@@ -19,13 +20,13 @@ trait StructArrayTrait
      * @param string|PromptType|ToolType|array $prompts Instructions and sources.
      * @param class-string<T> $input Class used to hydrate every list element.
      * @param array<string, mixed> $options Per-call context overrides.
-     * @return list<T>
+     * @return list<T>|AiInteractiveResult
      * @throws \InvalidArgumentException For an invalid class or result shape.
      * @example $items = (new AiContext())->structArray('Extract tasks.', Task::class);
      * @see \Phore\AiHarness\AiContext
      * @see PhoreAi::runCastedArray()
      */
-    public function structArray(string|PromptType|ToolType|array $prompts, string $input, array $options = []): array
+    public function structArray(string|PromptType|ToolType|array $prompts, string $input, array $options = []): array|AiInteractiveResult
     {
         return $this->executeAi(
             Toolkit::normalizePromptItems($prompts),

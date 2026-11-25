@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Phore\AiHarness\Context\AiContextRegistry;
+use Phore\AiHarness\Result\AiInteractiveResult;
 
 /**
  * Rank all supplied string/integer choices in a temporary or named AI context.
@@ -13,7 +14,7 @@ use Phore\AiHarness\Context\AiContextRegistry;
  *
  * @param array<int|string, int|string|null> $choices Values or value => description mappings.
  * @param array<string, mixed> $options Common helper options plus optional ai_context.
- * @return list<string|int>|null
+ * @return list<string|int>|null|AiInteractiveResult
  * @example $ranking = phore_ai_rank(null, ['news', 'guide'], options: ['ai_context' => 'article']);
  * @see \Phore\AiHarness\AiContext::rank()
  */
@@ -22,7 +23,7 @@ function phore_ai_rank(
     array $choices,
     bool $allowNull = false,
     array $options = [],
-): ?array {
+): array|AiInteractiveResult|null {
     $context = AiContextRegistry::resolve($options);
     unset($options['ai_context']);
 

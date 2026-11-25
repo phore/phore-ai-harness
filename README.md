@@ -320,75 +320,125 @@ An actual HTTP endpoint must authorize incoming IDs before resuming them.
 
 ### Interactive tool execution over HTTP
 
-Use `AiContext::doInteractive()` when the caller, rather than PHP, should
-control the tool loop. Rebuild the same context (prepared instructions, tools,
-model and client) on each request. Only the current provider response ID and
-an optional text prompt cross the application boundary.
+All high-level AI operations support the same optional interactive settings:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `interactive` | `false` | Execute one model request and its local callback batch |
+| `interactive_continue_id` | `null` | Opaque encrypted continuation; null starts a new task |
+| `interactive_steering_message` | `null` | Additional user input; null and empty strings are omitted |
+
+Use the existing function with its original arguments on every HTTP request.
+Only the first request submits the task prompt. Subsequent requests submit the
+saved tool outputs and optional steering. The provider's output schema and the
+registered tools and instructions remain available.
 
 ```php
-$step = $context->doInteractive(prompt: 'Prepare and review a topic.');
-echo json_encode($step);
+use Phore\AiHarness\Result\AiInteractiveResult;
 
-// On the next HTTP request, rebuild $context with the same tools.
-$step = $context->doInteractive(responseId: $step->responseId);
+$result = phore_ai_text([
+    'Prepare a short report using the supplied tools.',
+    $tool,
+], [
+    'interactive' => true,
+    'interactive_continue_id' => $request['interactive_continue_id'] ?? null,
+    'interactive_steering_message' => $request['interactive_steering_message'] ?? null,
+]);
 
-// Optional new input is steering, not a repeated initial prompt.
-$step = $context->doInteractive('Focus on accessibility.', $step->responseId);
+// The application can extend the DTO or append metadata before serialization.
+if ($result instanceof AiInteractiveResult) {
+    return json_encode([...get_object_vars($result), 'statusMessage' => $statusMessage]);
+}
+return json_encode($result);
 ```
 
-The result exposes `responseId`, `continue`, `message` and `toolCalls`.
-A typical intermediate result looks like:
+Here `$tool` is a registered application CallbackTool and `$statusMessage`
+is optional application data. The complete example below shows their creation.
+
+A continuation always has the fixed JSON discriminator `type: "ai_continue"`:
 
 ```json
 {
-  "responseId": "resp_example",
-  "continue": true,
-  "message": null,
-  "toolCalls": [{"name": "prepare_topic", "callId": "call_example"}]
+  "type": "ai_continue",
+  "continueId": "v1.example-encrypted-token",
+  "toolCalls": [{"name": "log_message", "callId": "call_example"}],
+  "message": null
 }
 ```
 
-- A null ID requires an initial prompt and starts a fresh conversation.
-- A supplied ID retrieves the stored response. Null prompt continues an open
-  tool round; a text prompt adds new user input. After `continue: false`,
-  a text prompt with the final ID starts a new turn in the same conversation.
-- Each call executes at most one batch of local callbacks (a model response
-  may contain several). The first step may make two model calls: one to obtain
-  the calls, one to submit their outputs. A resumed open round retrieves the
-  previous response, executes its calls, and sends all outputs plus any new
-  prompt to the model. It stops at the next response. The five-round limit of
-  synchronous `do()` remains unchanged; the consumer controls the overall
-  number of interactive steps.
-- `toolCalls` identifies executed local calls, including recoverable tool
-  failures. It is not a success report and does not expose arguments or
-  results. Provider-hosted tools are not separately stepped. `message` is
-  optional model text, not a fabricated progress update. `continue: false`
-  means no pending local calls, not a structured `do()` success assertion.
+The client checks the discriminator, returns the token as
+`interactive_continue_id` and repeats the same endpoint. If the result is not
+a continuation, the operation is finished and its usual return value is
+returned directly (string, bool, DTO, array, image, etc.). Reserve the
+`ai_continue` discriminator for continuations in your HTTP API.
 
-**Steering and safety:** queued steering is included in the next model request
-after any already-selected local tools execute. It cannot interrupt or undo
-those tools. Use the latest response ID only, authorize it for the current
-user/workspace, and serialize requests. Never retry an uncertain write blindly:
-a tool may have run before a transport failure. The library does not provide
-exactly-once execution or persistent application state. Stored provider
-responses must remain retrievable; provider retention limits apply. Persist
-mutable text/file/tool state yourself and rebuild it before resuming.
-`AiInteractiveResult` is an extensible DTO; add your own events, changed
-files or metadata in the application response.
+Each interactive call makes one model request and executes at most one batch
+of local callbacks. After any executed batch it returns a continuation
+**before** sending the callback outputs to the provider. This is why the
+client can always wait for a human response after a callback, even if it was
+the last callback before completion. A response with no pending local calls
+goes through the normal output decoding and validation. Synchronous calls
+retain their existing five-round limit; the interactive consumer controls its
+own overall limit. Provider-hosted tools are not separately stepped.
 
-Run the local-only [HTTP and JavaScript example](examples/18-interactive/)
+The mode applies to text, do, struct, struct arrays, choices, yes/no, rank,
+score, image and file editing, including the corresponding AiContext and
+AiContextTrait methods. Use a stable tool name, the same operation arguments
+and prepared tools on each step. For editable inputs keep the original text
+or struct snapshot, target file list, policies and stable filesystem IDs.
+Mutable text state, file edit outcomes/snapshots, memory revision histories
+and unsent callback outputs are carried in the token. Actual filesystem writes
+and persistent revision stores are not copied. Application callback closures,
+external connections, custom tool state and side effects must be rebuilt or
+persisted by the application. Never serialize a PHP object graph.
+
+#### Signing key
+
+Interactive mode requires PHP's sodium extension. The opaque token uses
+authenticated XChaCha20-Poly1305 encryption and a provider-specific HKDF-SHA256
+key. Configure a stable random signing secret explicitly when possible:
+
+```php
+use Phore\AiHarness\Keystore\Keystore;
+
+Keystore::instance()->setSigningKey($applicationSecret);
+```
+
+The secret can also be supplied as `SIGNING_KEY` in the environment or
+`/var/run/secrets/signing_key`. Otherwise the actual client's API key is used
+for derivation. Rotating that API key invalidates outstanding tokens unless a
+stable independent signing secret is configured. The codec binds the token to
+the provider endpoint and project. Tokens are versioned and limited to 32 MiB;
+large editor snapshots can be expensive to transmit. Do not log them.
+
+**Application boundary:** the token is not user authentication, authorization,
+a lock or replay protection. Bind it to the authenticated user and operation,
+accept only the latest token, serialize requests and never blindly retry an
+uncertain write. Old tokens can replay work. Keep provider responses stored and
+available for continuation. Already-executed callbacks cannot be interrupted
+or undone. Application-defined callbacks in one model response all run before
+the pause; use separate rounds for actions that must wait for confirmation.
+
+#### Example: log messages and ask the user
+
+Run the [single-endpoint PHP/JavaScript example](examples/18-interactive/)
 with configured OpenAI credentials:
 
 ```sh
 php -S 127.0.0.1:8080 -t examples/18-interactive
 ```
 
-Open http://127.0.0.1:8080 and submit “Call prepare_topic for accessibility,
-then review_topic for accessibility, then summarize.” While the client is
-working, send a new instruction. The same endpoint handles every step, and
-the JavaScript loop stops when `continue` is false unless another user
-message is queued. The example uses a session to accept only the latest
-cursor, not a production authentication or idempotency solution.
+Open http://127.0.0.1:8080 and submit “Prepare a short website accessibility
+report. Ask me which audience to focus on.” The application defines ordinary
+CallbackTools with captured PHP variables. The `log_message` tool appends
+status messages; the `ask_user` tool captures a question. The endpoint adds
+`logMessages`, `questions` and `stop` to the continuation response. The browser
+displays status messages and automatically continues, except when `stop` is
+true. The next user input then becomes the steering message, and the exact
+same endpoint resumes using the saved token. This is application logic, not
+a built-in question or logging protocol. A session in the local demo protects
+against stale continuation tokens; production authentication and authorization
+are the application's responsibility.
 
 ### System prompts on follow-up requests
 

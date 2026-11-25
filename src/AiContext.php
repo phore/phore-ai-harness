@@ -18,6 +18,10 @@ use Phore\AiHarness\Context\Traits\StructArrayTrait;
 use Phore\AiHarness\Context\Traits\StructTrait;
 use Phore\AiHarness\Context\Traits\TextTrait;
 use Phore\AiHarness\Helper\Toolkit;
+use Phore\AiHarness\Interactive\ContinueKey;
+use Phore\AiHarness\Interactive\InteractivePause;
+use Phore\AiHarness\Result\AiInteractiveResult;
+use Phore\AiHarness\FileSystem\AiFileSystemToolSet;
 use Phore\AiHarness\OutputFormat\OutputFormat;
 use Phore\AiHarness\PromptType\EditableTextPrompt;
 use Phore\AiHarness\PromptType\PromptType;
@@ -305,7 +309,7 @@ final class AiContext
     public function queryContent(
         string $prompt,
         AiOptions|array|string|null $options = null,
-    ): AiContentResultSet {
+    ): AiContentResultSet|AiInteractiveResult {
         if (trim($prompt) === '') {
             throw new InvalidArgumentException('AI content query must not be empty.');
         }
@@ -343,6 +347,9 @@ final class AiContext
             options: $options,
         );
 
+        if ($ids instanceof AiInteractiveResult) {
+            return $ids;
+        }
         $matched = [];
         foreach ($ids ?? [] as $choiceId) {
             if (!is_string($choiceId) || !str_starts_with($choiceId, 'content:')) {
@@ -519,7 +526,7 @@ final class AiContext
     }
 
     /** @internal Execute one operation through the existing provider facade. */
-    private function executeAi(array $items, array $options, callable $operation, ?OutputFormat $format = null): mixed
+    private function executeAi(array $items, array $options, callable $operation, ?OutputFormat $format = null, ?callable $localState = null, string $binding = ''): mixed
     {
         $this->assertIdle();
         $this->running = true;
@@ -550,8 +557,26 @@ final class AiContext
                 $this->clientSelection = $selection;
             }
 
+            // Authenticate before restoring local state or invoking provider tools.
+            $runtime = AiOptions::fromArray(array_intersect_key($effective, array_flip(AiOptions::KEYS)));
+            $codec = null;
+            $key = null;
+            $stateItems = [...$this->prompts, ...$this->pendingPrompts, ...$items];
+            if ($runtime->interactive) {
+                $codec = $ai->getOpenAiClient()->getContinueKeyGenerator();
+                if ($runtime->interactiveContinueId !== null) {
+                    $key = $codec->decode($runtime->interactiveContinueId);
+                    if (($key->state['binding'] ?? null) !== $binding) {
+                        throw new InvalidArgumentException('Interactive operation input changed.');
+                    }
+                    $this->restoreInteractiveState($stateItems, $key->state, $localState);
+                }
+                $this->responseId = $key?->responseId;
+                $ai = $ai->withInteractive($key, $runtime->interactiveSteeringMessage);
+            }
+
             // Daten-Prompts werden beim Root geladen; Tools/Systemprompts bleiben request-lokal aktiv.
-            $items = $this->withContextItems($items);
+            $items = $this->withContextItems($items, $runtime->interactive);
             $skillSet = $this->getToolSet(SkillCollection::class);
             if ($skillSet !== null) {
                 $catalog = $skillSet->list();
@@ -569,6 +594,15 @@ final class AiContext
             }
 
             return $operation($ai);
+        } catch (InteractivePause $pause) {
+            $state = $this->captureInteractiveState($stateItems, $localState);
+            $state['binding'] = $binding;
+            $state['outputs'] = $pause->outputs;
+            $token = $codec->encode(new ContinueKey($pause->responseId, $pause->contract, $state));
+            $this->responseId = $pause->responseId;
+            $this->pendingPrompts = [];
+
+            return new AiInteractiveResult($token, $pause->toolCalls, $pause->outputText);
         } finally {
             // Nur abgeschlossene Tool-Schleifen liefern einen fortsetzbaren Cursor.
             // Auch bei anschliessenden lokalen Decode-Fehlern bleibt dieser erhalten.
@@ -631,9 +665,63 @@ final class AiContext
      * @param list<PromptType|ToolType> $items
      * @return list<PromptType|ToolType>
      */
-    private function withContextItems(array $items): array
+    private function captureInteractiveState(array $items, ?callable $localState): array
     {
-        $contextItems = $this->responseId === null
+        $texts = [];
+        foreach ($items as $item) {
+            if ($item instanceof EditableTextPrompt) {
+                $texts[$item->alias] = [
+                    'original' => hash('sha256', $item->getOriginalContent()),
+                    'content' => $item->getContent(),
+                ];
+            }
+        }
+        return [
+            'local' => $localState === null ? null : $localState(null),
+            'texts' => $texts,
+            'filesystems' => $this->getToolSet(AiFileSystemToolSet::class)?->exportInteractiveState(),
+        ];
+    }
+
+    /** @internal Restore only data; tools, permissions and callbacks are rebuilt by the caller. */
+    private function restoreInteractiveState(array $items, array $state, ?callable $localState): void
+    {
+        if (($localState === null) !== (($state['local'] ?? null) === null)) {
+            throw new InvalidArgumentException('Interactive editor configuration changed.');
+        }
+        if ($localState !== null) {
+            $localState($state['local']);
+        }
+        $texts = [];
+        foreach ($items as $item) {
+            if ($item instanceof EditableTextPrompt) {
+                $texts[$item->alias] = $item;
+            }
+        }
+        $saved = $state['texts'] ?? [];
+        if (array_keys($texts) !== array_keys($saved)) {
+            throw new InvalidArgumentException('Interactive editable text targets changed.');
+        }
+        foreach ($texts as $alias => $item) {
+            $text = $saved[$alias];
+            if ($text['original'] !== hash('sha256', $item->getOriginalContent())
+                || ($item->getContent() !== $item->getOriginalContent() && $item->getContent() !== $text['content'])) {
+                throw new InvalidArgumentException('Interactive editable text snapshot changed.');
+            }
+            $item->setContent($text['content']);
+        }
+        $fs = $this->getToolSet(AiFileSystemToolSet::class);
+        if (($fs === null) !== (($state['filesystems'] ?? null) === null)) {
+            throw new InvalidArgumentException('Interactive filesystem configuration changed.');
+        }
+        if ($fs !== null) {
+            $fs->importInteractiveState($state['filesystems']);
+        }
+    }
+
+    private function withContextItems(array $items, bool $includePrepared = false): array
+    {
+        $contextItems = $includePrepared || $this->responseId === null
             ? $this->prompts
             : array_values(array_filter(
                 $this->prompts,

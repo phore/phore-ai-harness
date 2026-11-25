@@ -92,6 +92,19 @@ final class MemoryRevisionStore implements RevisionStoreInterface
         return null;
     }
 
+    /** @internal Export process-local revisions as authenticated JSON data. */
+    public function exportInteractiveState(): array
+    {
+        return ['revisions' => $this->revisions, 'nextId' => $this->nextId];
+    }
+
+    /** @internal Restore revisions from the authenticated continuation. */
+    public function importInteractiveState(array $state): void
+    {
+        $this->revisions = $state['revisions'];
+        $this->nextId = $state['nextId'];
+    }
+
     private function key(string $fileSystemId, string $path): string
     {
         return $fileSystemId . "\0" . $path;

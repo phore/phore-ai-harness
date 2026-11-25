@@ -586,6 +586,29 @@ final class AiFileSystem
         ];
     }
 
+    /** @internal Persist only memory history; never serialize filesystem access or hooks. */
+    public function exportInteractiveState(): array
+    {
+        return [
+            'configuration' => hash('sha256', \Phore\AiHarness\Helper\Toolkit::jsonEncode([
+                $this->id, $this->root, $this->files, $this->policy, $this->revisionStore::class,
+            ])),
+            'history' => $this->revisionStore instanceof MemoryRevisionStore
+                ? $this->revisionStore->exportInteractiveState() : null,
+        ];
+    }
+
+    /** @internal Validate the current filesystem binding before restoring memory history. */
+    public function importInteractiveState(array $state): void
+    {
+        if ($state['configuration'] !== $this->exportInteractiveState()['configuration']) {
+            throw new InvalidArgumentException('Interactive filesystem configuration changed.');
+        }
+        if ($this->revisionStore instanceof MemoryRevisionStore) {
+            $this->revisionStore->importInteractiveState($state['history']);
+        }
+    }
+
     public function getContext(): AiContext
     {
         return $this->context;

@@ -104,6 +104,23 @@ final class AiFileSystemToolSet implements AiToolSet
         return $this;
     }
 
+    /** @internal Capture memory revision histories for the registered filesystems. */
+    public function exportInteractiveState(): array
+    {
+        return array_map(static fn (AiFileSystem $fs): array => $fs->exportInteractiveState(), $this->fileSystems);
+    }
+
+    /** @internal Restore history only for identically registered filesystem IDs. */
+    public function importInteractiveState(array $state): void
+    {
+        if (array_keys($state) !== array_keys($this->fileSystems)) {
+            throw new InvalidArgumentException('Interactive filesystem IDs changed.');
+        }
+        foreach ($this->fileSystems as $id => $fs) {
+            $fs->importInteractiveState($state[$id]);
+        }
+    }
+
     public function getFileSystem(string $id): ?AiFileSystem
     {
         return $this->fileSystems[$id] ?? null;

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Phore\AiHarness\AiContext;
 use Phore\AiHarness\Context\AiContextRegistry;
+use Phore\AiHarness\Result\AiInteractiveResult;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\Result\ImageResultType;
 use Phore\AiHarness\ToolType\ToolType;
@@ -17,14 +18,14 @@ use Phore\AiHarness\ToolType\ToolType;
  *
  * @param string|PromptType|ToolType|array<int, string|PromptType|ToolType> $prompts Instructions and source prompts/tools.
  * @param array<string, mixed> $options Common context and image-generation options.
- * @return ImageResultType Binary data and metadata; no file is written automatically.
+ * @return ImageResultType|AiInteractiveResult Binary data and metadata; no file is written automatically.
  * @throws InvalidArgumentException For invalid settings or context selectors.
  * @throws RuntimeException For provider/tool failure or a missing image.
  * @example $image = phore_ai_image('A simple icon.', ['ai_context' => 'default', 'output_format' => 'png']);
  * @see AiContext::image()
  * @see ImageResultType::saveToFile()
  */
-function phore_ai_image(string|PromptType|ToolType|array $prompts, array $options = []): ImageResultType
+function phore_ai_image(string|PromptType|ToolType|array $prompts, array $options = []): ImageResultType|AiInteractiveResult
 {
     return AiContextRegistry::resolve($options)->image($prompts, $options);
 }

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Phore\AiHarness\Context\Traits;
 
+use Phore\AiHarness\Result\AiInteractiveResult;
 use InvalidArgumentException;
 use Phore\AiHarness\Helper\Toolkit;
 use Phore\AiHarness\OutputFormat\StructPatchOutput;
@@ -34,7 +35,7 @@ trait StructTrait
      * @param string|PromptType|ToolType|array $prompts Instructions and sources.
      * @param class-string<T>|T $input Output class or existing editing target.
      * @param array<string, mixed> $options Common and struct-patch options.
-     * @return T|\Phore\JsonPatch\PatchApplyResult Metadata when dry_run/return_patch is set.
+     * @return T|\Phore\JsonPatch\PatchApplyResult|AiInteractiveResult Metadata when dry_run/return_patch is set.
      * @throws InvalidArgumentException For invalid options, class or prompt tools.
      * @throws \Phore\JsonPatch\PatchValidationException For an invalid patch.
      * @example $answer = (new AiContext())->struct('Extract the answer.', Answer::class);
@@ -88,7 +89,13 @@ trait StructTrait
             'target' => $view, 'target_schema' => $schema, 'expected_hash' => $hash,
         ]));
         $format = new StructPatchOutput($policy);
-        $output = $this->executeAi($items, $options, static fn (PhoreAi $ai): string => $ai->run(), $format);
+        $output = $this->executeAi(
+            $items, $options, static fn (PhoreAi $ai): string => $ai->run(), $format,
+            binding: hash('sha256', Toolkit::jsonEncode([$target::class, $hash, $addressing, $options['identity_pointers'] ?? []])),
+        );
+        if ($output instanceof AiInteractiveResult) {
+            return $output;
+        }
 
         // Erst nach der Modellantwort wird lokal validiert; es gibt keinen Rewrite-Fallback.
         $patch = $format->parse($output);

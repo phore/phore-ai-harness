@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Phore\AiHarness\Context\Traits;
 
+use Phore\AiHarness\Result\AiInteractiveResult;
 use InvalidArgumentException;
 use Phore\AiHarness\Edit\FileBatchEditor;
 use Phore\AiHarness\Edit\FileEditException;
@@ -54,9 +55,18 @@ trait FileTrait
                 $items,
                 $options,
                 static fn (PhoreAi $ai): object|string => $className === null ? $ai->run() : $ai->runCasted($className),
+                localState: static function (?array $state) use ($editor): array {
+                    if ($state !== null) {
+                        $editor->importInteractiveState($state);
+                    }
+                    return $editor->exportInteractiveState();
+                },
             );
         } catch (CallbackRoundLimitException $error) {
             throw new FileEditException($editor->results(), $error);
+        }
+        if ($result instanceof AiInteractiveResult) {
+            return $result;
         }
         $editor->assertComplete();
         return $result;

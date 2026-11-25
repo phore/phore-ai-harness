@@ -87,6 +87,40 @@ final class Keystore
         return $this;
     }
 
+    /**
+     * Set a stable application secret for continuation tokens.
+     * Use a dedicated random secret of at least 32 bytes.
+     * @example Keystore::instance()->setSigningKey($applicationSecret);
+     * @see getSigningKey()
+     */
+    public function setSigningKey(#[\SensitiveParameter] string $secret): self
+    {
+        $this->addKey($secret, 'signing_key');
+        $this->loadedProviders['signing_key'] = true;
+
+        return $this;
+    }
+
+    /**
+     * Derive 32 binary key bytes. Explicit signing_key (environment or secret
+     * file included) takes precedence over the actual client/provider key.
+     * @throws RuntimeException If no secret or provider key is available.
+     * @example $key = Keystore::instance()->getSigningKey('open_ai');
+     * @see setSigningKey()
+     */
+    public function getSigningKey(string $provider, #[\SensitiveParameter] ?string $apiKey = null): string
+    {
+        $provider = $this->normalizeProvider($provider);
+        $secret = (isset($this->keys['signing_key']) || $this->hasKey('signing_key'))
+            ? $this->keys['signing_key']
+            : ($apiKey ?? $this->getKey($provider));
+        if ($secret === '') {
+            throw new InvalidArgumentException('Signing secret must not be empty.');
+        }
+
+        return hash_hkdf('sha256', $secret, 32, 'phore-ai-harness/continue-key/v1/' . $provider);
+    }
+
     public function hasKey(string $provider = 'open_ai'): bool
     {
         $provider = $this->normalizeProvider($provider);

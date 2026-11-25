@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Phore\AiHarness\Context\Traits;
 
+use Phore\AiHarness\Result\AiInteractiveResult;
 use Phore\AiHarness\Helper\Toolkit;
 use Phore\AiHarness\PhoreAi;
 use Phore\AiHarness\PromptType\PromptType;
@@ -25,7 +26,7 @@ trait ImageTrait
      * @see \Phore\AiHarness\AiContext
      * @see ImageResultType::saveToFile()
      */
-    public function image(string|PromptType|ToolType|array $prompts, array $options = []): ImageResultType
+    public function image(string|PromptType|ToolType|array $prompts, array $options = []): ImageResultType|AiInteractiveResult
     {
         $items = Toolkit::normalizePromptItems($prompts);
         if (!Toolkit::hasTool($items, ImageGenerationTool::class) && !$this->hasContextTool(ImageGenerationTool::class)) {

@@ -24,7 +24,8 @@ use Phore\AiHarness\OutputFormat\StructPatchOutput;
 use Phore\AiHarness\OutputFormat\TextOutput;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\PromptType\SystemPrompt;
-use Phore\AiHarness\Result\AiInteractiveResult;
+use Phore\AiHarness\Interactive\ContinueKey;
+use Phore\AiHarness\Interactive\InteractivePause;
 use Phore\AiHarness\Result\DoResultType;
 use Phore\AiHarness\Result\ImageResultType;
 use Phore\AiHarness\ToolType\CallbackRoundLimitException;
@@ -278,80 +279,70 @@ final class PhoreAi
         );
     }
 
-    /**
-     * Run one interactive step using the configured prompt, tools and cursor.
-     *
-     * Start with a model request or retrieve the stored parent. Execute at
-     * most one batch of local function calls, submit all outputs and stop
-     * after the next provider response. The initial step can therefore make
-     * two model requests. A resumed open round sends new input after its tool
-     * outputs, never as a substitute for them. The returned ID refers to the
-     * newest response, not an HTTP request ID.
-     *
-     * @throws \RuntimeException On malformed or unsuccessful provider responses.
-     * @example $step = $ai->runInteractive();
-     * @see AiContext::doInteractive()
-     * @see AiInteractiveResult
-     */
-    public function runInteractive(): AiInteractiveResult
+    private bool $interactive = false;
+    private ?ContinueKey $continueKey = null;
+    private ?string $steering = null;
+
+    /** @internal Configure a single step before the existing typed operation runs. */
+    public function withInteractive(?ContinueKey $key, ?string $steering): self
     {
-        return $this->executeRun(fn (?RunContext $context) => $this->runInteractiveInternal($context));
+        return clone($this, [
+            'interactive' => true,
+            'continueKey' => $key,
+            'steering' => $steering === '' ? null : $steering,
+        ]);
     }
 
-    private function runInteractiveInternal(?RunContext $context): AiInteractiveResult
+    /**
+     * All output modes share the same callback loop. On a resumed step the
+     * original input is never submitted again. The output schema and current
+     * tools/instructions must match the authenticated contract.
+     */
+    private function executeResponse(AiRequest $request, ?RunContext $context, bool $stream = true): AiResponse
     {
-        $request = (new OpenAiPromptTypeConverter())->toAiRequest($this->model, $this->prompts);
-        if ($this->tools !== []) {
-            $request = $request->withTools(...$this->tools);
+        if (!$this->interactive) {
+            return $this->resolveCallbackToolCalls($request, $this->sendRequest($request, $context, $stream), $context);
         }
-        $request = $this->applyOutputFormat($request, $this->outputFormat);
+
+        // Der Vertrag enthält Konfiguration und Schema, aber nicht den ursprünglichen Input.
+        $configuration = $request->toArray();
+        unset($configuration['input'], $configuration['previous_response_id']);
+        $contract = hash('sha256', Toolkit::jsonEncode([
+            $configuration, $this->reasoning, $this->responseOptions,
+        ]));
         $callbacks = $this->callbackToolsByName();
-        $input = $request->input === '' ? [] : $request->input;
+        $steering = $this->steering === null ? [] : [['role' => 'user', 'content' => $this->steering]];
 
-        // Eine offene Antwort wird geladen, nicht durch einen neuen Prompt ersetzt.
-        if ($this->previousResponseId !== null) {
-            $response = $this->openAiClient->retrieveResponse($this->previousResponseId);
-            $this->assertCompletedResponse($response);
-            if ($response->getId() !== $this->previousResponseId) {
-                throw new \RuntimeException('Retrieved response ID does not match the requested cursor.');
+        // Erst jetzt die gespeicherten Tool-Outputs mitsamt optionalem Steering senden.
+        // So kann auch ask_user als letzter Tool Call zuverlässig pausieren.
+        if ($this->continueKey !== null) {
+            if (!hash_equals($this->continueKey->contract, $contract)) {
+                throw new \InvalidArgumentException('Interactive operation configuration changed.');
             }
-            if ($this->interactiveCalls($response, $callbacks) === [] && $input !== []) {
-                $response = $this->sendRequest($request->withFollowUp($input, $this->previousResponseId), $context);
-                $input = [];
-            }
-        } else {
-            $response = $this->sendRequest($request, $context);
-            $input = [];
+            $outputs = $this->continueKey->state['outputs'];
+            $request = $request->withFollowUp([...$outputs, ...$steering], $this->continueKey->responseId);
+        } elseif ($steering !== []) {
+            $input = is_string($request->input)
+                ? ($request->input === '' ? [] : [['role' => 'user', 'content' => $request->input]])
+                : $request->input;
+            $request = clone($request, ['input' => [...$input, ...$steering]]);
         }
 
-        // Genau eine Callback-Runde ausführen und die Ergebnisse vollständig übermitteln.
+        $response = $this->sendRequest($request, $context, $stream);
         $calls = $this->interactiveCalls($response, $callbacks);
-        if ($calls !== []) {
-            $responseId = $response->getId();
-            if ($responseId === null) {
-                throw new \RuntimeException('Callback response is missing its response ID.');
-            }
-            $outputs = $this->callbackToolCallOutputs($response, $callbacks, $context);
-            if ($context !== null && $context->retryPending) {
-                $context->retries++;
-                $context->retryPending = false;
-            }
-            $response = $this->sendRequest(
-                $request->withFollowUp([...$outputs, ...$input], $responseId),
-                $context,
-            );
+        if ($calls === []) {
+            return $response;
         }
 
-        // Die neue Antwort bleibt beim Provider gespeichert; nur ihre ID wird weitergegeben.
-        $pending = $this->interactiveCalls($response, $callbacks);
-        $responseId = $response->getId();
-        if ($responseId === null || $responseId === '') {
-            throw new \RuntimeException('Interactive response is missing its response ID.');
+        // Eine lokale Callback-Runde ausführen. Outputs werden verschlüsselt mitgeführt;
+        // der nächste HTTP-Request setzt die Modellkonversation fort.
+        $id = $response->getId();
+        if ($id === null || $id === '') {
+            throw new \RuntimeException('Callback response is missing its response ID.');
         }
-        $this->lastResponseId = $responseId;
-        $message = $response->getOutputText();
-
-        return new AiInteractiveResult($responseId, $pending !== [], $message === '' ? null : $message, $calls);
+        $outputs = $this->callbackToolCallOutputs($response, $callbacks, $context);
+        $text = $response->getOutputText();
+        throw new InteractivePause($id, $contract, $calls, $text === '' ? null : $text, $outputs);
     }
 
     /**
@@ -396,8 +387,7 @@ final class PhoreAi
         }
         $request = $this->applyOutputFormat($request, $this->outputFormat);
 
-        $response = $this->sendRequest($request, $context);
-        $response = $this->resolveCallbackToolCalls($request, $response, $context);
+        $response = $this->executeResponse($request, $context);
         $this->lastResponseId = $response->getId();
 
         return $response->getOutputText();
@@ -425,8 +415,7 @@ final class PhoreAi
             $request = $request->withTools(...$instance->tools);
         }
 
-        $response = $instance->sendRequest($request, $context, false);
-        $response = $instance->resolveCallbackToolCalls($request, $response, $context);
+        $response = $instance->executeResponse($request, $context, false);
         $this->lastResponseId = $response->getId();
         return $instance->openAiClient->buildImageResponse($response, $contentType);
     }
@@ -517,8 +506,7 @@ final class PhoreAi
             'Return the result as an object with an items array. Each item must match the requested PHP class schema.',
         );
 
-        $response = $this->sendRequest($request, $context);
-        $response = $this->resolveCallbackToolCalls($request, $response, $context);
+        $response = $this->executeResponse($request, $context);
         $this->lastResponseId = $response->getId();
         $data = Toolkit::decodeJsonOutputValue($response->getOutputText());
         $items = is_array($data) && array_is_list($data) ? $data : (is_array($data) ? ($data['items'] ?? null) : null);
@@ -660,6 +648,9 @@ final class PhoreAi
             $result = $run($context);
             $status = 'ok';
             return $result;
+        } catch (InteractivePause $pause) {
+            $status = 'ok';
+            throw $pause;
         } catch (\Throwable $error) {
             $context?->error($error);
             throw $error;

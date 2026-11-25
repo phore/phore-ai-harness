@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Phore\AiHarness\Context\Traits;
 
+use Phore\AiHarness\Result\AiInteractiveResult;
 use InvalidArgumentException;
 use Phore\AiHarness\AiOptions;
 use Phore\AiHarness\Helper\Toolkit;
@@ -47,7 +48,7 @@ trait SimpleTypesTrait
         array $choices,
         bool $allowNull = false,
         AiOptions|array|string|null $options = null,
-    ): string|int|null {
+    ): string|int|AiInteractiveResult|null {
         $normalized = $this->normalizeSimpleChoices($choices);
         [$runtimeOptions, $selected, $selectedProvided] = $this->normalizeSimpleTypeOptions($options, true);
         if ($selectedProvided && $selected !== null) {
@@ -69,7 +70,11 @@ trait SimpleTypesTrait
             $items,
             $runtimeOptions,
             static fn (PhoreAi $ai): object => $ai->runCasted(ChoiceResultType::class),
+            binding: hash('sha256', Toolkit::jsonEncode([$normalized, $selected, $selectedProvided, $allowNull])),
         );
+        if ($result instanceof AiInteractiveResult) {
+            return $result;
+        }
 
         if (!$result->determined) {
             return $this->resolveSimpleTypeUndetermined($allowNull, 'choice');
@@ -87,7 +92,7 @@ trait SimpleTypesTrait
      *
      * @param array<int|string, int|string|null> $choices Allowed values or value => description mappings.
      * @param AiOptions|array<string, mixed>|string|null $options Per-call model/runtime options or a model name.
-     * @return list<string|int>|null Selected values, or null when undetermined and allowed.
+     * @return list<string|int>|null|AiInteractiveResult Selected values, or null when undetermined and allowed.
      * @throws TaskErrorException When the result is undetermined and allowNull is false.
      * @example $tags = $context->choices('Which tags apply?', ['news', 'guide', 'review'], min: 1, max: 2);
      * @example $tags = $context->choices(null, ['news', 'guide', 'review'], min: 0, max: 2, options: 'gpt-5-mini');
@@ -99,7 +104,7 @@ trait SimpleTypesTrait
         ?int $max = null,
         bool $allowNull = false,
         AiOptions|array|string|null $options = null,
-    ): ?array {
+    ): array|AiInteractiveResult|null {
         $normalized = $this->normalizeSimpleChoices($choices);
         $resolvedMax = $max ?? count($normalized);
         if ($min < 0) {
@@ -142,7 +147,11 @@ trait SimpleTypesTrait
             $items,
             $runtimeOptions,
             static fn (PhoreAi $ai): object => $ai->runCasted(ChoicesResultType::class),
+            binding: hash('sha256', Toolkit::jsonEncode([$normalized, $selected, $selectedProvided, $min, $resolvedMax, $allowNull])),
         );
+        if ($result instanceof AiInteractiveResult) {
+            return $result;
+        }
 
         if (!$result->determined) {
             return $this->resolveSimpleTypeUndetermined($allowNull, 'choices');
@@ -166,7 +175,7 @@ trait SimpleTypesTrait
      * Decide yes/no, optionally allowing an undecidable null result.
      *
      * @param AiOptions|array<string, mixed>|string|null $options Per-call model/runtime options or a model name.
-     * @return bool|null Null is possible only when allowNull is true.
+     * @return bool|null|AiInteractiveResult Null is possible only when allowNull is true.
      * @throws TaskErrorException When the result is undetermined and allowNull is false.
      * @example $publish = $context->yesNo('Is the article ready to publish?');
      * @example $publish = $context->yesNo(null, allowNull: true, options: 'gpt-5-mini');
@@ -175,7 +184,7 @@ trait SimpleTypesTrait
         ?string $prompt,
         bool $allowNull = false,
         AiOptions|array|string|null $options = null,
-    ): ?bool {
+    ): bool|AiInteractiveResult|null {
         [$runtimeOptions] = $this->normalizeSimpleTypeOptions($options);
         $items = $this->simpleTaskItems(
             $prompt,
@@ -188,7 +197,11 @@ trait SimpleTypesTrait
             $items,
             $runtimeOptions,
             static fn (PhoreAi $ai): object => $ai->runCasted(YesNoResultType::class),
+            binding: hash('sha256', Toolkit::jsonEncode([$allowNull])),
         );
+        if ($result instanceof AiInteractiveResult) {
+            return $result;
+        }
 
         if (!$result->determined) {
             return $this->resolveSimpleTypeUndetermined($allowNull, 'yes/no');
@@ -202,7 +215,7 @@ trait SimpleTypesTrait
      *
      * @param array<int|string, int|string|null> $choices Allowed values or value => description mappings.
      * @param AiOptions|array<string, mixed>|string|null $options Per-call model/runtime options or a model name.
-     * @return list<string|int>|null Every supplied value exactly once, or null when undetermined and allowed.
+     * @return list<string|int>|null|AiInteractiveResult Every supplied value exactly once, or null when undetermined and allowed.
      * @throws TaskErrorException When the result is undetermined and allowNull is false.
      * @example $ranking = $context->rank('Rank by editorial relevance.', ['news', 'guide', 'review']);
      * @example $ranking = $context->rank(null, ['news' => 'News item', 'guide' => 'Instructional article']);
@@ -212,7 +225,7 @@ trait SimpleTypesTrait
         array $choices,
         bool $allowNull = false,
         AiOptions|array|string|null $options = null,
-    ): ?array {
+    ): array|AiInteractiveResult|null {
         $normalized = $this->normalizeSimpleChoices($choices);
         [$runtimeOptions] = $this->normalizeSimpleTypeOptions($options);
         $items = $this->simpleChoiceItems(
@@ -229,7 +242,11 @@ trait SimpleTypesTrait
             $items,
             $runtimeOptions,
             static fn (PhoreAi $ai): object => $ai->runCasted(RankResultType::class),
+            binding: hash('sha256', Toolkit::jsonEncode([$normalized, $allowNull])),
         );
+        if ($result instanceof AiInteractiveResult) {
+            return $result;
+        }
 
         if (!$result->determined) {
             return $this->resolveSimpleTypeUndetermined($allowNull, 'ranking');
@@ -244,7 +261,7 @@ trait SimpleTypesTrait
      * Return a normalized score between 0.0 and 1.0.
      *
      * @param AiOptions|array<string, mixed>|string|null $options Per-call model/runtime options or a model name.
-     * @return float|null 0.0 means no match, 1.0 full match, null undetermined when allowed.
+     * @return float|null|AiInteractiveResult 0.0 means no match, 1.0 full match, null undetermined when allowed.
      * @throws TaskErrorException When the result is undetermined and allowNull is false.
      * @example $score = $context->score('How relevant is the current draft for the target audience?');
      * @example $score = $context->score(null, 'gpt-5-mini');
@@ -253,7 +270,7 @@ trait SimpleTypesTrait
         ?string $prompt,
         bool $allowNull = false,
         AiOptions|array|string|null $options = null,
-    ): ?float {
+    ): float|AiInteractiveResult|null {
         [$runtimeOptions] = $this->normalizeSimpleTypeOptions($options);
         $items = $this->simpleTaskItems(
             $prompt,
@@ -266,7 +283,11 @@ trait SimpleTypesTrait
             $items,
             $runtimeOptions,
             static fn (PhoreAi $ai): object => $ai->runCasted(ScoreResultType::class),
+            binding: hash('sha256', Toolkit::jsonEncode([$allowNull])),
         );
+        if ($result instanceof AiInteractiveResult) {
+            return $result;
+        }
 
         if (!$result->determined) {
             return $this->resolveSimpleTypeUndetermined($allowNull, 'score');

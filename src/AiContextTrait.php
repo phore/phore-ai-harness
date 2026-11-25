@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Phore\AiHarness;
 
+use Phore\AiHarness\Result\AiInteractiveResult;
 use LogicException;
 use Phore\AiHarness\Content\AiContent;
 use Phore\AiHarness\Content\AiContentResultSet;
@@ -119,7 +120,7 @@ trait AiContextTrait
         string|PromptType|ToolType|array $prompts,
         bool|string $throw = false,
         array $options = [],
-    ): bool {
+    ): bool|AiInteractiveResult {
         return $this->ai_context()->do($prompts, $throw, $options);
     }
 
@@ -136,7 +137,7 @@ trait AiContextTrait
         string|PromptType|ToolType|array $prompts,
         ?string $input = null,
         array $options = [],
-    ): string {
+    ): string|AiInteractiveResult {
         return $this->ai_context()->text($prompts, $input, $options);
     }
 
@@ -183,7 +184,7 @@ trait AiContextTrait
      * @param string|PromptType|ToolType|array $prompts Instructions and sources.
      * @param class-string<T> $input Output element class.
      * @param array<string,mixed> $options Per-call options.
-     * @return list<T>
+     * @return list<T>|AiInteractiveResult
      * @example $items = $mail->ai_struct_array('Extract tasks.', Task::class);
      * @see AiContext::structArray()
      */
@@ -191,7 +192,7 @@ trait AiContextTrait
         string|PromptType|ToolType|array $prompts,
         string $input,
         array $options = [],
-    ): array {
+    ): array|AiInteractiveResult {
         return $this->ai_context()->structArray($prompts, $input, $options);
     }
 
@@ -206,7 +207,7 @@ trait AiContextTrait
     public function ai_image(
         string|PromptType|ToolType|array $prompts,
         array $options = [],
-    ): ImageResultType {
+    ): ImageResultType|AiInteractiveResult {
         return $this->ai_context()->image($prompts, $options);
     }
 
@@ -223,7 +224,7 @@ trait AiContextTrait
         array $choices,
         bool $allowNull = false,
         AiOptions|array|string|null $options = null,
-    ): string|int|null {
+    ): string|int|AiInteractiveResult|null {
         return $this->ai_context()->choice($prompt, $choices, $allowNull, $options);
     }
 
@@ -232,7 +233,7 @@ trait AiContextTrait
      *
      * @param array<int|string,int|string|null> $choices Values or value => description mappings.
      * @param AiOptions|array<string,mixed>|string|null $options Runtime options or model name.
-     * @return list<string|int>|null
+     * @return list<string|int>|null|AiInteractiveResult
      * @example $tags = $mail->ai_choices('Which topics apply?', ['billing', 'profile'], max: 2);
      * @see AiContext::choices()
      */
@@ -243,7 +244,7 @@ trait AiContextTrait
         ?int $max = null,
         bool $allowNull = false,
         AiOptions|array|string|null $options = null,
-    ): ?array {
+    ): array|AiInteractiveResult|null {
         return $this->ai_context()->choices($prompt, $choices, $min, $max, $allowNull, $options);
     }
 
@@ -258,7 +259,7 @@ trait AiContextTrait
         ?string $prompt,
         bool $allowNull = false,
         AiOptions|array|string|null $options = null,
-    ): ?bool {
+    ): bool|AiInteractiveResult|null {
         return $this->ai_context()->yesNo($prompt, $allowNull, $options);
     }
 
@@ -267,7 +268,7 @@ trait AiContextTrait
      *
      * @param array<int|string,int|string|null> $choices Values or value => description mappings.
      * @param AiOptions|array<string,mixed>|string|null $options Runtime options or model name.
-     * @return list<string|int>|null
+     * @return list<string|int>|null|AiInteractiveResult
      * @example $ranking = $mail->ai_rank('Rank by relevance.', ['cv', 'profile']);
      * @see AiContext::rank()
      */
@@ -276,7 +277,7 @@ trait AiContextTrait
         array $choices,
         bool $allowNull = false,
         AiOptions|array|string|null $options = null,
-    ): ?array {
+    ): array|AiInteractiveResult|null {
         return $this->ai_context()->rank($prompt, $choices, $allowNull, $options);
     }
 
@@ -291,7 +292,7 @@ trait AiContextTrait
         ?string $prompt,
         bool $allowNull = false,
         AiOptions|array|string|null $options = null,
-    ): ?float {
+    ): float|AiInteractiveResult|null {
         return $this->ai_context()->score($prompt, $allowNull, $options);
     }
 
@@ -317,7 +318,7 @@ trait AiContextTrait
      *
      * @param string $prompt Natural-language selection question.
      * @param AiOptions|array<string,mixed>|string|null $options Runtime options or model name.
-     * @return AiContentResultSet Matching content subset.
+     * @return AiContentResultSet|AiInteractiveResult Matching content subset.
      * @example $images = $ticket->ai_query_content('Which images show visible damage?');
      * @see AiContext::queryContent()
      * @see AiContentResultSet
@@ -325,7 +326,7 @@ trait AiContextTrait
     public function ai_query_content(
         string $prompt,
         AiOptions|array|string|null $options = null,
-    ): AiContentResultSet {
+    ): AiContentResultSet|AiInteractiveResult {
         return $this->ai_context()->queryContent($prompt, $options);
     }
 

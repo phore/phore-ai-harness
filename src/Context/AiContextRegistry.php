@@ -33,6 +33,7 @@ final class AiContextRegistry
         }
 
         $defaults = array_intersect_key($options, array_flip(AiOptions::KEYS));
+        unset($defaults['interactive'], $defaults['interactive_continue_id'], $defaults['interactive_steering_message']);
         if ($selection === null) {
             return new AiContext(options: $defaults);
         }

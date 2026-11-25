@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Phore\AiHarness\Context\AiContextRegistry;
+use Phore\AiHarness\Result\AiInteractiveResult;
 
 /**
  * Select exactly one string/integer value in a temporary or named AI context.
@@ -13,7 +14,7 @@ use Phore\AiHarness\Context\AiContextRegistry;
  *
  * @param array<int|string, int|string|null> $choices Values or value => description mappings.
  * @param array<string, mixed> $options Common helper options plus optional selected and ai_context.
- * @return string|int|null
+ * @return string|int|null|AiInteractiveResult
  * @example $tag = phore_ai_choice('Which tag fits?', ['news', 'guide'], options: ['ai_context' => 'article']);
  * @see \Phore\AiHarness\AiContext::choice()
  */
@@ -22,7 +23,7 @@ function phore_ai_choice(
     array $choices,
     bool $allowNull = false,
     array $options = [],
-): string|int|null {
+): string|int|AiInteractiveResult|null {
     $context = AiContextRegistry::resolve($options);
     unset($options['ai_context']);
 

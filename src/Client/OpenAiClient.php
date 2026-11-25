@@ -81,48 +81,16 @@ final class OpenAiClient
     }
 
     /**
-     * Retrieve an existing stored response without creating a new model turn.
-     *
-     * The caller must authorize the ID and use the same provider/project.
-     * Retrieval does not count as new model usage or overwrite the last
-     * generated response.
-     *
-     * @throws InvalidArgumentException If the ID is empty.
-     * @throws AiRequestException On transport or provider failure.
-     * @example $response = $client->retrieveResponse($responseId);
-     * @see \Phore\AiHarness\PhoreAi::runInteractive()
+     * Obtain a continuation codec bound to this provider endpoint and project.
+     * @example $codec = $client->getContinueKeyGenerator();
+     * @see \Phore\AiHarness\Keystore\Keystore::getSigningKey()
      */
-    public function retrieveResponse(string $responseId): AiResponse
+    public function getContinueKeyGenerator(): \Phore\AiHarness\Interactive\ContinueKeyGenerator
     {
-        if (trim($responseId) === '') {
-            throw new InvalidArgumentException('Response ID must not be empty.');
-        }
-
-        $curl = curl_init($this->baseUrl . '/responses/' . rawurlencode($responseId));
-        if ($curl === false) {
-            throw new RuntimeException('Could not initialize curl.');
-        }
-        $headers = [];
-        curl_setopt_array($curl, [
-            CURLOPT_HTTPHEADER => $this->buildRequestHeaders(false),
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_TIMEOUT => $this->timeout,
-            CURLOPT_CONNECTTIMEOUT => $this->connectTimeout,
-            CURLOPT_HEADERFUNCTION => function (CurlHandle $curl, string $line) use (&$headers): int {
-                $this->parseHeaderLine($headers, $line);
-                return strlen($line);
-            },
-        ]);
-
-        $rawBody = curl_exec($curl);
-        if ($rawBody === false) {
-            throw AiRequestException::fromCurlError('OpenAI response retrieval failed', curl_error($curl));
-        }
-
-        $response = AiResponse::fromJson((int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE), $headers, $rawBody);
-        $this->assertSuccessfulResponse($response);
-
-        return $response;
+        return new \Phore\AiHarness\Interactive\ContinueKeyGenerator(
+            Keystore::instance()->getSigningKey('open_ai', $this->apiKey),
+            Toolkit::jsonEncode(['open_ai', $this->baseUrl, $this->organization, $this->project]),
+        );
     }
 
     /**
