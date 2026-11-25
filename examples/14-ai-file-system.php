@@ -21,6 +21,7 @@ $fileSystem = new AiFileSystem(
         editable: ['src/*', 'docs/*'],
         creatable: ['docs/*'],
         deletable: ['docs/generated/*'],
+        movable: ['docs/drafts/*', 'docs/generated/*'],
     ),
 );
 
@@ -43,7 +44,9 @@ $fileSystem->addFile('/srv/shared/architecture.md');
 
 $context->do(
     'Find the deprecated cache adapter, update its use in src and update '
-    . 'the matching documentation in docs. Do not edit architecture.md.',
+    . 'the matching documentation in docs. If docs/drafts/adapter.md exists, '
+    . 'move it to docs/generated/adapter.md if that directory exists. '
+    . 'Do not edit architecture.md.',
     throw: true,
 );
 

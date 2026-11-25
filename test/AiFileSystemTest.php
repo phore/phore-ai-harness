@@ -133,6 +133,8 @@ final class AiFileSystemTest extends TestCase
         self::assertArrayHasKey('filesystem_list_systems', $schemas);
         self::assertArrayHasKey('filesystem_create', $schemas);
         self::assertArrayHasKey('filesystem_delete', $schemas);
+        self::assertArrayHasKey('filesystem_move', $schemas);
+        self::assertArrayHasKey('targetPath', $schemas['filesystem_move']['properties']);
         self::assertArrayHasKey('fileSystemId', $schemas['filesystem_read']['properties']);
 
         $editSchema = json_encode($schemas['filesystem_edit'], JSON_THROW_ON_ERROR);
@@ -192,10 +194,15 @@ final class AiFileSystemTest extends TestCase
         $binary->edit('binary.bin', [['search' => 'abc', 'replacement' => 'ABC']]);
     }
 
-    public function testDefaultPolicyAndMemoryHistorySupportFullLifecycle(): void
+    public function testExplicitPolicyAndMemoryHistorySupportFullLifecycle(): void
     {
         $context = new AiContext();
-        $fileSystem = new AiFileSystem($this->root, context: $context, id: 'lifecycle');
+        $fileSystem = new AiFileSystem(
+            $this->root,
+            context: $context,
+            id: 'lifecycle',
+            policy: new FileSystemPolicy(creatable: ['docs/*'], deletable: ['docs/*']),
+        );
 
         $events = [];
         $fileSystem
