@@ -91,6 +91,54 @@ $fileSystem->getContext()->do(
 
 The source is removed and the destination contains the original text.
 
+## Export a change set
+
+Attach the filesystem to an existing context with prepared prompts and data.
+The constructor registers its tools in that context; no filesystem prompt or
+additional AI call is needed to export the results.
+
+```php
+$context = new AiContext(prompts: [
+    new SystemPrompt('Maintain the website using the project settings.'),
+    new StructPrompt(['language' => 'de'], alias: 'settings'),
+]);
+$fileSystem = new AiFileSystem('/srv/website', context: $context, id: 'website');
+
+$fileSystem->resetChangeSet();
+$context->do('Update the contact page headline.', throw: true);
+
+$changes = $fileSystem->getChangeSet(); // list<FileChange>
+echo json_encode($changes, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR);
+```
+
+Example result (assuming the model changed the headline):
+
+```json
+[
+    {
+        "path": "pages/contact.md",
+        "status": "modified",
+        "oldPath": null,
+        "oldContent": "# Contact",
+        "newContent": "# Kontakt"
+    }
+]
+```
+
+Each `FileChange` DTO has a relative path, status (`created`, `modified`,
+`deleted` or `moved`), original path for moves, and full old/new contents.
+Null content indicates a missing file; an empty string is an existing empty
+file. Repeated edits and moves retain the first state and final state.
+Create-then-delete and changes reverted to their starting state are omitted.
+A move followed by an edit remains a move. A moved file subsequently deleted
+is reported as a deletion of its original path. Successful restores are
+included; rejected operations and successfully rolled-back hooks are not.
+
+Tracking begins at construction and is instance-local, independent of the
+revision store. It is not a filesystem scan and does not detect external
+writes. Reset clears only the change set. Reading it is non-destructive.
+Only export or forward file contents to authorized consumers.
+
 ## Revision history
 
 Revision history is active by default through `MemoryRevisionStore`. It keeps

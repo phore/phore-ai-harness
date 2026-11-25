@@ -9,6 +9,8 @@ use InvalidArgumentException;
 use LogicException;
 use Phore\AiHarness\AiContext;
 use Phore\AiHarness\Edit\TextEditEngine;
+use Phore\AiHarness\FileSystem\Dto\FileChange;
+use Phore\AiHarness\FileSystem\Helper\ChangeSetTracker;
 use RuntimeException;
 use Throwable;
 
@@ -22,6 +24,7 @@ final class AiFileSystem
 
     private FileSystemPolicy $policy;
     private RevisionStoreInterface $revisionStore;
+    private readonly ChangeSetTracker $changeSet;
 
     /** @var array<string, list<callable(FileOperationContext): void>> */
     private array $hooks = [
@@ -75,6 +78,7 @@ final class AiFileSystem
         $this->description = $this->normalizeOptionalText($description, 'description');
         $this->policy = $policy ?? new FileSystemPolicy();
         $this->revisionStore = $revisionStore ?? new MemoryRevisionStore();
+        $this->changeSet = new ChangeSetTracker();
 
         if ($root !== null) {
             $this->addRoot($root);
@@ -491,6 +495,7 @@ final class AiFileSystem
             throw $error;
         }
 
+        $this->changeSet->record($virtualPath, null, $content);
         $revisionId = $this->revisionStore->save($this->id, $virtualPath, $content);
 
         return [
@@ -537,6 +542,7 @@ final class AiFileSystem
             throw $error;
         }
 
+        $this->changeSet->record($virtualPath, $content, null);
         $revisionId = $this->revisionStore->save($this->id, $virtualPath, null);
 
         return [
@@ -588,6 +594,7 @@ final class AiFileSystem
             throw $error;
         }
 
+        $this->changeSet->record($source, $content, $content, $target);
         $sourceRevisionId = $this->revisionStore->save($this->id, $source, null);
         $revisionId = $this->revisionStore->save($this->id, $target, $content);
 
@@ -659,6 +666,7 @@ final class AiFileSystem
             $this->deletePersisted($realPath, $current);
         }
 
+        $this->changeSet->record($virtualPath, $current, $target['content']);
         $newRevisionId = $this->revisionStore->save(
             $this->id,
             $virtualPath,
@@ -671,6 +679,32 @@ final class AiFileSystem
             'revisionId' => $newRevisionId,
             'exists' => $target['exists'],
         ];
+    }
+
+    /**
+     * Return the net file changes made through this instance since its creation
+     * or the last reset. Includes complete old/new contents and move paths.
+     * The returned DTOs are snapshots; reading them does not clear tracking.
+     * External writes and earlier PHP processes are not included.
+     *
+     * @return list<FileChange> Serializable file changes; empty if unchanged.
+     * @example $json = json_encode($fs->getChangeSet(), JSON_THROW_ON_ERROR);
+     * @see resetChangeSet()
+     */
+    public function getChangeSet(): array
+    {
+        return $this->changeSet->changes();
+    }
+
+    /**
+     * Start a new change-set interval without modifying files or revisions.
+     *
+     * @example $fs->resetChangeSet();
+     * @see getChangeSet()
+     */
+    public function resetChangeSet(): void
+    {
+        $this->changeSet->reset();
     }
 
     public function getContext(): AiContext
@@ -878,6 +912,7 @@ final class AiFileSystem
             throw $error;
         }
 
+        $this->changeSet->record($virtualPath, $original, $updated);
         $revisionId = $this->revisionStore->save($this->id, $virtualPath, $updated);
 
         return [
