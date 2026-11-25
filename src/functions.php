@@ -11,6 +11,7 @@ require_once __DIR__ . '/functions/phore_ai_yes_no.php';
 require_once __DIR__ . '/functions/phore_ai_rank.php';
 require_once __DIR__ . '/functions/phore_ai_score.php';
 require_once __DIR__ . '/functions/phore_ai_image.php';
+require_once __DIR__ . '/functions/phore_ai_speech_to_text.php';
 require_once __DIR__ . '/functions/phore_ai_struct.php';
 require_once __DIR__ . '/functions/phore_ai_edit_struct.php';
 require_once __DIR__ . '/functions/phore_ai_struct_array.php';
