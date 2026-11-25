@@ -58,6 +58,11 @@ final class AiFileSystemToolSet implements AiToolSet
                 'Delete one UTF-8 text file inside the configured root when policy permits it.',
             ),
             new CallbackTool(
+                [$this, 'moveFile'],
+                'filesystem_move',
+                'Move or rename one file within the same root when both paths are movable. Never overwrite a target.',
+            ),
+            new CallbackTool(
                 [$this, 'history'],
                 'filesystem_history',
                 'List saved revisions for one file from the default memory or injected store.',
@@ -65,7 +70,7 @@ final class AiFileSystemToolSet implements AiToolSet
             new CallbackTool(
                 [$this, 'restore'],
                 'filesystem_restore',
-                'Restore a saved revision of one editable file.',
+                'Restore a saved revision when the resulting edit, create or delete is permitted.',
             ),
         ];
     }
@@ -192,7 +197,7 @@ final class AiFileSystemToolSet implements AiToolSet
     /**
      * Create a UTF-8 text file through the routed filesystem.
      *
-     * Creation still requires both the root-level capability and the policy
+     * Creation requires both a configured root and the policy
      * allowlist. Hook validation failures are surfaced as recoverable tool errors.
      *
      * @return array<string, mixed>
@@ -219,6 +224,21 @@ final class AiFileSystemToolSet implements AiToolSet
         return $this->call(
             $fileSystemId,
             static fn (AiFileSystem $fileSystem): array => $fileSystem->delete($path),
+        );
+    }
+
+    /**
+     * Move a file through the routed filesystem.
+     *
+     * @return array<string, mixed>
+     * @example $toolSet->moveFile('backend', 'drafts/a.md', 'pages/a.md');
+     * @see AiFileSystem::move()
+     */
+    public function moveFile(string $fileSystemId, string $path, string $targetPath): array
+    {
+        return $this->call(
+            $fileSystemId,
+            static fn (AiFileSystem $fileSystem): array => $fileSystem->move($path, $targetPath),
         );
     }
 

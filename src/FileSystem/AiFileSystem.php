@@ -9,6 +9,8 @@ use InvalidArgumentException;
 use LogicException;
 use Phore\AiHarness\AiContext;
 use Phore\AiHarness\Edit\TextEditEngine;
+use Phore\AiHarness\FileSystem\Dto\FileChange;
+use Phore\AiHarness\FileSystem\Helper\ChangeSetTracker;
 use RuntimeException;
 use Throwable;
 
@@ -22,6 +24,7 @@ final class AiFileSystem
 
     private FileSystemPolicy $policy;
     private RevisionStoreInterface $revisionStore;
+    private readonly ChangeSetTracker $changeSet;
 
     /** @var array<string, list<callable(FileOperationContext): void>> */
     private array $hooks = [
@@ -31,6 +34,8 @@ final class AiFileSystem
         'afterEdit' => [],
         'beforeDelete' => [],
         'afterDelete' => [],
+        'beforeMove' => [],
+        'afterMove' => [],
     ];
 
     public readonly string $id;
@@ -50,7 +55,7 @@ final class AiFileSystem
      * @param string|null $id Stable routing ID; generated when omitted.
      * @param string|null $alias Optional human-readable name.
      * @param string|null $description Optional purpose shown by filesystem_list_systems.
-     * @param FileSystemPolicy|null $policy Optional path policy; omitted means all paths are allowed.
+     * @param FileSystemPolicy|null $policy Optional path policy; omitted permits reads and edits only.
      * @param RevisionStoreInterface|null $revisionStore Optional history backend; defaults to memory.
      * @throws InvalidArgumentException For invalid IDs, aliases or descriptions.
      * @example $fs = new AiFileSystem('/srv/app', id: 'app');
@@ -73,6 +78,7 @@ final class AiFileSystem
         $this->description = $this->normalizeOptionalText($description, 'description');
         $this->policy = $policy ?? new FileSystemPolicy();
         $this->revisionStore = $revisionStore ?? new MemoryRevisionStore();
+        $this->changeSet = new ChangeSetTracker();
 
         if ($root !== null) {
             $this->addRoot($root);
@@ -89,7 +95,7 @@ final class AiFileSystem
     /**
      * Add the single directory root exposed by this filesystem.
      *
-     * Paths used by list/read/edit/create/delete are relative to this root.
+     * Paths used by list/read/edit/create/delete/move are relative to this root.
      * A second root is rejected; use another AiFileSystem for another root.
      * Explicit files already registered must not be inside the root and must not
      * collide with a top-level path in the root.
@@ -131,7 +137,7 @@ final class AiFileSystem
      * Add one explicit real file under its basename.
      *
      * Explicit files work without a root and can be listed, searched, read,
-     * edited and restored. Create and delete remain root-only operations.
+     * edited and restored. Create, delete and move remain root-only operations.
      * Basenames must be unique within one AiFileSystem; aliases and virtual
      * in-memory files are intentionally not supported.
      *
@@ -249,6 +255,30 @@ final class AiFileSystem
     public function onAfterDelete(callable $hook): self
     {
         return $this->addHook('afterDelete', $hook);
+    }
+
+    /**
+     * Register a check that can veto a move before any filesystem change.
+     *
+     * @return $this
+     * @example $fs->onBeforeMove(fn (FileOperationContext $event) => protectPath($event->path));
+     * @see FileOperationContext
+     */
+    public function onBeforeMove(callable $hook): self
+    {
+        return $this->addHook('beforeMove', $hook);
+    }
+
+    /**
+     * Register a validator after a move; a failing hook moves the file back.
+     *
+     * @return $this
+     * @example $fs->onAfterMove(fn (FileOperationContext $event) => validateFile($event->targetRealPath));
+     * @see move()
+     */
+    public function onAfterMove(callable $hook): self
+    {
+        return $this->addHook('afterMove', $hook);
     }
 
     /**
@@ -446,7 +476,7 @@ final class AiFileSystem
         }
 
         [$virtualPath, $realPath] = $this->resolveMutationTarget($path, mustExist: false);
-        if (!$this->canCreate($virtualPath)) {
+        if (isset($this->files[$virtualPath]) || !$this->canCreate($virtualPath)) {
             throw new RuntimeException('AI filesystem file is not creatable: ' . $virtualPath);
         }
         if (file_exists($realPath)) {
@@ -465,6 +495,7 @@ final class AiFileSystem
             throw $error;
         }
 
+        $this->changeSet->record($virtualPath, null, $content);
         $revisionId = $this->revisionStore->save($this->id, $virtualPath, $content);
 
         return [
@@ -511,11 +542,67 @@ final class AiFileSystem
             throw $error;
         }
 
+        $this->changeSet->record($virtualPath, $content, null);
         $revisionId = $this->revisionStore->save($this->id, $virtualPath, null);
 
         return [
             'path' => $virtualPath,
             'status' => 'deleted',
+            'revisionId' => $revisionId,
+        ];
+    }
+
+    /**
+     * Move or rename one UTF-8 file within the root without overwriting.
+     *
+     * Both paths require movable permission independently of create/delete.
+     * The target parent must exist on the same filesystem. Both path states
+     * are revisioned and an after-hook failure reverses the move.
+     *
+     * @return array{path: string, targetPath: string, status: string, sourceRevisionId: ?int, revisionId: ?int}
+     * @throws RuntimeException When the move is forbidden or the target exists.
+     * @example $fs->move('drafts/contact.md', 'pages/contact.md');
+     * @see onAfterMove()
+     */
+    public function move(string $path, string $targetPath): array
+    {
+        [$source, $sourceReal] = $this->resolveMutationTarget($path, mustExist: true);
+        [$target, $targetReal] = $this->resolveMutationTarget($targetPath, mustExist: false);
+        if (isset($this->files[$source]) || isset($this->files[$target])
+            || !$this->policy->isMovable($source, $target)
+        ) {
+            throw new RuntimeException('AI filesystem move is not permitted: ' . $source . ' -> ' . $target);
+        }
+        if (file_exists($targetReal) || is_link($targetReal)) {
+            throw new RuntimeException('AI filesystem target already exists: ' . $target);
+        }
+
+        // Snapshot both paths and allow application validation before mutation.
+        $content = $this->readTextFile($sourceReal, $source);
+        $event = new FileOperationContext(
+            $this->id, 'move', $source, $sourceReal, $content, $content, $target, $targetReal,
+        );
+        $this->runHooks('beforeMove', $event);
+        $this->revisionStore->save($this->id, $source, $content);
+        $this->revisionStore->save($this->id, $target, null);
+        $this->movePersisted($sourceReal, $targetReal, $content);
+
+        try {
+            $this->runHooks('afterMove', $event);
+        } catch (Throwable $error) {
+            $this->movePersisted($targetReal, $sourceReal, $content);
+            throw $error;
+        }
+
+        $this->changeSet->record($source, $content, $content, $target);
+        $sourceRevisionId = $this->revisionStore->save($this->id, $source, null);
+        $revisionId = $this->revisionStore->save($this->id, $target, $content);
+
+        return [
+            'path' => $source,
+            'targetPath' => $target,
+            'status' => 'moved',
+            'sourceRevisionId' => $sourceRevisionId,
             'revisionId' => $revisionId,
         ];
     }
@@ -548,16 +635,23 @@ final class AiFileSystem
     public function restore(string $path, int $revisionId): array
     {
         [$virtualPath, $realPath] = $this->resolveRevisionTarget($path);
-        if (!$this->canRestore($virtualPath)) {
-            throw new RuntimeException('AI filesystem file is not restorable: ' . $virtualPath);
-        }
-
         $target = $this->revisionStore->get($this->id, $virtualPath, $revisionId);
         if ($target === null) {
             throw new RuntimeException('AI filesystem revision does not exist: ' . $revisionId);
         }
 
         $currentExists = is_file($realPath);
+        $explicit = isset($this->files[$virtualPath]);
+        $allowed = match (true) {
+            $target['exists'] && $currentExists => $this->canEdit($virtualPath),
+            $target['exists'] => !$explicit && $this->canCreate($virtualPath),
+            $currentExists => !$explicit && $this->canDelete($virtualPath),
+            default => !$explicit && ($this->canCreate($virtualPath) || $this->canDelete($virtualPath)),
+        };
+        if (!$allowed) {
+            throw new RuntimeException('AI filesystem file is not restorable: ' . $virtualPath);
+        }
+
         $current = $currentExists ? $this->readTextFile($realPath, $virtualPath) : null;
         $this->revisionStore->save($this->id, $virtualPath, $current);
 
@@ -572,6 +666,7 @@ final class AiFileSystem
             $this->deletePersisted($realPath, $current);
         }
 
+        $this->changeSet->record($virtualPath, $current, $target['content']);
         $newRevisionId = $this->revisionStore->save(
             $this->id,
             $virtualPath,
@@ -584,6 +679,32 @@ final class AiFileSystem
             'revisionId' => $newRevisionId,
             'exists' => $target['exists'],
         ];
+    }
+
+    /**
+     * Return the net file changes made through this instance since its creation
+     * or the last reset. Includes complete old/new contents and move paths.
+     * The returned DTOs are snapshots; reading them does not clear tracking.
+     * External writes and earlier PHP processes are not included.
+     *
+     * @return list<FileChange> Serializable file changes; empty if unchanged.
+     * @example $json = json_encode($fs->getChangeSet(), JSON_THROW_ON_ERROR);
+     * @see resetChangeSet()
+     */
+    public function getChangeSet(): array
+    {
+        return $this->changeSet->changes();
+    }
+
+    /**
+     * Start a new change-set interval without modifying files or revisions.
+     *
+     * @example $fs->resetChangeSet();
+     * @see getChangeSet()
+     */
+    public function resetChangeSet(): void
+    {
+        $this->changeSet->reset();
     }
 
     public function getContext(): AiContext
@@ -743,17 +864,6 @@ final class AiFileSystem
         return $this->policy->isDeletable($virtualPath);
     }
 
-    private function canRestore(string $virtualPath): bool
-    {
-        if (isset($this->files[$virtualPath])) {
-            return $this->canEdit($virtualPath);
-        }
-
-        return $this->canEdit($virtualPath)
-            || $this->canCreate($virtualPath)
-            || $this->canDelete($virtualPath);
-    }
-
     private function readTextFile(string $realPath, string $virtualPath): string
     {
         $size = filesize($realPath);
@@ -802,6 +912,7 @@ final class AiFileSystem
             throw $error;
         }
 
+        $this->changeSet->record($virtualPath, $original, $updated);
         $revisionId = $this->revisionStore->save($this->id, $virtualPath, $updated);
 
         return [
@@ -818,6 +929,16 @@ final class AiFileSystem
         $root = $this->requireRoot();
         $realPath = $root . DIRECTORY_SEPARATOR
             . str_replace('/', DIRECTORY_SEPARATOR, $virtualPath);
+
+        // Reject symlink aliases so a permitted virtual path cannot mutate a
+        // differently protected path, including through a linked directory.
+        $candidate = $root;
+        foreach (explode('/', $virtualPath) as $segment) {
+            $candidate .= DIRECTORY_SEPARATOR . $segment;
+            if (is_link($candidate)) {
+                throw new RuntimeException('AI filesystem mutation cannot follow symlinks: ' . $virtualPath);
+            }
+        }
 
         $parent = realpath(dirname($realPath));
         if ($parent === false || !$this->isInsideRoot($parent)) {
@@ -874,6 +995,27 @@ final class AiFileSystem
         }
 
         $this->persist($path, $content);
+    }
+
+    private function movePersisted(string $source, string $target, string $expectedContent): void
+    {
+        if (is_link($source) || @file_get_contents($source) !== $expectedContent) {
+            throw new RuntimeException('AI filesystem move source changed: ' . $source);
+        }
+
+        // Unlike rename(), link() fails when the target already exists.
+        // Both paths must be on the same filesystem; no overwrite is allowed.
+        if (!@link($source, $target)) {
+            throw new RuntimeException('Cannot move AI filesystem file to: ' . $target);
+        }
+        try {
+            $this->deletePersisted($source, $expectedContent);
+        } catch (Throwable $error) {
+            if (!@unlink($target)) {
+                throw new RuntimeException('Cannot roll back AI filesystem move: ' . $target, previous: $error);
+            }
+            throw $error;
+        }
     }
 
     private function deletePersisted(string $path, string $expectedContent): void

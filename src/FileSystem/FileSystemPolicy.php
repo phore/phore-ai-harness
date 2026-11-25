@@ -12,22 +12,31 @@ final readonly class FileSystemPolicy
      * @param list<string> $editable Virtual-path allowlist for edit operations.
      * @param list<string> $creatable Virtual-path allowlist for create operations.
      * @param list<string> $deletable Virtual-path allowlist for delete operations.
+     * @param list<string> $movable Virtual-path allowlist for both move endpoints.
      */
     public function __construct(
         public array $ignore = [],
         public array $searchable = ['*'],
         public array $editable = ['*'],
-        public array $creatable = ['*'],
-        public array $deletable = ['*'],
+        public array $creatable = [],
+        public array $deletable = [],
         public int $maxListLimit = 100,
         public int $maxSearchResults = 100,
         public int $maxReadBytes = 1048576,
+        public array $movable = [],
     ) {
     }
 
     public function isIgnored(string $path): bool
     {
-        return $this->matches($path, $this->ignore);
+        do {
+            if ($this->matches($path, $this->ignore)) {
+                return true;
+            }
+            $path = dirname($path);
+        } while ($path !== '.' && $path !== '/');
+
+        return false;
     }
 
     public function isSearchable(string $path): bool
@@ -60,6 +69,20 @@ final readonly class FileSystemPolicy
     public function isDeletable(string $path): bool
     {
         return !$this->isIgnored($path) && $this->matches($path, $this->deletable);
+    }
+
+    /**
+     * Check whether both virtual paths are allowed for a move.
+     *
+     * @example $policy->isMovable('drafts/a.md', 'pages/a.md');
+     * @see AiFileSystem::move()
+     */
+    public function isMovable(string $sourcePath, string $targetPath): bool
+    {
+        return !$this->isIgnored($sourcePath)
+            && !$this->isIgnored($targetPath)
+            && $this->matches($sourcePath, $this->movable)
+            && $this->matches($targetPath, $this->movable);
     }
 
     private function matches(string $path, array $patterns): bool

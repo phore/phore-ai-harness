@@ -133,6 +133,8 @@ final class AiFileSystemTest extends TestCase
         self::assertArrayHasKey('filesystem_list_systems', $schemas);
         self::assertArrayHasKey('filesystem_create', $schemas);
         self::assertArrayHasKey('filesystem_delete', $schemas);
+        self::assertArrayHasKey('filesystem_move', $schemas);
+        self::assertArrayHasKey('targetPath', $schemas['filesystem_move']['properties']);
         self::assertArrayHasKey('fileSystemId', $schemas['filesystem_read']['properties']);
 
         $editSchema = json_encode($schemas['filesystem_edit'], JSON_THROW_ON_ERROR);
@@ -192,10 +194,15 @@ final class AiFileSystemTest extends TestCase
         $binary->edit('binary.bin', [['search' => 'abc', 'replacement' => 'ABC']]);
     }
 
-    public function testDefaultPolicyAndMemoryHistorySupportFullLifecycle(): void
+    public function testExplicitPolicyAndMemoryHistorySupportFullLifecycle(): void
     {
         $context = new AiContext();
-        $fileSystem = new AiFileSystem($this->root, context: $context, id: 'lifecycle');
+        $fileSystem = new AiFileSystem(
+            $this->root,
+            context: $context,
+            id: 'lifecycle',
+            policy: new FileSystemPolicy(creatable: ['docs/*'], deletable: ['docs/*']),
+        );
 
         $events = [];
         $fileSystem
@@ -254,6 +261,63 @@ final class AiFileSystemTest extends TestCase
         self::assertSame('applied', $result['status']);
         self::assertSame("rewritten\n", file_get_contents($this->root . '/docs/generated.txt'));
         self::assertCount(6, $events);
+    }
+
+    public function testChangeSetTracksNetChangesAndReset(): void
+    {
+        $fs = new AiFileSystem(
+            $this->root,
+            id: 'changes',
+            policy: new FileSystemPolicy(creatable: ['*'], deletable: ['*'], movable: ['*']),
+        );
+
+        $fs->edit('docs/a.md', [['search' => 'Title', 'replacement' => 'Updated']]);
+        $fs->move('docs/a.md', 'docs/moved.md');
+        $fs->edit('docs/moved.md', [['search' => 'Updated', 'replacement' => 'Final']]);
+        $fs->create('docs/temporary.md', '');
+        $fs->delete('docs/temporary.md');
+        $fs->create('docs/new.md', '');
+        $fs->delete('docs/b.txt');
+
+        $changes = json_decode(json_encode($fs->getChangeSet(), JSON_THROW_ON_ERROR), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame([
+            [
+                'path' => 'docs/moved.md',
+                'status' => 'moved',
+                'oldPath' => 'docs/a.md',
+                'oldContent' => "# Title\nneedle alpha\nlast\n",
+                'newContent' => "# Final\nneedle alpha\nlast\n",
+            ],
+            [
+                'path' => 'docs/new.md',
+                'status' => 'created',
+                'oldPath' => null,
+                'oldContent' => null,
+                'newContent' => '',
+            ],
+            [
+                'path' => 'docs/b.txt',
+                'status' => 'deleted',
+                'oldPath' => null,
+                'oldContent' => "beta\nneedle beta\n",
+                'newContent' => null,
+            ],
+        ], $changes);
+
+        $fs->resetChangeSet();
+        self::assertSame([], $fs->getChangeSet());
+        self::assertNotEmpty($fs->history('docs/moved.md')['revisions']);
+
+        $fs->onAfterEdit(static function (): void {
+            throw new \RuntimeException('Reject change');
+        });
+        try {
+            $fs->edit('docs/moved.md', [['search' => 'Final', 'replacement' => 'Rejected']]);
+            self::fail('Expected edit to roll back.');
+        } catch (\RuntimeException $error) {
+            self::assertSame('Reject change', $error->getMessage());
+        }
+        self::assertSame([], $fs->getChangeSet());
     }
 
     public function testSqliteRevisionStorePersistsAcrossInstances(): void
