@@ -56,6 +56,7 @@ Use the helpers for isolated one- or two-shot work:
 | `phore_ai_struct()` / `phore_ai_struct_array()` | hydrate one DTO or a DTO list |
 | `phore_ai_edit_struct()` | patch an existing DTO |
 | `phore_ai_image()` | generate an image |
+| `phore_ai_speech_to_text()` | transcribe a completed audio recording |
 | `phore_ai_edit_file()` | edit one or more explicit files |
 | `get_last_ai_request()` / `get_last_ai_response()` | inspect the latest request/response |
 | `get_ai_usage_stats()` | inspect process-wide usage and estimated cost |
@@ -70,6 +71,20 @@ $summary = phore_ai_text([
     FilePrompt::fromFile('/path/to/File.pdf'),
 ]);
 ```
+
+### Speech-to-text
+
+Transcribe raw audio bytes (not base64) from a completed recording:
+
+```php
+$text = phore_ai_speech_to_text($audioBytes, 'webm');
+echo $text;
+```
+
+The default model is `gpt-transcribe`. Supported formats include WebM, MP4/M4A,
+Ogg, WAV, MP3 and FLAC; the maximum size is 25 MB. Optional named arguments
+`model`, `prompt` and `client` let you select the transcription model, supply
+vocabulary hints or use a configured `OpenAiClient`. No conversation is needed.
 
 ### Edit text and return a separate reply
 
@@ -241,6 +256,43 @@ accept `options: ['execTimeout' => 60]` (seconds; default 30) to terminate
 long-running skill scripts and report a timeout error.
 See [`examples/15-skills.php`](examples/15-skills.php) and the
 [`AI Usage Info`](.ai-usage-info.md) for the complete API and permissions.
+
+### AI file system
+
+Attach an `AiFileSystem` to an existing context to let the AI search, read and
+edit selected files within a directory. The policy controls each operation
+independently:
+
+```php
+use Phore\AiHarness\FileSystem\AiFileSystem;
+use Phore\AiHarness\FileSystem\FileSystemPolicy;
+
+$context = new AiContext();
+$fileSystem = new AiFileSystem(
+    '/srv/website',
+    context: $context,
+    id: 'website',
+    policy: new FileSystemPolicy(
+        ignore: ['.git/*', 'vendor/*'],
+        searchable: ['docs/*'],
+        editable: ['docs/*'],
+        creatable: ['docs/generated/*'],
+        deletable: ['docs/generated/*'],
+        movable: ['docs/drafts/*', 'docs/generated/*'],
+    ),
+);
+
+$context->do('Correct spelling in docs/contact.md.', throw: true);
+$changes = $fileSystem->getChangeSet(); // FileChange DTOs with old/new contents.
+```
+
+Create, delete and move are denied by default. Empty allowlists deny the
+respective operation; `['*']` permits all paths inside the filesystem boundary.
+Ignored paths take precedence; moves require permission for both source and
+destination. Changes are applied to real files, not just returned as text.
+Use `getChangeSet()` to inspect changes, including created, deleted and moved
+files. See [AI file system](docs/ai-filesystem.md) for explicit files, revision
+history, path restrictions and the full API.
 
 ### State, checkpoints and sessions
 
@@ -444,21 +496,6 @@ response ID or exported context state when resuming in a new PHP request.
 See [example 17](examples/17-text-edit-tool.php) and
 [context documentation](docs/ai-context.md#bearbeitbare-text-inputs-im-chat).
 
-## Git Submodules
-
-Beim Klonen direkt mit auschecken:
-
-```bash
-git clone --recurse-submodules <repo-url>
-```
-
-Nachträglich initialisieren oder aktualisieren:
-
-```bash
-git submodule update --init --recursive
-git submodule update --remote --merge
-```
-
 ## Preferred: prompts from files
 
 For reusable prompt files, prepare `PromptFile` directly on the context:
@@ -549,9 +586,9 @@ Reading stats returns a detached snapshot and never clears the counters.
 State lasts for the PHP runtime (one request in typical PHP-FPM, whole execution
 in CLI/long-lived workers); separate processes are not combined.
 
-`Phore\AiHarness\Usage\CostEstimator` uses a price snapshot checked on 2026-10-15.
+`Phore\AiHarness\Usage\CostEstimator` uses a price snapshot checked on 2026-11-25.
 Sources: [OpenAI pricing](https://developers.openai.com/api/docs/pricing)
-(including GPT-6.1 Sol, GPT-6 Luna and GPT-6 Astra),
+(including GPT-6.2 Astra, GPT-6.2 Sol, GPT-6.1 Terra and GPT-6 Luna),
 [GPT-5.5](https://developers.openai.com/api/docs/models/gpt-5.5),
 [GPT-5.5 Pro](https://developers.openai.com/api/docs/models/gpt-5.5-pro),
 [GPT-5.4](https://developers.openai.com/api/docs/models/gpt-5.4),
@@ -576,6 +613,12 @@ Sources: [OpenAI pricing](https://developers.openai.com/api/docs/pricing)
 | gpt-5.6-luna | 0.4 | 0.04 | 1.8 |
 | gpt-5.6-sol | 8 | 0.8 | 30 |
 | gpt-5.6-terra | 4 | 0.4 | 18 |
+| gpt-6-cyber | 20 | 2 | 100 |
+| gpt-6-rosalind | 10 | 1 | 50 |
+| gpt-6-sol | 4 | 0.4 | 15 |
+| gpt-6.1-terra | 2 | 0.1 | 7.5 |
+| gpt-6.2-astra | 16 | 0.8 | 60 |
+| gpt-6.2-sol | 4 | 0.2 | 15 |
 | gpt-6-astra | 20 | 2 | 75 |
 | gpt-6.1-sol | 4 | 0.2 | 15 |
 | gpt-6-luna | 0.2 | 0.02 | 0.75 |
@@ -583,9 +626,12 @@ Sources: [OpenAI pricing](https://developers.openai.com/api/docs/pricing)
 | gpt-5-mini | 0.25 | 0.025 | 2 |
 | gpt-5-nano | 0.05 | 0.005 | 0.40 |
 
-GPT-6 Astra, GPT-6.1 Sol, GPT-6 Luna, GPT-5.6 Sol/Terra/Luna and GPT-5.5
-deliberately use their higher long-context standard rates even for short requests. Other named entries use
-published standard rates. These are budgeting estimates, not exact billing.
+GPT-6.2 Astra/Sol, GPT-6 Astra/Sol/Luna, GPT-6.1 Sol/Terra, GPT-5.6
+Sol/Terra/Luna and GPT-5.5 deliberately use their higher long-context standard
+rates even for short requests. Other named entries use published standard rates. These are budgeting estimates, not exact billing. For short-context Standard
+requests, GPT-6.2 Astra costs 8 / 0.4 / 40 and GPT-6.2 Sol costs 2 / 0.1 / 10
+USD per million input / cached input / output tokens. Specialized models may
+require additional provider access; promotional prices can change.
 
 Resolution order: explicit model/override, dated snapshot, then case-insensitive
 regex matching of complete name segments separated by `- _ . / :`.
