@@ -21,7 +21,7 @@ use Phore\AiHarness\ToolType\ToolType;
  * @param string|PromptType|ToolType|array $prompts Editing instructions and sources; direct ToolType items are rejected.
  * @param T $target Existing schema-compatible instance.
  * @param array<string, mixed> $options Common context and documented struct-patch policies.
- * @return T|\Phore\JsonPatch\PatchApplyResult|AiInteractiveResult New instance, or metadata for dry_run/return_patch.
+ * @return T|\Phore\JsonPatch\PatchApplyResult|AiInteractiveResult<T|\Phore\JsonPatch\PatchApplyResult> New instance, or metadata for dry_run/return_patch.
  * @throws InvalidArgumentException For invalid options or explicit prompt tools.
  * @throws \Phore\JsonPatch\PatchValidationException For an invalid patch, schema or hash.
  * @example $edited = phore_ai_edit_struct('Correct the title.', $original, ['ai_context' => 'default']);

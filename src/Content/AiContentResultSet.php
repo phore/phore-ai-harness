@@ -9,6 +9,7 @@ use InvalidArgumentException;
 use IteratorAggregate;
 use Phore\AiHarness\AiContext;
 use Phore\AiHarness\AiOptions;
+use Phore\AiHarness\Result\AiInteractiveResult;
 use Traversable;
 
 /**
@@ -114,14 +115,14 @@ final readonly class AiContentResultSet implements Countable, IteratorAggregate
      *
      * @param string $prompt Natural-language selection question.
      * @param AiOptions|array<string, mixed>|string|null $options Per-call AI options.
-     * @return self Matching subset.
+     * @return self|AiInteractiveResult<self> Matching subset.
      * @example $portraits = $result->query('Which images show a person?');
      * @see AiContext::queryContent()
      */
     public function query(
         string $prompt,
         AiOptions|array|string|null $options = null,
-    ): self {
+    ): self|AiInteractiveResult {
         return $this->context->queryContent($prompt, $options);
     }
 

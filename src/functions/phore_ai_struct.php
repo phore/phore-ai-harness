@@ -18,7 +18,7 @@ use Phore\AiHarness\ToolType\ToolType;
  * @param string|PromptType|ToolType|array<int, string|PromptType|ToolType> $prompts Instructions and sources.
  * @param class-string<T> $className Class defining the result schema.
  * @param array<string, mixed> $options Common context/client/model/logging options.
- * @return T|AiInteractiveResult Hydrated result.
+ * @return T|AiInteractiveResult<T> Hydrated result.
  * @throws InvalidArgumentException For invalid options, class or result shape.
  * @throws JsonException For an undecodable structured response.
  * @example $answer = phore_ai_struct('Extract the answer.', Answer::class, ['ai_context' => 'default']);

@@ -13,7 +13,7 @@ use Phore\AiHarness\Result\AiInteractiveResult;
  * task error is surfaced.
  *
  * @param array<string, mixed> $options Common helper options plus optional ai_context.
- * @return float|null|AiInteractiveResult
+ * @return float|null|AiInteractiveResult<float|null>
  * @example $score = phore_ai_score('How relevant is it?', options: ['ai_context' => 'article']);
  * @see \Phore\AiHarness\AiContext::score()
  */

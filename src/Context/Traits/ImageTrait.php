@@ -21,6 +21,7 @@ trait ImageTrait
      *
      * @param string|PromptType|ToolType|array $prompts Instructions and sources.
      * @param array<string, mixed> $options Common and image-generation options.
+     * @return ImageResultType|AiInteractiveResult<ImageResultType> Generated image.
      * @throws \RuntimeException For a provider/tool failure or missing image.
      * @example $image = (new AiContext())->image('Create a simple icon.');
      * @see \Phore\AiHarness\AiContext

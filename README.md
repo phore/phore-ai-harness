@@ -325,13 +325,14 @@ All high-level AI operations support the same optional interactive settings:
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `interactive` | `false` | Execute one model request and its local callback batch |
-| `interactive_continue_id` | `null` | Opaque encrypted continuation; null starts a new task |
+| `interactive_continue_id` | `null` | Opaque encrypted continuation; null starts a new conversation |
 | `interactive_steering_message` | `null` | Additional user input; null and empty strings are omitted |
 
-Use the existing function with its original arguments on every HTTP request.
-Only the first request submits the task prompt. Subsequent requests submit the
-saved tool outputs and optional steering. The provider's output schema and the
-registered tools and instructions remain available.
+Use the existing function with its original arguments while a task is open.
+Only its first request submits the task prompt. Subsequent requests submit the
+saved tool outputs and optional steering. A completed token starts a new task
+in the same conversation, so the new prompt is sent normally. The provider's
+output schema and registered tools and instructions remain available.
 
 ```php
 use Phore\AiHarness\Result\AiInteractiveResult;
@@ -345,32 +346,83 @@ $result = phore_ai_text([
     'interactive_steering_message' => $request['interactive_steering_message'] ?? null,
 ]);
 
-// The application can extend the DTO or append metadata before serialization.
-if ($result instanceof AiInteractiveResult) {
-    return json_encode([...get_object_vars($result), 'statusMessage' => $statusMessage]);
-}
-return json_encode($result);
+// In interactive mode the result is always AiInteractiveResult<string>.
+return json_encode([...get_object_vars($result), 'statusMessage' => $statusMessage]);
 ```
 
 Here `$tool` is a registered application CallbackTool and `$statusMessage`
 is optional application data. The complete example below shows their creation.
 
-A continuation always has the fixed JSON discriminator `type: "ai_continue"`:
+Every successful interactive call returns `AiInteractiveResult<T>`, including
+the final call. Its fixed JSON discriminator is always `type: "ai_continue"`.
+For a tool round:
 
 ```json
 {
   "type": "ai_continue",
   "continueId": "v1.example-encrypted-token",
+  "completed": false,
+  "stop": false,
   "toolCalls": [{"name": "log_message", "callId": "call_example"}],
-  "message": null
+  "message": null,
+  "result": null
 }
 ```
 
-The client checks the discriminator, returns the token as
-`interactive_continue_id` and repeats the same endpoint. If the result is not
-a continuation, the operation is finished and its usual return value is
-returned directly (string, bool, DTO, array, image, etc.). Reserve the
-`ai_continue` discriminator for continuations in your HTTP API.
+For a completed text operation:
+
+```json
+{
+  "type": "ai_continue",
+  "continueId": "v1.example-final-token",
+  "completed": true,
+  "stop": true,
+  "toolCalls": [],
+  "message": null,
+  "result": "The finished report."
+}
+```
+
+| completed | stop | Client behavior |
+| --- | --- | --- |
+| false | false | Send the same task and the latest token automatically |
+| false | true | Wait for user input, then send the same task and steering |
+| true | true | Use result; retain the final token for the next task |
+
+`completed` indicates that the original operation, including local validation,
+has finished. `stop` controls automatic HTTP requests; an application may set it
+on an unfinished response, for example when asking the user a question.
+Never determine completion by testing the truthiness of `result`:
+`false` (including a normal unsuccessful `do()`), `null` (when allowed),
+`0.0`, an empty string, and an empty array can all be valid final results.
+
+The PHPDoc generic describes the original return type: text gives
+`AiInteractiveResult<string>`, do gives `AiInteractiveResult<bool>`, a struct
+gives `AiInteractiveResult<MyDto>`, a struct array gives
+`AiInteractiveResult<list<MyDto>>`. With interactive disabled, the existing
+return types and exception behavior are unchanged. Technical, validation and
+explicit task exceptions still propagate; they are not wrapped as successful
+completed responses.
+
+#### Starting and continuing tasks
+
+* No token: start a fresh conversation, sending the supplied prompt.
+* Unfinished token: repeat the original operation, inputs and prepared tools;
+  only the saved callback outputs and non-empty steering are submitted.
+* Completed token: start a new operation in the same provider conversation.
+  The new prompt and options are used; the previous operation's editor state
+  and output contract are not restored. A new operation can have another
+  output type. Pass the latest token as `interactive_continue_id`; there is
+  no need to also pass a raw provider response ID.
+* An empty content query with no candidates can complete locally without a
+  provider response. Its `continueId` is null if there is no conversation;
+  an existing completed token is retained if provided. An open token cannot
+  be completed by removing its candidates.
+
+The wrapper preserves PHP result objects rather than converting their data
+to a new format. When serving JSON, explicitly encode image binary data
+(e.g. base64) and project non-JSON-native objects, such as an
+`AiContentResultSet` via its `all()` method, into the application's wire format.
 
 Each interactive call makes one model request and executes at most one batch
 of local callbacks. After any executed batch it returns a continuation
@@ -432,10 +484,11 @@ Open http://127.0.0.1:8080 and submit “Prepare a short website accessibility
 report. Ask me which audience to focus on.” The application defines ordinary
 CallbackTools with captured PHP variables. The `log_message` tool appends
 status messages; the `ask_user` tool captures a question. The endpoint adds
-`logMessages`, `questions` and `stop` to the continuation response. The browser
-displays status messages and automatically continues, except when `stop` is
-true. The next user input then becomes the steering message, and the exact
-same endpoint resumes using the saved token. This is application logic, not
+`logMessages` and `questions`, and sets `stop` when a question is pending or
+the operation has completed. The browser displays status messages and
+automatically continues unless `stop` is true. For an unfinished response,
+the next user input becomes steering; after completion it starts a new task
+with the final token. The same endpoint handles both cases. This is application logic, not
 a built-in question or logging protocol. A session in the local demo protects
 against stale continuation tokens; production authentication and authorization
 are the application's responsibility.

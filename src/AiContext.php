@@ -302,7 +302,7 @@ final class AiContext
      * back to the original AiContent instances before leaving this method.
      *
      * @param AiOptions|array<string, mixed>|string|null $options Per-call AI options.
-     * @return AiContentResultSet Matching content; an empty set is valid.
+     * @return AiContentResultSet|AiInteractiveResult<AiContentResultSet> Matching content; an empty set is valid.
      * @example $images = $context->queryContent('Which images show the damaged package?');
      * @see getContentById()
      */
@@ -316,7 +316,26 @@ final class AiContext
 
         $contents = array_values($this->contentById);
         if ($contents === []) {
-            return new AiContentResultSet([], new self());
+            // Keine Kandidaten: kein Provider-Request nötig. Ein offener Auftrag
+            // darf dadurch jedoch nicht versehentlich als abgeschlossen gelten.
+            [$runtimeOptions] = $this->normalizeSimpleTypeOptions($options);
+            $runtime = AiOptions::fromArray(array_replace($this->defaults->toArray(), $runtimeOptions));
+            $empty = new AiContentResultSet([], new self());
+            if (!$runtime->interactive) {
+                return $empty;
+            }
+            $token = $runtime->interactiveContinueId;
+            if ($token !== null) {
+                $client = $this->client ?? Toolkit::createAi($runtime->toArray())->getOpenAiClient();
+                $key = $client->getContinueKeyGenerator()->decode($token);
+                if (!$key->completed) {
+                    throw new InvalidArgumentException('Interactive content candidates changed.');
+                }
+                $this->responseId = $key->responseId;
+            } else {
+                $this->responseId = null;
+            }
+            return new AiInteractiveResult($token, completed: true, result: $empty);
         }
 
         $choices = [];
@@ -347,24 +366,23 @@ final class AiContext
             options: $options,
         );
 
-        if ($ids instanceof AiInteractiveResult) {
-            return $ids;
-        }
-        $matched = [];
-        foreach ($ids ?? [] as $choiceId) {
-            if (!is_string($choiceId) || !str_starts_with($choiceId, 'content:')) {
-                throw new \RuntimeException('AI content query returned an invalid content selection.');
+        return $this->mapInteractiveResult($ids, function (?array $ids): AiContentResultSet {
+            $matched = [];
+            foreach ($ids ?? [] as $choiceId) {
+                if (!is_string($choiceId) || !str_starts_with($choiceId, 'content:')) {
+                    throw new \RuntimeException('AI content query returned an invalid content selection.');
+                }
+
+                $id = substr($choiceId, strlen('content:'));
+                if (!isset($this->contentById[$id])) {
+                    throw new \RuntimeException('AI content query returned an unknown content ID.');
+                }
+
+                $matched[] = $this->contentById[$id];
             }
 
-            $id = substr($choiceId, strlen('content:'));
-            if (!isset($this->contentById[$id])) {
-                throw new \RuntimeException('AI content query returned an unknown content ID.');
-            }
-
-            $matched[] = $this->contentById[$id];
-        }
-
-        return new AiContentResultSet($matched, new self(prompts: $matched));
+            return new AiContentResultSet($matched, new self(prompts: $matched));
+        });
     }
 
     /**
@@ -566,13 +584,17 @@ final class AiContext
                 $codec = $ai->getOpenAiClient()->getContinueKeyGenerator();
                 if ($runtime->interactiveContinueId !== null) {
                     $key = $codec->decode($runtime->interactiveContinueId);
-                    if (($key->state['binding'] ?? null) !== $binding) {
-                        throw new InvalidArgumentException('Interactive operation input changed.');
+                    if (!$key->completed) {
+                        if (($key->state['binding'] ?? null) !== $binding) {
+                            throw new InvalidArgumentException('Interactive operation input changed.');
+                        }
+                        $this->restoreInteractiveState($stateItems, $key->state, $localState);
                     }
-                    $this->restoreInteractiveState($stateItems, $key->state, $localState);
                 }
+                // Ein abgeschlossener Key startet einen neuen Auftrag an derselben Conversation.
+                // Nur ein offener Key unterdrückt den Aufgaben-Prompt und restauriert Editor-State.
                 $this->responseId = $key?->responseId;
-                $ai = $ai->withInteractive($key, $runtime->interactiveSteeringMessage);
+                $ai = $ai->withInteractive($key?->completed ? null : $key, $runtime->interactiveSteeringMessage);
             }
 
             // Daten-Prompts werden beim Root geladen; Tools/Systemprompts bleiben request-lokal aktiv.
@@ -593,7 +615,17 @@ final class AiContext
                 $ai = $ai->withOutput($format);
             }
 
-            return $operation($ai);
+            $result = $operation($ai);
+            if (!$runtime->interactive) {
+                return $result;
+            }
+            $id = $ai->getLastResponseId();
+            if ($id === null || $id === '') {
+                throw new \RuntimeException('Completed interactive response is missing its response ID.');
+            }
+            $token = $codec->encode(new ContinueKey($id, '', completed: true));
+
+            return new AiInteractiveResult($token, completed: true, result: $result);
         } catch (InteractivePause $pause) {
             $state = $this->captureInteractiveState($stateItems, $localState);
             $state['binding'] = $binding;
@@ -612,6 +644,27 @@ final class AiContext
             }
             $this->running = false;
         }
+    }
+
+    /**
+     * Apply the existing local result transformation only after completion.
+     * Pauses pass through; the envelope retains its token and status.
+     *
+     * @template T
+     * @template U
+     * @param T|AiInteractiveResult<T> $step
+     * @param callable(T): U $transform
+     * @return U|AiInteractiveResult<U>
+     */
+    private function mapInteractiveResult(mixed $step, callable $transform): mixed
+    {
+        if (!$step instanceof AiInteractiveResult) {
+            return $transform($step);
+        }
+        if (!$step->completed) {
+            return $step;
+        }
+        return clone($step, ['result' => $transform($step->result)]);
     }
 
     /**

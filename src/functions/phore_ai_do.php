@@ -22,7 +22,7 @@ use Phore\AiHarness\ToolType\ToolType;
  * @param string|PromptType|ToolType|array<int, string|PromptType|ToolType> $prompts Instructions/sources/tools.
  * @param bool|class-string<DoException> $throw Failure policy for a completed but unsuccessful task.
  * @param array{ai_context?: AiContext|string|null, client?: OpenAiClient|string|null, model?: string, reasoning?: array|null, timeout?: int, connect_timeout?: int, debug_log?: bool|LoggerInterface} $options Common options.
- * @return bool|AiInteractiveResult True when the requested work completed; false for a reported fachlicher failure when throwing is disabled.
+ * @return bool|AiInteractiveResult<bool> True when the requested work completed; false for a reported fachlicher failure when throwing is disabled.
  * @throws DoException When the model reports failure and throwing is enabled.
  * @throws InvalidArgumentException For an invalid context selector, exception class or option.
  * @example $ok = phore_ai_do('Research the topic for the next step.', options: ['ai_context' => 'job']);

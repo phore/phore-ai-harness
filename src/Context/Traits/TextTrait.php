@@ -28,6 +28,7 @@ trait TextTrait
      * @param string|PromptType|ToolType|array $prompts Instructions and sources.
      * @param string|null $input Existing text, or null for generation.
      * @param array<string, mixed> $options Per-call overrides of context defaults.
+     * @return string|AiInteractiveResult<string> Generated or locally edited text.
      * @throws RuntimeException For an unfinished edit or exhausted callback limit.
      * @example $text = (new AiContext())->text('Correct spelling.', input: $draft);
      * @see \Phore\AiHarness\AiContext
@@ -73,12 +74,11 @@ trait TextTrait
             },
             binding: hash('sha256', $input),
         );
-        if ($step instanceof AiInteractiveResult) {
-            return $step;
-        }
-        if (!$written) {
-            throw new RuntimeException('AI response did not complete the text edit through write_text.');
-        }
-        return $result;
+        return $this->mapInteractiveResult($step, static function (string $message) use ($written, $result): string {
+            if (!$written) {
+                throw new RuntimeException('AI response did not complete the text edit through write_text.');
+            }
+            return $result;
+        });
     }
 }

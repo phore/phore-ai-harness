@@ -19,7 +19,7 @@ use Phore\AiHarness\ToolType\ToolType;
  *
  * @param string|PromptType|ToolType|array<int, string|PromptType|ToolType> $prompts Instructions/sources; strings are instruction-enabled.
  * @param array{ai_context?: AiContext|string|null, input?: string|null, client?: OpenAiClient|string|null, model?: string, reasoning?: array|null, timeout?: int, connect_timeout?: int, debug_log?: bool|LoggerInterface} $options Common options; see docs/ai-context.md. Without ai_context each call is isolated.
- * @return string|AiInteractiveResult Generated or edited text, never the edit callback's commentary.
+ * @return string|AiInteractiveResult<string> Generated or edited text, never the edit callback's commentary.
  * @throws InvalidArgumentException For invalid context selectors or options.
  * @throws RuntimeException For provider/tool failure or an unfinished edit.
  * @example $text = phore_ai_text('Correct spelling.', ['input' => $draft, 'ai_context' => 'default']);

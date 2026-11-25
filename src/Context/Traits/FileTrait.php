@@ -29,6 +29,7 @@ trait FileTrait
      * @param string|PromptType|ToolType|array $prompts Instructions and sources.
      * @param string|list<string> $input Target path(s), not the text contents.
      * @param array<string, mixed> $options Common options and optional output_class.
+     * @return object|string|AiInteractiveResult<object|string> Validated edit summary.
      * @throws InvalidArgumentException For invalid targets or output class.
      * @throws FileEditException For unresolved edits, with per-file outcomes.
      * @throws \RuntimeException For unreadable input or missing callback completion.
@@ -65,10 +66,9 @@ trait FileTrait
         } catch (CallbackRoundLimitException $error) {
             throw new FileEditException($editor->results(), $error);
         }
-        if ($result instanceof AiInteractiveResult) {
-            return $result;
-        }
-        $editor->assertComplete();
-        return $result;
+        return $this->mapInteractiveResult($result, static function (object|string $summary) use ($editor): object|string {
+            $editor->assertComplete();
+            return $summary;
+        });
     }
 }

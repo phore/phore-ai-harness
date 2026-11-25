@@ -38,6 +38,7 @@ final readonly class ContinueKeyGenerator
             'responseId' => $key->responseId,
             'contract' => $key->contract,
             'state' => $key->state,
+            'completed' => $key->completed,
         ], JSON_THROW_ON_ERROR);
         $encrypted = sodium_crypto_aead_xchacha20poly1305_ietf_encrypt(
             $json, self::PREFIX . $this->scope, $nonce, $this->key,
@@ -75,11 +76,13 @@ final readonly class ContinueKeyGenerator
             }
             $data = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
             if (!is_array($data) || !is_string($data['responseId'] ?? null) || $data['responseId'] === ''
-                || !is_string($data['contract'] ?? null) || !is_array($data['state'] ?? null)) {
+                || !is_string($data['contract'] ?? null) || !is_array($data['state'] ?? null)
+                || !is_bool($data['completed'] ?? false)
+                || (($data['completed'] ?? false) && ($data['contract'] !== '' || $data['state'] !== []))) {
                 throw new InvalidArgumentException('Invalid continuation token.');
             }
 
-            return new ContinueKey($data['responseId'], $data['contract'], $data['state']);
+            return new ContinueKey($data['responseId'], $data['contract'], $data['state'], $data['completed'] ?? false);
         } catch (\SodiumException|\JsonException) {
             throw new InvalidArgumentException('Invalid continuation token.');
         }

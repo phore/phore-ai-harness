@@ -23,7 +23,7 @@ use Phore\AiHarness\ToolType\ToolType;
  * @param string|list<string> $filenames Existing or new target paths; parent directories must exist.
  * @param class-string<T>|null $className Class for the final summary, not file contents.
  * @param array<string, mixed> $options Existing common options plus ai_context (ID/object/null).
- * @return T|string|AiInteractiveResult Hydrated summary or plain text after a successful edit/no-op.
+ * @return T|string|AiInteractiveResult<T|string> Hydrated summary or plain text after a successful edit/no-op.
  * @throws InvalidArgumentException For invalid target arguments or output class.
  * @throws FileEditException For incomplete edits, with per-file outcomes.
  * @throws RuntimeException For unreadable files or missing write callback.

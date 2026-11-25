@@ -18,7 +18,7 @@ use Phore\AiHarness\ToolType\ToolType;
  *
  * @param string|PromptType|ToolType|array<int, string|PromptType|ToolType> $prompts Instructions and source prompts/tools.
  * @param array<string, mixed> $options Common context and image-generation options.
- * @return ImageResultType|AiInteractiveResult Binary data and metadata; no file is written automatically.
+ * @return ImageResultType|AiInteractiveResult<ImageResultType> Binary data and metadata; no file is written automatically.
  * @throws InvalidArgumentException For invalid settings or context selectors.
  * @throws RuntimeException For provider/tool failure or a missing image.
  * @example $image = phore_ai_image('A simple icon.', ['ai_context' => 'default', 'output_format' => 'png']);

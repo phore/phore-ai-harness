@@ -35,7 +35,7 @@ trait StructTrait
      * @param string|PromptType|ToolType|array $prompts Instructions and sources.
      * @param class-string<T>|T $input Output class or existing editing target.
      * @param array<string, mixed> $options Common and struct-patch options.
-     * @return T|\Phore\JsonPatch\PatchApplyResult|AiInteractiveResult Metadata when dry_run/return_patch is set.
+     * @return T|\Phore\JsonPatch\PatchApplyResult|AiInteractiveResult<T|\Phore\JsonPatch\PatchApplyResult> Metadata when dry_run/return_patch is set.
      * @throws InvalidArgumentException For invalid options, class or prompt tools.
      * @throws \Phore\JsonPatch\PatchValidationException For an invalid patch.
      * @example $answer = (new AiContext())->struct('Extract the answer.', Answer::class);
@@ -93,14 +93,12 @@ trait StructTrait
             $items, $options, static fn (PhoreAi $ai): string => $ai->run(), $format,
             binding: hash('sha256', Toolkit::jsonEncode([$target::class, $hash, $addressing, $options['identity_pointers'] ?? []])),
         );
-        if ($output instanceof AiInteractiveResult) {
-            return $output;
-        }
-
-        // Erst nach der Modellantwort wird lokal validiert; es gibt keinen Rewrite-Fallback.
-        $patch = $format->parse($output);
-        $options['expected_hash'] = $hash;
-        $result = (new StructPatcher())->apply($target, $patch, $options);
-        return ($options['dry_run'] ?? false) || ($options['return_patch'] ?? false) ? $result : $result->value;
+        return $this->mapInteractiveResult($output, static function (string $text) use ($format, $options, $hash, $target): object {
+            // Erst nach der Modellantwort wird lokal validiert; kein Rewrite-Fallback.
+            $patch = $format->parse($text);
+            $options['expected_hash'] = $hash;
+            $result = (new StructPatcher())->apply($target, $patch, $options);
+            return ($options['dry_run'] ?? false) || ($options['return_patch'] ?? false) ? $result : $result->value;
+        });
     }
 }

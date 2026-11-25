@@ -113,6 +113,7 @@ trait AiContextTrait
      * @param string|PromptType|ToolType|array $prompts Instructions and sources.
      * @param bool|class-string<DoException> $throw Failure handling.
      * @param array<string,mixed> $options Per-call options.
+     * @return bool|AiInteractiveResult<bool>
      * @example $mail->ai_do('Verify the supplied facts.', throw: true);
      * @see AiContext::do()
      */
@@ -130,6 +131,7 @@ trait AiContextTrait
      * @param string|PromptType|ToolType|array $prompts Instructions and sources.
      * @param ?string $input Optional existing text to edit.
      * @param array<string,mixed> $options Per-call options.
+     * @return string|AiInteractiveResult<string>
      * @example $answer = $mail->ai_text('Summarize the latest request.');
      * @see AiContext::text()
      */
@@ -147,6 +149,7 @@ trait AiContextTrait
      * @param string|PromptType|ToolType|array $prompts Instructions and sources.
      * @param string|list<string> $input Target path or paths.
      * @param array<string,mixed> $options Per-call options.
+     * @return object|string|AiInteractiveResult<object|string>
      * @example $summary = $job->ai_file('Update the changelog.', 'CHANGELOG.md');
      * @see AiContext::file()
      */
@@ -165,7 +168,7 @@ trait AiContextTrait
      * @param string|PromptType|ToolType|array $prompts Instructions and sources.
      * @param class-string<T>|T $input Output class or existing object.
      * @param array<string,mixed> $options Per-call options.
-     * @return T|object
+     * @return T|\Phore\JsonPatch\PatchApplyResult|AiInteractiveResult<T|\Phore\JsonPatch\PatchApplyResult>
      * @example $result = $mail->ai_struct('Extract the request.', Request::class);
      * @see AiContext::struct()
      */
@@ -184,7 +187,7 @@ trait AiContextTrait
      * @param string|PromptType|ToolType|array $prompts Instructions and sources.
      * @param class-string<T> $input Output element class.
      * @param array<string,mixed> $options Per-call options.
-     * @return list<T>|AiInteractiveResult
+     * @return list<T>|AiInteractiveResult<list<T>>
      * @example $items = $mail->ai_struct_array('Extract tasks.', Task::class);
      * @see AiContext::structArray()
      */
@@ -201,6 +204,7 @@ trait AiContextTrait
      *
      * @param string|PromptType|ToolType|array $prompts Instructions and sources.
      * @param array<string,mixed> $options Image and runtime options.
+     * @return ImageResultType|AiInteractiveResult<ImageResultType>
      * @example $image = $card->ai_image('Create the illustration.');
      * @see AiContext::image()
      */
@@ -216,6 +220,7 @@ trait AiContextTrait
      *
      * @param array<int|string,int|string|null> $choices Values or value => description mappings.
      * @param AiOptions|array<string,mixed>|string|null $options Runtime options or model name.
+     * @return string|int|null|AiInteractiveResult<string|int|null>
      * @example $type = $mail->ai_choice('Which request fits?', ['question', 'profile']);
      * @see AiContext::choice()
      */
@@ -233,7 +238,7 @@ trait AiContextTrait
      *
      * @param array<int|string,int|string|null> $choices Values or value => description mappings.
      * @param AiOptions|array<string,mixed>|string|null $options Runtime options or model name.
-     * @return list<string|int>|null|AiInteractiveResult
+     * @return list<string|int>|null|AiInteractiveResult<list<string|int>|null>
      * @example $tags = $mail->ai_choices('Which topics apply?', ['billing', 'profile'], max: 2);
      * @see AiContext::choices()
      */
@@ -252,6 +257,7 @@ trait AiContextTrait
      * Decide yes/no from the bound conversation.
      *
      * @param AiOptions|array<string,mixed>|string|null $options Runtime options or model name.
+     * @return bool|null|AiInteractiveResult<bool|null>
      * @example $firstReply = $mail->ai_yes_no('Is this the first applicant reply?');
      * @see AiContext::yesNo()
      */
@@ -268,7 +274,7 @@ trait AiContextTrait
      *
      * @param array<int|string,int|string|null> $choices Values or value => description mappings.
      * @param AiOptions|array<string,mixed>|string|null $options Runtime options or model name.
-     * @return list<string|int>|null|AiInteractiveResult
+     * @return list<string|int>|null|AiInteractiveResult<list<string|int>|null>
      * @example $ranking = $mail->ai_rank('Rank by relevance.', ['cv', 'profile']);
      * @see AiContext::rank()
      */
@@ -285,6 +291,7 @@ trait AiContextTrait
      * Score the current conversation from 0.0 to 1.0.
      *
      * @param AiOptions|array<string,mixed>|string|null $options Runtime options or model name.
+     * @return float|null|AiInteractiveResult<float|null>
      * @example $confidence = $mail->ai_score('How clearly is the request stated?');
      * @see AiContext::score()
      */
@@ -318,7 +325,7 @@ trait AiContextTrait
      *
      * @param string $prompt Natural-language selection question.
      * @param AiOptions|array<string,mixed>|string|null $options Runtime options or model name.
-     * @return AiContentResultSet|AiInteractiveResult Matching content subset.
+     * @return AiContentResultSet|AiInteractiveResult<AiContentResultSet> Matching content subset.
      * @example $images = $ticket->ai_query_content('Which images show visible damage?');
      * @see AiContext::queryContent()
      * @see AiContentResultSet

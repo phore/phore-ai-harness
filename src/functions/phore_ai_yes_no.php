@@ -13,7 +13,7 @@ use Phore\AiHarness\Result\AiInteractiveResult;
  * that condition is surfaced as TaskErrorException instead of being guessed.
  *
  * @param array<string, mixed> $options Common helper options plus optional ai_context.
- * @return bool|null|AiInteractiveResult
+ * @return bool|null|AiInteractiveResult<bool|null>
  * @example $ready = phore_ai_yes_no('Is the article ready?', options: ['ai_context' => 'article']);
  * @see \Phore\AiHarness\AiContext::yesNo()
  */

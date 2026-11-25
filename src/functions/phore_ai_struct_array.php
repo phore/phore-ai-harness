@@ -18,7 +18,7 @@ use Phore\AiHarness\ToolType\ToolType;
  * @param string|PromptType|ToolType|array<int, string|PromptType|ToolType> $prompts Instructions and sources.
  * @param class-string<T> $className Class used to hydrate every element.
  * @param array<string, mixed> $options Common context/client/model/logging options.
- * @return list<T>|AiInteractiveResult Hydrated results in provider order.
+ * @return list<T>|AiInteractiveResult<list<T>> Hydrated results in provider order.
  * @throws InvalidArgumentException For an invalid class or result shape.
  * @throws JsonException For an undecodable result.
  * @example $tasks = phore_ai_struct_array('Extract tasks.', Task::class, ['ai_context' => 'default']);

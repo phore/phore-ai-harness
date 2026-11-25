@@ -42,6 +42,17 @@ final class ContinueKeyTest extends TestCase
         self::assertEquals($key, $codec->decode($token));
     }
 
+    public function testCompletedKeyRetainsOnlyConversationCursor(): void
+    {
+        $codec = new ContinueKeyGenerator(random_bytes(32), 'fixture');
+        $key = new ContinueKey('resp_final', '', completed: true);
+        $decoded = $codec->decode($codec->encode($key));
+        self::assertTrue($decoded->completed);
+        self::assertSame('resp_final', $decoded->responseId);
+        self::assertSame([], $decoded->state);
+        self::assertSame('', $decoded->contract);
+    }
+
     public function testRejectsTampering(): void
     {
         $codec = new ContinueKeyGenerator(random_bytes(32), 'fixture');

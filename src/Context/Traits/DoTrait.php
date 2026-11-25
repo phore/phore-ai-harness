@@ -24,7 +24,7 @@ trait DoTrait
      * @param string|PromptType|ToolType|array $prompts Instructions and sources/tools.
      * @param bool|class-string<DoException> $throw Failure handling for an otherwise valid task.
      * @param array<string, mixed> $options Per-call overrides of context defaults.
-     * @return bool|AiInteractiveResult True only when the requested work was completed successfully.
+     * @return bool|AiInteractiveResult<bool> True only when the requested work was completed successfully.
      * @throws DoException For a reported task failure when throwing is enabled.
      * @example $context->do('Research the source.'); $text = $context->text('Summarize it.');
      * @see \Phore\AiHarness\AiContext

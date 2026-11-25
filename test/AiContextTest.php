@@ -140,6 +140,9 @@ final class AiContextTest extends TestCase
         $first = $this->context('interactive', [$tool])->text($prompt, options: $options);
         self::assertInstanceOf(AiInteractiveResult::class, $first);
         self::assertSame('ai_continue', json_decode(json_encode($first), true)['type']);
+        self::assertFalse($first->completed);
+        self::assertFalse($first->stop);
+        self::assertNull($first->result);
         self::assertSame([['name' => 'record_step', 'callId' => 'call_1']], $first->toolCalls);
         self::assertSame([1], $executed);
 
@@ -166,7 +169,14 @@ final class AiContextTest extends TestCase
         $options['interactive_continue_id'] = $third->continueId;
         $options['interactive_steering_message'] = null;
         $context = $this->context('interactive', [$tool]);
-        self::assertSame('Finished.', $context->text($prompt, options: $options));
+        $last = $context->text($prompt, options: $options);
+        self::assertInstanceOf(AiInteractiveResult::class, $last);
+        self::assertTrue($last->completed);
+        self::assertTrue($last->stop);
+        self::assertSame('Finished.', $last->result);
+        self::assertNotEmpty($last->continueId);
+        self::assertSame([], $last->toolCalls);
+        self::assertSame('ai_continue', json_decode(json_encode($last), true)['type']);
         self::assertSame('resp_interactive_4', $context->getResponseId());
         self::assertCount(1, $this->lastRequest()['input']);
         self::assertSame([1, 2, 3], $executed);
@@ -183,7 +193,9 @@ final class AiContextTest extends TestCase
             'interactive' => true,
             'interactive_continue_id' => $first->continueId,
         ]);
-        self::assertSame('ONE TWO', $result);
+        self::assertInstanceOf(AiInteractiveResult::class, $result);
+        self::assertTrue($result->completed);
+        self::assertSame('ONE TWO', $result->result);
     }
 
     public function testInteractiveFileEditorRetainsPartialSuccess(): void
@@ -205,7 +217,10 @@ final class AiContextTest extends TestCase
             $second = $this->context('file-retry')->file('Edit.', $paths, $options);
             self::assertInstanceOf(AiInteractiveResult::class, $second);
             $options['interactive_continue_id'] = $second->continueId;
-            self::assertSame('ready', $this->context('file-retry')->file('Edit.', $paths, $options));
+            $last = $this->context('file-retry')->file('Edit.', $paths, $options);
+            self::assertInstanceOf(AiInteractiveResult::class, $last);
+            self::assertTrue($last->completed);
+            self::assertSame('ready', $last->result);
             self::assertSame('ONE', file_get_contents($firstPath));
             self::assertSame('fixed two repeat', file_get_contents($secondPath));
         } finally {
@@ -227,8 +242,107 @@ final class AiContextTest extends TestCase
             $options['interactive_continue_id'] = $step->continueId;
         }
         $result = $this->context('interactive', [$tool])->struct('Extract.', ContextValue::class, $options);
-        self::assertInstanceOf(ContextValue::class, $result);
-        self::assertSame('ready', $result->value);
+        self::assertInstanceOf(AiInteractiveResult::class, $result);
+        self::assertTrue($result->completed);
+        self::assertInstanceOf(ContextValue::class, $result->result);
+        self::assertSame('ready', $result->result->value);
+    }
+
+    public function testCompletedInteractiveKeyStartsNextTaskInSameConversation(): void
+    {
+        if (!extension_loaded('sodium')) {
+            self::markTestSkipped('Interactive mode requires sodium.');
+        }
+        $context = $this->context();
+        $first = $context->text('Original task.', options: ['interactive' => true]);
+        self::assertInstanceOf(AiInteractiveResult::class, $first);
+        self::assertTrue($first->completed);
+        $id = $context->getResponseId();
+
+        // Ein abgeschlossener Key erlaubt einen neuen Prompt und einen anderen Ergebnistyp.
+        $next = $this->context()->struct('New task.', ContextValue::class, [
+            'interactive' => true,
+            'interactive_continue_id' => $first->continueId,
+            'interactive_steering_message' => '',
+        ]);
+        self::assertInstanceOf(AiInteractiveResult::class, $next);
+        self::assertTrue($next->completed);
+        self::assertInstanceOf(ContextValue::class, $next->result);
+        $request = $this->lastRequest();
+        self::assertSame($id, $request['previous_response_id']);
+        self::assertStringContainsString('New task.', json_encode($request['input']));
+        self::assertStringNotContainsString('Original task.', json_encode($request['input']));
+        self::assertNotSame('function_call_output', $request['input'][0]['type'] ?? null);
+    }
+
+    public function testInteractiveSimpleResultsAreWrappedAfterValidation(): void
+    {
+        if (!extension_loaded('sodium')) {
+            self::markTestSkipped('Interactive mode requires sodium.');
+        }
+        $options = ['interactive' => true];
+        $context = $this->context();
+        $results = [
+            [$this->context('do-failure')->do('Verify.', options: $options), false],
+            [$this->context('simple-undetermined')->yesNo('Decide.', true, $options), null],
+            [$context->choice('Choose.', ['a', 'b', 'c'], options: $options), 'a'],
+            [$context->choices('Choose.', ['a', 'b', 'c'], options: $options), ['a', 'c']],
+            [$context->rank('Rank.', ['a', 'b', 'c'], options: $options), ['c', 'a', 'b']],
+            [$context->score('Score.', options: $options), 0.75],
+            [$context->yesNo('Decide.', options: $options), true],
+        ];
+        foreach ($results as [$step, $expected]) {
+            self::assertInstanceOf(AiInteractiveResult::class, $step);
+            self::assertTrue($step->completed);
+            self::assertTrue($step->stop);
+            self::assertSame($expected, $step->result);
+            self::assertSame($expected, json_decode(json_encode($step), true)['result']);
+        }
+        self::assertSame('ready', $context->text('Synchronous.'));
+    }
+
+    public function testInteractiveEmptyContentQueryCompletesWithoutProvider(): void
+    {
+        $step = (new AiContext())->queryContent('Find images.', ['interactive' => true]);
+        self::assertInstanceOf(AiInteractiveResult::class, $step);
+        self::assertTrue($step->completed);
+        self::assertTrue($step->stop);
+        self::assertNull($step->continueId);
+        self::assertCount(0, $step->result);
+    }
+
+    public function testInteractiveArrayImageAndPatchReturnOrdinaryResults(): void
+    {
+        if (!extension_loaded('sodium')) {
+            self::markTestSkipped('Interactive mode requires sodium.');
+        }
+        $options = ['interactive' => true];
+        $context = $this->context();
+        $array = $context->structArray('List.', ContextValue::class, $options);
+        self::assertInstanceOf(AiInteractiveResult::class, $array);
+        self::assertTrue($array->completed);
+        self::assertSame('ready', $array->result[0]->value);
+
+        $image = $context->image('Image.', $options);
+        self::assertInstanceOf(AiInteractiveResult::class, $image);
+        self::assertTrue($image->completed);
+        self::assertSame('fixture-image', $image->result->data);
+
+        $original = new ContextValue('original');
+        $patch = $context->struct('Update.', $original, $options);
+        self::assertInstanceOf(AiInteractiveResult::class, $patch);
+        self::assertTrue($patch->completed);
+        self::assertSame('updated', $patch->result->value);
+        self::assertSame('original', $original->value);
+    }
+
+    public function testInteractiveErrorsRemainExceptions(): void
+    {
+        if (!extension_loaded('sodium')) {
+            self::markTestSkipped('Interactive mode requires sodium.');
+        }
+        $this->expectException(TaskErrorException::class);
+        $this->context('simple-undetermined')->yesNo('Decide.', false, ['interactive' => true]);
     }
 
     public function testEditableTextPromptsShareToolsAndRefreshOnFollowUp(): void

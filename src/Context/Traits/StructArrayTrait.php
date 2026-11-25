@@ -20,7 +20,7 @@ trait StructArrayTrait
      * @param string|PromptType|ToolType|array $prompts Instructions and sources.
      * @param class-string<T> $input Class used to hydrate every list element.
      * @param array<string, mixed> $options Per-call context overrides.
-     * @return list<T>|AiInteractiveResult
+     * @return list<T>|AiInteractiveResult<list<T>>
      * @throws \InvalidArgumentException For an invalid class or result shape.
      * @example $items = (new AiContext())->structArray('Extract tasks.', Task::class);
      * @see \Phore\AiHarness\AiContext

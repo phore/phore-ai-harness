@@ -25,13 +25,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         // Application-level replay protection: only the latest token of this session is accepted.
         if ($continueId !== null && (!hash_equals($_SESSION['continueHash'] ?? '', hash('sha256', $continueId))
-            || !hash_equals($_SESSION['promptHash'] ?? '', hash('sha256', $prompt)))) {
+            || (!($_SESSION['completed'] ?? false)
+                && !hash_equals($_SESSION['promptHash'] ?? '', hash('sha256', $prompt))))) {
             http_response_code(409);
             echo json_encode(['error' => 'Stale or unauthorized continuation.']);
             return;
         }
         $_SESSION['continueHash'] = null; // No blind retry after an uncertain outcome.
         $_SESSION['promptHash'] = hash('sha256', $prompt);
+        $_SESSION['completed'] = false;
 
         // These variables only describe this step; they do not belong to the framework.
         $logMessages = [];
@@ -66,17 +68,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ]);
 
         // Application-defined response fields, no additional framework API.
-        if ($result instanceof AiInteractiveResult) {
-            $_SESSION['continueHash'] = hash('sha256', $result->continueId);
-            $result = [
-                ...get_object_vars($result),
-                'logMessages' => $logMessages,
-                'questions' => $questions,
-                'stop' => $questions !== [],
-            ];
+        if (!$result instanceof AiInteractiveResult) {
+            throw new LogicException('Interactive mode must return AiInteractiveResult.');
         }
-
-        echo json_encode($result, JSON_THROW_ON_ERROR);
+        $_SESSION['continueHash'] = $result->continueId === null ? null : hash('sha256', $result->continueId);
+        $_SESSION['completed'] = $result->completed;
+        echo json_encode([
+            ...get_object_vars($result),
+            'logMessages' => $logMessages,
+            'questions' => $questions,
+            'stop' => $result->stop || $questions !== [],
+        ], JSON_THROW_ON_ERROR);
     } catch (Throwable $error) {
         http_response_code(500);
         error_log($error->getMessage());

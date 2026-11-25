@@ -12,6 +12,7 @@ final readonly class ContinueKey
         public string $responseId,
         public string $contract,
         public array $state = [],
+        public bool $completed = false,
     ) {
     }
 }

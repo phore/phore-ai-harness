@@ -14,7 +14,7 @@ use Phore\AiHarness\Result\AiInteractiveResult;
  *
  * @param array<int|string, int|string|null> $choices Values or value => description mappings.
  * @param array<string, mixed> $options Common helper options plus optional ai_context.
- * @return list<string|int>|null|AiInteractiveResult
+ * @return list<string|int>|null|AiInteractiveResult<list<string|int>|null>
  * @example $ranking = phore_ai_rank(null, ['news', 'guide'], options: ['ai_context' => 'article']);
  * @see \Phore\AiHarness\AiContext::rank()
  */

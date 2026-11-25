@@ -14,7 +14,7 @@ use Phore\AiHarness\Result\AiInteractiveResult;
  *
  * @param array<int|string, int|string|null> $choices Values or value => description mappings.
  * @param array<string, mixed> $options Common helper options plus optional selected and ai_context.
- * @return string|int|null|AiInteractiveResult
+ * @return string|int|null|AiInteractiveResult<string|int|null>
  * @example $tag = phore_ai_choice('Which tag fits?', ['news', 'guide'], options: ['ai_context' => 'article']);
  * @see \Phore\AiHarness\AiContext::choice()
  */
