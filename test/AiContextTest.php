@@ -121,6 +121,65 @@ final class AiContextTest extends TestCase
         return get_last_ai_response()->body['fixture_request'];
     }
 
+    public function testInteractiveStepsResumeAndSteerWithFreshContexts(): void
+    {
+        $executed = [];
+        $tool = new CallbackTool(
+            static function (int $step) use (&$executed): string {
+                $executed[] = $step;
+                return 'recorded ' . $step;
+            },
+            name: 'record_step',
+        );
+
+        $first = $this->context('interactive', [$tool])->doInteractive('Start.');
+        self::assertTrue($first->continue);
+        self::assertSame('resp_interactive_2', $first->responseId);
+        self::assertSame([['name' => 'record_step', 'callId' => 'call_1']], $first->toolCalls);
+        self::assertSame([1], $executed);
+
+        $second = $this->context('interactive', [$tool])->doInteractive(
+            'Use the new direction.',
+            $first->responseId,
+        );
+        self::assertTrue($second->continue);
+        self::assertSame([1, 2], $executed);
+        self::assertSame([['name' => 'record_step', 'callId' => 'call_2']], $second->toolCalls);
+        $request = $this->lastRequest();
+        self::assertSame('resp_interactive_2', $request['previous_response_id']);
+        self::assertSame('function_call_output', $request['input'][0]['type']);
+        self::assertSame('call_2', $request['input'][0]['call_id']);
+        self::assertSame('user', $request['input'][1]['role']);
+        self::assertStringContainsString('Use the new direction.', json_encode($request['input'][1]));
+
+        $context = $this->context('interactive', [$tool]);
+        $last = $context->doInteractive(responseId: $second->responseId);
+        self::assertFalse($last->continue);
+        self::assertSame('Finished.', $last->message);
+        self::assertSame([1, 2, 3], $executed);
+        self::assertSame($last->responseId, $context->getResponseId());
+        self::assertCount(1, $this->lastRequest()['input']);
+
+        $next = $this->context('interactive', [$tool])->doInteractive('Another question.', $last->responseId);
+        self::assertFalse($next->continue);
+        self::assertSame([], $next->toolCalls);
+        self::assertSame([1, 2, 3], $executed);
+        self::assertSame($last->responseId, $this->lastRequest()['previous_response_id']);
+    }
+
+    public function testInteractiveRequiresInitialPrompt(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->context()->doInteractive();
+    }
+
+    public function testInteractiveRejectsUnknownPendingTool(): void
+    {
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Unknown or malformed interactive callback');
+        $this->context('interactive')->doInteractive(responseId: 'resp_interactive_2');
+    }
+
     public function testEditableTextPromptsShareToolsAndRefreshOnFollowUp(): void
     {
         $intro = new EditableTextPrompt('Original introduction', alias: 'intro');

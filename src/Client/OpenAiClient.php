@@ -81,6 +81,51 @@ final class OpenAiClient
     }
 
     /**
+     * Retrieve an existing stored response without creating a new model turn.
+     *
+     * The caller must authorize the ID and use the same provider/project.
+     * Retrieval does not count as new model usage or overwrite the last
+     * generated response.
+     *
+     * @throws InvalidArgumentException If the ID is empty.
+     * @throws AiRequestException On transport or provider failure.
+     * @example $response = $client->retrieveResponse($responseId);
+     * @see \Phore\AiHarness\PhoreAi::runInteractive()
+     */
+    public function retrieveResponse(string $responseId): AiResponse
+    {
+        if (trim($responseId) === '') {
+            throw new InvalidArgumentException('Response ID must not be empty.');
+        }
+
+        $curl = curl_init($this->baseUrl . '/responses/' . rawurlencode($responseId));
+        if ($curl === false) {
+            throw new RuntimeException('Could not initialize curl.');
+        }
+        $headers = [];
+        curl_setopt_array($curl, [
+            CURLOPT_HTTPHEADER => $this->buildRequestHeaders(false),
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => $this->timeout,
+            CURLOPT_CONNECTTIMEOUT => $this->connectTimeout,
+            CURLOPT_HEADERFUNCTION => function (CurlHandle $curl, string $line) use (&$headers): int {
+                $this->parseHeaderLine($headers, $line);
+                return strlen($line);
+            },
+        ]);
+
+        $rawBody = curl_exec($curl);
+        if ($rawBody === false) {
+            throw AiRequestException::fromCurlError('OpenAI response retrieval failed', curl_error($curl));
+        }
+
+        $response = AiResponse::fromJson((int) curl_getinfo($curl, CURLINFO_RESPONSE_CODE), $headers, $rawBody);
+        $this->assertSuccessfulResponse($response);
+
+        return $response;
+    }
+
+    /**
      * Transcribes a completed audio recording in its original language.
      *
      * The audio is sent directly to the transcription endpoint, not to a

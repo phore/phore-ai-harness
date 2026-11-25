@@ -3,6 +3,46 @@
 declare(strict_types=1);
 
 // Local-only Responses fixture. No credentials and no outbound network calls.
+// A deterministic interactive scenario supports retrieval across PHP requests.
+if (str_starts_with($_SERVER['REQUEST_URI'], '/interactive/responses')) {
+    header('Content-Type: application/json');
+    $parts = explode('/', trim($_SERVER['REQUEST_URI'], '/'));
+    $request = $_SERVER['REQUEST_METHOD'] === 'GET'
+        ? []
+        : json_decode(file_get_contents('php://input'), true, 512, JSON_THROW_ON_ERROR);
+    $parent = $request['previous_response_id'] ?? null;
+    $id = $_SERVER['REQUEST_METHOD'] === 'GET'
+        ? ($parts[2] ?? '')
+        : match ($parent) {
+            null => 'resp_interactive_1',
+            'resp_interactive_1' => 'resp_interactive_2',
+            'resp_interactive_2' => 'resp_interactive_3',
+            'resp_interactive_3' => 'resp_interactive_4',
+            default => 'resp_interactive_final',
+        };
+    if (!in_array($id, ['resp_interactive_1', 'resp_interactive_2', 'resp_interactive_3', 'resp_interactive_4', 'resp_interactive_final'], true)) {
+        http_response_code(404);
+        echo '{"error":{"message":"unknown response"}}';
+        return;
+    }
+    $number = (int) substr($id, -1);
+    $output = $number >= 1 && $number <= 3 ? [[
+        'type' => 'function_call',
+        'name' => 'record_step',
+        'call_id' => 'call_' . $number,
+        'arguments' => json_encode(['step' => $number]),
+    ]] : [['type' => 'message', 'content' => [['type' => 'output_text', 'text' => 'Finished.']]]];
+    echo json_encode([
+        'id' => $id,
+        'status' => 'completed',
+        'model' => 'gpt-5-mini',
+        'output' => $output,
+        'fixture_request' => $request,
+        'usage' => ['input_tokens' => 10, 'output_tokens' => 2, 'total_tokens' => 12],
+    ]);
+    return;
+}
+
 $request = json_decode(file_get_contents('php://input'), true, 512, JSON_THROW_ON_ERROR);
 $scenario = explode('/', trim($_SERVER['REQUEST_URI'], '/'))[0];
 $input = $request['input'] ?? [];

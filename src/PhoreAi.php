@@ -24,6 +24,7 @@ use Phore\AiHarness\OutputFormat\StructPatchOutput;
 use Phore\AiHarness\OutputFormat\TextOutput;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\PromptType\SystemPrompt;
+use Phore\AiHarness\Result\AiInteractiveResult;
 use Phore\AiHarness\Result\DoResultType;
 use Phore\AiHarness\Result\ImageResultType;
 use Phore\AiHarness\ToolType\CallbackRoundLimitException;
@@ -275,6 +276,113 @@ final class PhoreAi
             $result->details === '' ? null : $result->details,
             $result->data,
         );
+    }
+
+    /**
+     * Run one interactive step using the configured prompt, tools and cursor.
+     *
+     * Start with a model request or retrieve the stored parent. Execute at
+     * most one batch of local function calls, submit all outputs and stop
+     * after the next provider response. The initial step can therefore make
+     * two model requests. A resumed open round sends new input after its tool
+     * outputs, never as a substitute for them. The returned ID refers to the
+     * newest response, not an HTTP request ID.
+     *
+     * @throws \RuntimeException On malformed or unsuccessful provider responses.
+     * @example $step = $ai->runInteractive();
+     * @see AiContext::doInteractive()
+     * @see AiInteractiveResult
+     */
+    public function runInteractive(): AiInteractiveResult
+    {
+        return $this->executeRun(fn (?RunContext $context) => $this->runInteractiveInternal($context));
+    }
+
+    private function runInteractiveInternal(?RunContext $context): AiInteractiveResult
+    {
+        $request = (new OpenAiPromptTypeConverter())->toAiRequest($this->model, $this->prompts);
+        if ($this->tools !== []) {
+            $request = $request->withTools(...$this->tools);
+        }
+        $request = $this->applyOutputFormat($request, $this->outputFormat);
+        $callbacks = $this->callbackToolsByName();
+        $input = $request->input === '' ? [] : $request->input;
+
+        // Eine offene Antwort wird geladen, nicht durch einen neuen Prompt ersetzt.
+        if ($this->previousResponseId !== null) {
+            $response = $this->openAiClient->retrieveResponse($this->previousResponseId);
+            $this->assertCompletedResponse($response);
+            if ($response->getId() !== $this->previousResponseId) {
+                throw new \RuntimeException('Retrieved response ID does not match the requested cursor.');
+            }
+            if ($this->interactiveCalls($response, $callbacks) === [] && $input !== []) {
+                $response = $this->sendRequest($request->withFollowUp($input, $this->previousResponseId), $context);
+                $input = [];
+            }
+        } else {
+            $response = $this->sendRequest($request, $context);
+            $input = [];
+        }
+
+        // Genau eine Callback-Runde ausführen und die Ergebnisse vollständig übermitteln.
+        $calls = $this->interactiveCalls($response, $callbacks);
+        if ($calls !== []) {
+            $responseId = $response->getId();
+            if ($responseId === null) {
+                throw new \RuntimeException('Callback response is missing its response ID.');
+            }
+            $outputs = $this->callbackToolCallOutputs($response, $callbacks, $context);
+            if ($context !== null && $context->retryPending) {
+                $context->retries++;
+                $context->retryPending = false;
+            }
+            $response = $this->sendRequest(
+                $request->withFollowUp([...$outputs, ...$input], $responseId),
+                $context,
+            );
+        }
+
+        // Die neue Antwort bleibt beim Provider gespeichert; nur ihre ID wird weitergegeben.
+        $pending = $this->interactiveCalls($response, $callbacks);
+        $responseId = $response->getId();
+        if ($responseId === null || $responseId === '') {
+            throw new \RuntimeException('Interactive response is missing its response ID.');
+        }
+        $this->lastResponseId = $responseId;
+        $message = $response->getOutputText();
+
+        return new AiInteractiveResult($responseId, $pending !== [], $message === '' ? null : $message, $calls);
+    }
+
+    /**
+     * Validate all local calls before starting side effects. Unknown functions
+     * must never be silently treated as a completed interactive turn.
+     *
+     * @param array<string, CallbackTool> $callbacks
+     * @return list<array{name: string, callId: string}>
+     */
+    private function interactiveCalls(AiResponse $response, array $callbacks): array
+    {
+        $calls = [];
+        $seen = [];
+        foreach ($response->body['output'] ?? [] as $item) {
+            if (!is_array($item) || ($item['type'] ?? null) !== 'function_call') {
+                continue;
+            }
+            $name = $item['name'] ?? null;
+            $id = $item['call_id'] ?? null;
+            if (!is_string($name) || !isset($callbacks[$name])
+                || !is_string($id) || $id === '' || isset($seen[$id])
+                || !is_string($item['arguments'] ?? null)
+                || !json_decode($item['arguments'], false, 512, JSON_THROW_ON_ERROR) instanceof \stdClass
+            ) {
+                throw new \RuntimeException('Unknown or malformed interactive callback tool call.');
+            }
+            $seen[$id] = true;
+            $calls[] = ['name' => $name, 'callId' => $id];
+        }
+
+        return $calls;
     }
 
     private function runInternal(?RunContext $context = null): string

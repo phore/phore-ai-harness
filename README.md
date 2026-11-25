@@ -318,6 +318,78 @@ for two independent contexts connected by a simulated JSON roundtrip.
 Run `php examples/16-chat-resume-conversation.php` with configured credentials.
 An actual HTTP endpoint must authorize incoming IDs before resuming them.
 
+### Interactive tool execution over HTTP
+
+Use `AiContext::doInteractive()` when the caller, rather than PHP, should
+control the tool loop. Rebuild the same context (prepared instructions, tools,
+model and client) on each request. Only the current provider response ID and
+an optional text prompt cross the application boundary.
+
+```php
+$step = $context->doInteractive(prompt: 'Prepare and review a topic.');
+echo json_encode($step);
+
+// On the next HTTP request, rebuild $context with the same tools.
+$step = $context->doInteractive(responseId: $step->responseId);
+
+// Optional new input is steering, not a repeated initial prompt.
+$step = $context->doInteractive('Focus on accessibility.', $step->responseId);
+```
+
+The result exposes `responseId`, `continue`, `message` and `toolCalls`.
+A typical intermediate result looks like:
+
+```json
+{
+  "responseId": "resp_example",
+  "continue": true,
+  "message": null,
+  "toolCalls": [{"name": "prepare_topic", "callId": "call_example"}]
+}
+```
+
+- A null ID requires an initial prompt and starts a fresh conversation.
+- A supplied ID retrieves the stored response. Null prompt continues an open
+  tool round; a text prompt adds new user input. After `continue: false`,
+  a text prompt with the final ID starts a new turn in the same conversation.
+- Each call executes at most one batch of local callbacks (a model response
+  may contain several). The first step may make two model calls: one to obtain
+  the calls, one to submit their outputs. A resumed open round retrieves the
+  previous response, executes its calls, and sends all outputs plus any new
+  prompt to the model. It stops at the next response. The five-round limit of
+  synchronous `do()` remains unchanged; the consumer controls the overall
+  number of interactive steps.
+- `toolCalls` identifies executed local calls, including recoverable tool
+  failures. It is not a success report and does not expose arguments or
+  results. Provider-hosted tools are not separately stepped. `message` is
+  optional model text, not a fabricated progress update. `continue: false`
+  means no pending local calls, not a structured `do()` success assertion.
+
+**Steering and safety:** queued steering is included in the next model request
+after any already-selected local tools execute. It cannot interrupt or undo
+those tools. Use the latest response ID only, authorize it for the current
+user/workspace, and serialize requests. Never retry an uncertain write blindly:
+a tool may have run before a transport failure. The library does not provide
+exactly-once execution or persistent application state. Stored provider
+responses must remain retrievable; provider retention limits apply. Persist
+mutable text/file/tool state yourself and rebuild it before resuming.
+`AiInteractiveResult` is an extensible DTO; add your own events, changed
+files or metadata in the application response.
+
+Run the local-only [HTTP and JavaScript example](examples/18-interactive/)
+with configured OpenAI credentials:
+
+```sh
+php -S 127.0.0.1:8080 -t examples/18-interactive
+```
+
+Open http://127.0.0.1:8080 and submit “Call prepare_topic for accessibility,
+then review_topic for accessibility, then summarize.” While the client is
+working, send a new instruction. The same endpoint handles every step, and
+the JavaScript loop stops when `continue` is false unless another user
+message is queued. The example uses a session to accept only the latest
+cursor, not a production authentication or idempotency solution.
+
 ### System prompts on follow-up requests
 
 `AiContext` automatically includes prepared `SystemPrompt` instructions again
