@@ -10,6 +10,8 @@ use Phore\AiHarness\Client\AiRequest;
 use Phore\AiHarness\Client\AiResponse;
 use Phore\AiHarness\Client\OpenAiClient;
 use Phore\AiHarness\Client\OpenAI\OpenAiPromptTypeConverter;
+use Phore\AiHarness\Client\OpenAI\OpenAiPromptToContentConverter;
+use Phore\AiHarness\Content\AiImage;
 use Phore\AiHarness\Helper\DataUrl;
 use Phore\AiHarness\Helper\Toolkit;
 use Phore\AiHarness\Keystore\Keystore;
@@ -22,6 +24,7 @@ use Phore\AiHarness\OutputFormat\OutputFormat;
 use Phore\AiHarness\OutputFormat\StructOutput;
 use Phore\AiHarness\OutputFormat\StructPatchOutput;
 use Phore\AiHarness\OutputFormat\TextOutput;
+use Phore\AiHarness\PromptType\ImagePrompt;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\PromptType\SystemPrompt;
 use Phore\AiHarness\Result\DoResultType;
@@ -493,7 +496,7 @@ final class PhoreAi
 
     /**
      * @param array<string, CallbackTool> $callbackTools
-     * @return list<array{type: string, call_id: string, output: string}>
+     * @return list<array{type: string, call_id: string, output: string|list<array<string, mixed>>}>
      * @throws JsonException
      */
     private function callbackToolCallOutputs(AiResponse $response, array $callbackTools, ?RunContext $context = null): array
@@ -603,7 +606,7 @@ final class PhoreAi
         }
     }
 
-    private function invokeLoggedCallback(CallbackTool $tool, string $json, string $callId, RunContext $context): string
+    private function invokeLoggedCallback(CallbackTool $tool, string $json, string $callId, RunContext $context): string|array
     {
         $details = ['tool' => $tool->name(), 'call_id' => $callId];
         $skillEvent = match ($tool->name()) {
@@ -637,10 +640,10 @@ final class PhoreAi
                 return $this->recoverableToolOutput($error);
             }
             // Serialization failures are internal errors, not a reason to repeat a side effect.
-            $output = is_string($result) ? $result : Toolkit::jsonEncode($result);
+            $output = $this->serializeCallbackResult($result);
             $status = 'ok';
             if ($skillEvent === null) {
-                $context->emit('tool_result', [...$details, 'bytes' => strlen($output)]);
+                $context->emit('tool_result', [...$details, 'bytes' => strlen(is_string($output) ? $output : Toolkit::jsonEncode($output))]);
             }
             return $output;
         } catch (\Throwable $error) {
@@ -659,7 +662,7 @@ final class PhoreAi
                         }
                     }
                 }
-                if ($skillEvent === 'skill_executed' && isset($output)) {
+                if ($skillEvent === 'skill_executed' && isset($output) && is_string($output)) {
                     $result = json_decode($output, true);
                     if (is_array($result) && isset($result['exitCode']) && is_int($result['exitCode'])) {
                         $summary['exitCode'] = $result['exitCode'];
@@ -678,7 +681,7 @@ final class PhoreAi
     /**
      * @throws JsonException
      */
-    private function invokeCallbackTool(CallbackTool $tool, string $argumentsJson): string
+    private function invokeCallbackTool(CallbackTool $tool, string $argumentsJson): string|array
     {
         $decodedRoot = json_decode($argumentsJson, false, 512, JSON_THROW_ON_ERROR);
         if (!$decodedRoot instanceof \stdClass) {
@@ -694,6 +697,16 @@ final class PhoreAi
             $result = call_user_func_array($tool->callback(), $arguments);
         } catch (RecoverableToolException $exception) {
             return $this->recoverableToolOutput($exception);
+        }
+
+        return $this->serializeCallbackResult($result);
+    }
+
+    /** @return string|list<array<string, mixed>> */
+    private function serializeCallbackResult(mixed $result): string|array
+    {
+        if ($result instanceof AiImage || $result instanceof ImagePrompt) {
+            return (new OpenAiPromptToContentConverter())->convert($result);
         }
 
         return is_string($result) ? $result : Toolkit::jsonEncode($result);
