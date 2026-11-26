@@ -62,6 +62,34 @@ final class AiFileSystemTest extends TestCase
         self::assertSame([], glob($this->root . '/docs/.phore-ai-fs-*'));
     }
 
+    public function testOptionalCreationMaskDoesNotChangeProcessMaskOrExistingPermissions(): void
+    {
+        $processMask = umask();
+        foreach ([0000 => 0777, 0027 => 0750] as $mask => $permissions) {
+            $path = 'docs/mask-' . $mask . '.md';
+            $fs = new AiFileSystem(
+                $this->root,
+                policy: new FileSystemPolicy(creatable: ['docs/*']),
+                umask: $mask,
+            );
+            $fs->create($path, 'New');
+            clearstatcache(true, $this->root . '/' . $path);
+            self::assertSame($permissions, fileperms($this->root . '/' . $path) & 0777);
+            self::assertSame($processMask, umask());
+            chmod($this->root . '/' . $path, 0640);
+            clearstatcache(true, $this->root . '/' . $path);
+            $fs->edit($path, [['search' => 'New', 'replacement' => 'Edited']]);
+            clearstatcache(true, $this->root . '/' . $path);
+            self::assertSame(0640, fileperms($this->root . '/' . $path) & 0777);
+        }
+    }
+
+    public function testInvalidCreationMaskIsRejected(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new AiFileSystem($this->root, umask: 01000);
+    }
+
     public function testReadHooksReportOnlySuccessfulExplicitReadsAndGrep(): void
     {
         $fs = new AiFileSystem($this->root, id: 'activity', policy: new FileSystemPolicy(ignore: ['vendor']));

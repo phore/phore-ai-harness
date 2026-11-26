@@ -60,6 +60,8 @@ final class AiFileSystem
      * @param FileSystemPolicy|null $policy Optional path policy; omitted permits reads and edits only.
      * @param RevisionStoreInterface|null $revisionStore Optional history backend; defaults to memory.
      * @throws InvalidArgumentException For invalid IDs, aliases or descriptions.
+     * @param int|null $umask Optional creation mask applied to 0777 for new files; null preserves temporary-file defaults.
+     *                       Existing files retain their permissions. The process umask is never changed.
      * @example $fs = new AiFileSystem('/srv/app', id: 'app');
      * @see getContext()
      * @see addRoot()
@@ -73,7 +75,11 @@ final class AiFileSystem
         ?string $description = null,
         ?FileSystemPolicy $policy = null,
         ?RevisionStoreInterface $revisionStore = null,
+        private readonly ?int $umask = null,
     ) {
+        if ($umask !== null && ($umask < 0 || $umask > 0777)) {
+            throw new InvalidArgumentException('AI filesystem umask must be between 0000 and 0777.');
+        }
         $this->context = $context ?? new AiContext();
         $this->id = $this->normalizeId($id ?? 'fs_' . bin2hex(random_bytes(8)));
         $this->alias = $this->normalizeOptionalText($alias, 'alias');
@@ -1111,8 +1117,10 @@ final class AiFileSystem
                 throw new RuntimeException('Cannot write AI filesystem temporary file: ' . $path);
             }
             $mode = file_exists($path) ? fileperms($path) : false;
-            if ($mode !== false) {
-                @chmod($temporary, $mode & 0777);
+            $permissions = $mode !== false ? $mode & 0777
+                : ($this->umask === null ? null : 0777 & ~$this->umask);
+            if ($permissions !== null && !@chmod($temporary, $permissions)) {
+                throw new RuntimeException('Cannot set AI filesystem file permissions: ' . $path);
             }
             if (!@rename($temporary, $path)) {
                 throw new RuntimeException('Cannot replace AI filesystem file: ' . $path);
