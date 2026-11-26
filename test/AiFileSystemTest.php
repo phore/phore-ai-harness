@@ -41,6 +41,27 @@ final class AiFileSystemTest extends TestCase
         @rmdir($this->root);
     }
 
+    public function testCreateAndEditWithStrictErrorHandlerPreserveExistingPermissions(): void
+    {
+        $fs = new AiFileSystem($this->root, policy: new FileSystemPolicy(creatable: ['docs/*']));
+        chmod($this->root . '/docs/a.md', 0640);
+        set_error_handler(static function (int $severity, string $message, string $file, int $line): never {
+            // Match hosts that also convert warnings suppressed with @ into exceptions.
+            throw new \ErrorException($message, 0, $severity, $file, $line);
+        });
+        try {
+            $fs->create('docs/new.md', "New file\n");
+            $fs->edit('docs/a.md', [['search' => 'Title', 'replacement' => 'Changed']]);
+        } finally {
+            restore_error_handler();
+        }
+        self::assertSame("New file\n", file_get_contents($this->root . '/docs/new.md'));
+        self::assertStringContainsString('Changed', file_get_contents($this->root . '/docs/a.md'));
+        clearstatcache(true, $this->root . '/docs/a.md');
+        self::assertSame(0640, fileperms($this->root . '/docs/a.md') & 0777);
+        self::assertSame([], glob($this->root . '/docs/.phore-ai-fs-*'));
+    }
+
     public function testReadHooksReportOnlySuccessfulExplicitReadsAndGrep(): void
     {
         $fs = new AiFileSystem($this->root, id: 'activity', policy: new FileSystemPolicy(ignore: ['vendor']));
