@@ -11,6 +11,34 @@ use PHPUnit\Framework\TestCase;
 
 final class GlobalUsageTest extends TestCase
 {
+    public function testRequestMetadataIsReportedThroughScopedUsage(): void
+    {
+        $global = GlobalUsage::instance();
+        $usage = new GlobalUsage();
+        self::assertNull($usage->getStats()['model']);
+        $events = [];
+        $usage->track(function () use ($global): void {
+            $call = $global->begin('requested-model', 'low');
+            $global->finish($call, [
+                'model' => 'provider-model',
+                'reasoning' => ['effort' => 'medium'],
+                'usage' => ['input_tokens' => 10, 'output_tokens' => 2],
+            ]);
+        }, static function (array $stats) use (&$events): void { $events[] = $stats; });
+        self::assertSame('requested-model', $events[0]['model']);
+        self::assertSame('low', $events[0]['reasoningEffort']);
+        self::assertSame('provider-model', $events[1]['model']);
+        self::assertSame('medium', $events[1]['reasoningEffort']);
+        $usage->track(function () use ($global): void {
+            $global->finish($global->begin('next-model', 'low'), []);
+        });
+        self::assertSame('low', $usage->getStats()['reasoningEffort']);
+        $usage->track(function () use ($global): void {
+            $global->finish($global->begin('no-reasoning'), []);
+        });
+        self::assertNull($usage->getStats()['reasoningEffort']);
+    }
+
     public function testScopedUsageIsolatedAcrossNestedAndConcurrentOperations(): void
     {
         $global = GlobalUsage::instance();

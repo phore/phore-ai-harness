@@ -174,7 +174,8 @@ final class AiRequestSpooler
         $streamContext = $entry['stream'] ? $this->client->createStreamContext() : null;
 
         return (object) [
-            'usageCall' => GlobalUsage::instance()->begin((string) ($entry['request']->extraBody['model'] ?? $entry['request']->model)),
+            'usageCall' => GlobalUsage::instance()->begin((string) ($entry['request']->extraBody['model'] ?? $entry['request']->model),
+                $entry['request']->extraBody['reasoning']['effort'] ?? null),
             'index' => $index,
             'request' => $entry['request'],
             'stream' => $entry['stream'],

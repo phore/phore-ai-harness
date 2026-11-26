@@ -58,7 +58,8 @@ final class OpenAiClient
     public function createResponse(AiRequest $request): AiResponse
     {
         $usage = GlobalUsage::instance();
-        $call = $usage->begin((string) ($request->extraBody['model'] ?? $request->model));
+        $call = $usage->begin((string) ($request->extraBody['model'] ?? $request->model),
+            $request->extraBody['reasoning']['effort'] ?? null);
         $response = null;
         $failed = true;
         $headers = [];
@@ -191,7 +192,8 @@ final class OpenAiClient
     public function streamResponse(AiRequest $request, callable $onEvent): AiResponse
     {
         $usage = GlobalUsage::instance();
-        $call = $usage->begin((string) ($request->extraBody['model'] ?? $request->model));
+        $call = $usage->begin((string) ($request->extraBody['model'] ?? $request->model),
+            $request->extraBody['reasoning']['effort'] ?? null);
         $failed = true;
         $response = null;
         $context = $this->createStreamContext();

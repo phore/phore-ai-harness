@@ -14,6 +14,8 @@ final class GlobalUsage
     /** @var \WeakMap<object, object>|null */
     private static ?\WeakMap $scopes = null;
     private array $models = [];
+    private ?string $model = null;
+    private ?string $reasoningEffort = null;
 
     /**
      * Attribute requests started inside this operation to this independent tracker.
@@ -62,14 +64,14 @@ final class GlobalUsage
     }
 
     /** @internal Start one client request attempt, including setup failures. */
-    public function begin(string $model): object
+    public function begin(string $model, ?string $reasoningEffort = null): object
     {
-        $call = $this->beginLocal($model);
+        $call = $this->beginLocal($model, $reasoningEffort);
         if ($this === self::instance()) {
             $scope = self::$scopes[self::scopeKey()] ?? null;
             if ($scope !== null) {
                 $call->scope = $scope;
-                $call->scopeCall = $scope->tracker->beginLocal($model);
+                $call->scopeCall = $scope->tracker->beginLocal($model, $reasoningEffort);
                 $this->notifyScope($scope);
             }
         }
@@ -77,13 +79,15 @@ final class GlobalUsage
         return $call;
     }
 
-    private function beginLocal(string $model): object
+    private function beginLocal(string $model, ?string $reasoningEffort): object
     {
+        $this->model = $model;
+        $this->reasoningEffort = $reasoningEffort;
         $this->models[$model] ??= self::emptyCounters();
         $this->models[$model]['requests']++;
         $this->models[$model]['pendingRequests']++;
 
-        return (object) ['model' => $model, 'finished' => false];
+        return (object) ['model' => $model, 'reasoningEffort' => $reasoningEffort, 'finished' => false];
     }
 
     /** @internal Complete once, even when stream or spooler cleanup runs twice. */
@@ -113,6 +117,9 @@ final class GlobalUsage
         $requestedModel = $call->model;
         $model = is_string($body['model'] ?? null) && $body['model'] !== ''
             ? $body['model'] : $requestedModel;
+        $this->model = $model;
+        $this->reasoningEffort = is_string($body['reasoning']['effort'] ?? null)
+            ? $body['reasoning']['effort'] : $call->reasoningEffort;
         $this->models[$requestedModel]['pendingRequests']--;
         if ($model !== $requestedModel) {
             $this->models[$requestedModel]['requests']--;
@@ -141,6 +148,8 @@ final class GlobalUsage
     /**
      * A detached snapshot. knownCostUsd is the priced subtotal; totalCostUsd is
      * null if any request is pending, lacks usage, or has no known model price.
+     * model/reasoningEffort describe the latest request update, not aggregates.
+     * Provider response metadata takes precedence over sent request metadata.
      */
     public function getStats(?CostEstimator $estimator = null): array
     {
@@ -171,7 +180,8 @@ final class GlobalUsage
         }
         $total['totalCostUsd'] = $total['missingUsageRequests'] + $total['pendingRequests'] + $total['unpricedRequests'] === 0
             ? $total['knownCostUsd'] : null;
-        return [...$total, 'currency' => 'USD', 'estimated' => true, 'models' => $models];
+        return [...$total, 'currency' => 'USD', 'estimated' => true, 'models' => $models,
+            'model' => $this->model, 'reasoningEffort' => $this->reasoningEffort];
     }
 
     private static function emptyCounters(): array
