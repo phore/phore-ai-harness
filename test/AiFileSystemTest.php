@@ -41,6 +41,29 @@ final class AiFileSystemTest extends TestCase
         @rmdir($this->root);
     }
 
+    public function testReadHooksReportOnlySuccessfulExplicitReadsAndGrep(): void
+    {
+        $fs = new AiFileSystem($this->root, id: 'activity', policy: new FileSystemPolicy(ignore: ['vendor']));
+        $events = [];
+        $fs->onRead(static function (FileOperationContext $event) use (&$events): void {
+            $events[] = [$event->fileSystemId, $event->operation, $event->path, $event->beforeContent, $event->afterContent];
+        });
+        $fs->read('docs/a.md', 2, 1);
+        $fs->grep('needle', 'docs');
+        $fs->edit('docs/a.md', [['search' => 'Title', 'replacement' => 'Changed']]);
+        try {
+            $fs->read('vendor/ignored.txt');
+            self::fail('Expected denied read.');
+        } catch (\RuntimeException) {
+        }
+        self::assertSame(['activity', 'read', 'docs/a.md', null, null], $events[0]);
+        self::assertCount(3, $events);
+        $paths = array_column(array_slice($events, 1), 2);
+        sort($paths);
+        self::assertSame(['docs/a.md', 'docs/b.txt'], $paths);
+        self::assertCount(1, $fs->getChangeSet());
+    }
+
     public function testContextReusesOneFilesystemToolSetForSeveralFilesystems(): void
     {
         $context = new AiContext();

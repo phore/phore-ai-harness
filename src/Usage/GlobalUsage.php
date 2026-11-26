@@ -10,7 +10,51 @@ use Phore\AiHarness\Result\UsageInfoType;
 final class GlobalUsage
 {
     private static ?self $instance = null;
+    private static ?object $mainScopeKey = null;
+    /** @var \WeakMap<object, object>|null */
+    private static ?\WeakMap $scopes = null;
     private array $models = [];
+
+    /**
+     * Attribute requests started inside this operation to this independent tracker.
+     *
+     * The process-wide aggregate is still updated. Nested scopes and independent
+     * Fibers are isolated. Each request keeps its original scope through finish(),
+     * even if completed outside that scope (e.g. spooler cleanup).
+     * The optional observer receives a detached snapshot after begin and finish.
+     * Use a fresh tracker for each independent edit; no global reset is needed.
+     *
+     * @param callable(): mixed $operation Operation whose requests are measured.
+     * @param callable(array): void|null $onUpdate Usage observer.
+     * @return mixed Result of the operation.
+     * @throws \LogicException If this is the process-global tracker.
+     * @example $usage = new GlobalUsage(); $result = $usage->track(fn () => $context->text('Edit'), fn (array $stats) => reportUsage($stats));
+     * @see getStats()
+     */
+    public function track(callable $operation, ?callable $onUpdate = null): mixed
+    {
+        if ($this === self::instance()) {
+            throw new \LogicException('Use an independent usage tracker for a scope.');
+        }
+        $key = self::scopeKey();
+        $scopes = self::$scopes ??= new \WeakMap();
+        $previous = $scopes[$key] ?? null;
+        $scopes[$key] = (object) ['tracker' => $this, 'observer' => $onUpdate];
+        try {
+            return $operation();
+        } finally {
+            if ($previous === null) {
+                unset($scopes[$key]);
+            } else {
+                $scopes[$key] = $previous;
+            }
+        }
+    }
+
+    private static function scopeKey(): object
+    {
+        return \Fiber::getCurrent() ?? (self::$mainScopeKey ??= new \stdClass());
+    }
 
     public static function instance(): self
     {
@@ -20,9 +64,25 @@ final class GlobalUsage
     /** @internal Start one client request attempt, including setup failures. */
     public function begin(string $model): object
     {
+        $call = $this->beginLocal($model);
+        if ($this === self::instance()) {
+            $scope = self::$scopes[self::scopeKey()] ?? null;
+            if ($scope !== null) {
+                $call->scope = $scope;
+                $call->scopeCall = $scope->tracker->beginLocal($model);
+                $this->notifyScope($scope);
+            }
+        }
+
+        return $call;
+    }
+
+    private function beginLocal(string $model): object
+    {
         $this->models[$model] ??= self::emptyCounters();
         $this->models[$model]['requests']++;
         $this->models[$model]['pendingRequests']++;
+
         return (object) ['model' => $model, 'finished' => false];
     }
 
@@ -32,6 +92,23 @@ final class GlobalUsage
         if ($call->finished) {
             return;
         }
+        $this->finishLocal($call, $body, $failed);
+        if (isset($call->scope)) {
+            $scope = $call->scope;
+            $scope->tracker->finishLocal($call->scopeCall, $body, $failed);
+            $this->notifyScope($scope);
+        }
+    }
+
+    private function notifyScope(object $scope): void
+    {
+        if ($scope->observer !== null) {
+            ($scope->observer)($scope->tracker->getStats());
+        }
+    }
+
+    private function finishLocal(object $call, ?array $body, bool $failed): void
+    {
         $call->finished = true;
         $requestedModel = $call->model;
         $model = is_string($body['model'] ?? null) && $body['model'] !== ''

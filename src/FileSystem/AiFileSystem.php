@@ -37,6 +37,7 @@ final class AiFileSystem
         'beforeMove' => [],
         'afterMove' => [],
         'change' => [],
+        'read' => [],
     ];
 
     public readonly string $id;
@@ -301,6 +302,24 @@ final class AiFileSystem
     }
 
     /**
+     * Observe successful explicit reads and files scanned by grep.
+     *
+     * The event contains the filesystem ID and virtual path; beforeContent
+     * and afterContent are null. Internal mutation reads do not emit events.
+     * Failed or denied reads do not emit events.
+     *
+     * @param callable(FileOperationContext): void $hook Read observer.
+     * @return $this
+     * @example $fs->onRead(fn (FileOperationContext $event) => reportRead($event->path));
+     * @see read()
+     * @see grep()
+     */
+    public function onRead(callable $hook): self
+    {
+        return $this->addHook('read', $hook);
+    }
+
+    /**
      * Return model-visible metadata without exposing the host root path.
      *
      * @return array{id: string, alias: ?string, description: ?string, rootConfigured: bool, files: list<string>}
@@ -387,6 +406,7 @@ final class AiFileSystem
             } catch (RuntimeException) {
                 continue;
             }
+            $this->runHooks('read', new FileOperationContext($this->id, 'read', $virtualPath, $realPath, null, null));
             $lines = preg_split('/\R/u', $content);
             if ($lines === false) {
                 continue;
@@ -446,6 +466,7 @@ final class AiFileSystem
         $lineCount = max(1, min(1000, $lineCount));
         $slice = array_slice($lines, $startLine - 1, $lineCount);
         $endLine = $slice === [] ? $startLine - 1 : $startLine + count($slice) - 1;
+        $this->runHooks('read', new FileOperationContext($this->id, 'read', $virtualPath, $realPath, null, null));
 
         return [
             'path' => $virtualPath,

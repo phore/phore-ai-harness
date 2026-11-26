@@ -11,6 +11,54 @@ use PHPUnit\Framework\TestCase;
 
 final class GlobalUsageTest extends TestCase
 {
+    public function testScopedUsageIsolatedAcrossNestedAndConcurrentOperations(): void
+    {
+        $global = GlobalUsage::instance();
+        $outer = new GlobalUsage();
+        $inner = new GlobalUsage();
+        $other = new GlobalUsage();
+        $events = [];
+        $body = ['usage' => ['input_tokens' => 100, 'output_tokens' => 20]];
+        $before = $global->getStats()['requests'];
+
+        $result = $outer->track(function () use ($global, $inner, $other, $body): string {
+            $call = $global->begin('gpt-5-mini');
+            $fiber = new \Fiber(fn () => $other->track(function () use ($global, $body): void {
+                $request = $global->begin('gpt-5-nano');
+                \Fiber::suspend();
+                $global->finish($request, $body);
+            }));
+            $fiber->start();
+            $inner->track(fn () => $global->finish($global->begin('gpt-5'), $body));
+            $fiber->resume();
+            $global->finish($call, $body);
+            $global->finish($call, $body);
+
+            return 'done';
+        }, static function (array $stats) use (&$events): void {
+            $events[] = $stats;
+        });
+        self::assertSame('done', $result);
+        self::assertCount(2, $events);
+        self::assertSame(1, $events[0]['pendingRequests']);
+        self::assertNull($events[0]['totalCostUsd']);
+        self::assertSame(120, $events[1]['totalTokens']);
+        self::assertEqualsWithDelta(0.000065, $events[1]['totalCostUsd'], 1e-12);
+        self::assertSame(1, $outer->getStats()['requests']);
+        self::assertSame(1, $inner->getStats()['requests']);
+        self::assertSame(1, $other->getStats()['requests']);
+        self::assertSame($before + 3, $global->getStats()['requests']);
+
+        try {
+            $outer->track(static function (): void {
+                throw new \RuntimeException('Operation failed');
+            });
+        } catch (\RuntimeException) {
+        }
+        $global->finish($global->begin('gpt-5'), $body);
+        self::assertSame(1, $outer->getStats()['requests']);
+    }
+
     public function testAggregatesModelsCachesErrorsAndDetachedSnapshots(): void
     {
         $usage = new GlobalUsage();
