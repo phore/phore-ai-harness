@@ -177,6 +177,6 @@ the conversation cursor.
 ## Safety boundaries
 
 Model tool calls never receive arbitrary host paths. Path traversal is rejected,
-symlinks leaving the root are not traversed, root mutation paths cannot follow
-symlinks, reads are bounded, mutations accept
+root symlinks are not traversed (including aliases inside the root), reads are
+bounded, mutations accept
 UTF-8 text only, and writes use snapshot checks plus atomic replacement.

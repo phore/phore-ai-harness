@@ -347,13 +347,43 @@ final class AiFileSystemTest extends TestCase
         self::assertFalse($literal->isEditable('a1.md'));
     }
 
+    public function testSymlinkAliasesCannotBypassWriteOrIgnorePolicy(): void
+    {
+        mkdir($this->root . '/node_modules');
+        file_put_contents($this->root . '/node_modules/locked.md', 'original');
+        $alias = $this->root . '/docs/alias.md';
+        if (!@symlink($this->root . '/node_modules/locked.md', $alias)) {
+            self::markTestSkipped('Symlinks are unavailable.');
+        }
+        try {
+            $fs = new AiFileSystem($this->root, policy: new FileSystemPolicy(
+                ignore: ['vendor'],
+                writeIgnore: ['node_modules'],
+            ));
+            foreach (['docs/alias.md', 'node_modules/locked.md'] as $path) {
+                try {
+                    $fs->edit($path, [['search' => 'original', 'replacement' => 'changed']]);
+                    self::fail('Protected file must not be editable.');
+                } catch (\RuntimeException $error) {
+                    self::assertStringContainsString($path, $error->getMessage());
+                }
+            }
+            self::assertSame('original', file_get_contents($this->root . '/node_modules/locked.md'));
+            self::assertSame('original', $fs->read('node_modules/locked.md')['content']);
+            $this->expectException(\RuntimeException::class);
+            $fs->list('vendor');
+        } finally {
+            unlink($alias);
+        }
+    }
+
     public function testChangeObserverSeesPersistedOperationsAndRestore(): void
     {
         $fs = new AiFileSystem($this->root, policy: new FileSystemPolicy(
             creatable: ['*'], deletable: ['*'], movable: ['*'],
         ));
         $events = [];
-        $fs->onChange(static function (FileOperationContext $event) use (&$events, $fs): void {
+        $fs->onChange(static function (FileOperationContext $event) use (&$events): void {
             if ($event->afterContent !== null) {
                 self::assertSame($event->afterContent, file_get_contents($event->targetRealPath ?? $event->realPath));
             } else {

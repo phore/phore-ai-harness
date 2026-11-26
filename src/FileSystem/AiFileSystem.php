@@ -789,7 +789,11 @@ final class AiFileSystem
                 continue;
             }
 
-            $candidate = realpath($realDirectory . DIRECTORY_SEPARATOR . $name);
+            $entryPath = $realDirectory . DIRECTORY_SEPARATOR . $name;
+            if (is_link($entryPath)) {
+                continue;
+            }
+            $candidate = realpath($entryPath);
             if ($candidate === false || !$this->isInsideRoot($candidate)) {
                 continue;
             }
@@ -850,9 +854,18 @@ final class AiFileSystem
         }
 
         $root = $this->requireRoot();
-        $candidate = realpath(
-            $root . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $virtualPath),
-        );
+        if ($this->policy->isIgnored($virtualPath)) {
+            throw new RuntimeException('AI filesystem path is ignored: ' . $virtualPath);
+        }
+        // Symlink aliases must not bypass virtual-path policies or create traversal loops.
+        $candidate = $root;
+        foreach (explode('/', $virtualPath) as $segment) {
+            $candidate .= DIRECTORY_SEPARATOR . $segment;
+            if (is_link($candidate)) {
+                throw new RuntimeException('AI filesystem path cannot follow symlinks: ' . $virtualPath);
+            }
+        }
+        $candidate = realpath($candidate);
 
         if ($candidate === false || !$this->isInsideRoot($candidate)) {
             throw new RuntimeException('AI filesystem path does not exist or leaves its root: ' . $virtualPath);
