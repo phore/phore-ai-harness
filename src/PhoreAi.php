@@ -26,7 +26,6 @@ use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\PromptType\SystemPrompt;
 use Phore\AiHarness\Result\DoResultType;
 use Phore\AiHarness\Result\ImageResultType;
-use Phore\AiHarness\ToolType\CallbackRoundLimitException;
 use Phore\AiHarness\ToolType\CallbackTool;
 use Phore\AiHarness\ToolType\ImageGenerationTool;
 use Phore\AiHarness\ToolType\RecoverableToolException;
@@ -38,6 +37,7 @@ use Phore\Schema\Parser\SchemaParser;
 final class PhoreAi
 {
     /** Hard limit on executed callback rounds, including correction attempts. */
+    /** @deprecated Callback rounds are no longer limited; retained for source compatibility. */
     public const MAX_CALLBACK_ROUNDS = 5;
 
     private OpenAiClient $openAiClient;
@@ -440,8 +440,8 @@ final class PhoreAi
             return $response;
         }
 
-        // Das Limit und die Fortsetzungsregeln gelten unabhaengig vom Logging.
-        for ($iteration = 0; $iteration < self::MAX_CALLBACK_ROUNDS; $iteration++) {
+        // Tool-Aufrufe ohne feste Rundengrenze bis zur abschliessenden Antwort fortsetzen.
+        while (true) {
             if (!$this->hasCallbackCalls($response, $callbackTools)) {
                 return $response;
             }
@@ -464,12 +464,6 @@ final class PhoreAi
             $response = $this->sendRequest($nextRequest, $context);
         }
 
-        if ($this->hasCallbackCalls($response, $callbackTools)) {
-            $error = new CallbackRoundLimitException('Callback round limit (' . self::MAX_CALLBACK_ROUNDS . ') reached with unresolved tool calls.');
-            $context?->error($error, ['limit' => self::MAX_CALLBACK_ROUNDS], 'Callback round limit reached; unresolved tool calls remain.');
-            throw $error;
-        }
-        return $response;
     }
 
     private function hasCallbackCalls(AiResponse $response, array $callbackTools): bool
