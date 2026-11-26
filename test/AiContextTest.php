@@ -271,6 +271,31 @@ final class AiContextTest extends TestCase
         self::assertSame($prepared, $context->getResponseId());
     }
 
+    public function testSignedResponseRoundTripKeepsRawProviderCursorInternal(): void
+    {
+        $secret = 'fixture/api-token!';
+        $binding = ['user' => 17, 'site' => 'demo'];
+        $context = $this->context()->setSigningKey($secret, $binding);
+        self::assertNull($context->getResponseId());
+        $context->text('Start.');
+        $token = $context->getResponseId();
+        self::assertNotNull($token);
+        self::assertStringStartsWith('aih1.response.', $token);
+        $context->setCheckpoint('start');
+        $context->text('Continue.');
+        $raw = $this->lastRequest()['previous_response_id'];
+        self::assertNotSame($token, $raw);
+
+        $resumed = $this->context()->setSigningKey($secret, $binding);
+        $resumed->resumeFromResponseId($token)->text('Resume.');
+        self::assertSame($raw, $this->lastRequest()['previous_response_id']);
+
+        $context->rollback('start');
+        $restored = $this->context()->setSigningKey($secret, $binding);
+        $restored->importState($context->exportState())->rollback('start')->text('Restore.');
+        self::assertSame($raw, $this->lastRequest()['previous_response_id']);
+    }
+
     public function testExportAndImportStateRestoresCursorAndCheckpointsWithoutSerializingSetup(): void
     {
         $setup = ['Stable session prompt.', new WebAccessTool()];

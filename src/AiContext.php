@@ -10,6 +10,7 @@ use LogicException;
 use Phore\AiHarness\Client\OpenAiClient;
 use Phore\AiHarness\Content\AiContent;
 use Phore\AiHarness\Content\AiContentResultSet;
+use Phore\AiHarness\Context\Helper\ConversationSigner;
 use Phore\AiHarness\Context\Traits\DoTrait;
 use Phore\AiHarness\Context\Traits\FileTrait;
 use Phore\AiHarness\Context\Traits\ImageTrait;
@@ -68,6 +69,7 @@ final class AiContext
     private ?OpenAiClient $client = null;
     private mixed $clientSelection = null;
     private ?string $responseId = null;
+    private ?ConversationSigner $conversationSigner = null;
     /** @var list<array{name: ?string, responseId: ?string}> */
     private array $checkpoints = [];
     private bool $running = false;
@@ -207,29 +209,77 @@ final class AiContext
     }
 
     /**
-     * Return the provider response cursor, or null before the first completion.
-     * This is a provider identifier, not a registry ID or a guaranteed cache hit.
+     * Configure automatic authentication of conversation IDs and exported state.
      *
-     * @example $responseId = $context->getResponseId();
-     * @see Context\AiContextRegistry
+     * Configure a fresh context before starting or resuming a conversation.
+     * The non-empty server secret is hashed to a fixed-length key internally.
+     * Use a stable high-entropy secret and the same ordered JSON-compatible
+     * binding on each request (authenticated user, tenant and application scope).
+     * Tokens are signed, not encrypted; the binding and secret are not included.
+     * Signing cannot be disabled or reconfigured on an initialized context.
+     *
+     * @param string $secret Stable high-entropy server secret of any format or length.
+     * @param array $binding Ordered JSON-compatible scalar and array data.
+     * @param int|null $ttlSeconds Token lifetime in seconds; null disables expiration.
+     * @return $this
+     * @throws InvalidArgumentException For an empty secret, invalid lifetime or unserializable binding.
+     * @throws LogicException If signing was configured or the context has already been used.
+     * @example $context->setSigningKey($serverSecret, ['user' => $userId, 'site' => $siteId]);
+     * @see getResponseId()
+     * @see resumeFromResponseId()
+     * @see exportState()
      */
-    public function getResponseId(): ?string
-    {
-        return $this->responseId;
+    public function setSigningKey(
+        #[\SensitiveParameter] string $secret,
+        #[\SensitiveParameter] array $binding = [],
+        ?int $ttlSeconds = 3600,
+    ): self {
+        $this->assertIdle();
+        if ($this->conversationSigner !== null || $this->responseId !== null
+            || $this->client !== null || $this->checkpoints !== []
+        ) {
+            throw new LogicException('Configure AI conversation signing once on a fresh context.');
+        }
+        $this->conversationSigner = new ConversationSigner($secret, $binding, $ttlSeconds);
+
+        return $this;
     }
 
     /**
-     * Resume a conversation from a trusted provider response ID, or null for a new root.
+     * Return the conversation cursor, or null before the first completion.
      *
-     * The caller must rebuild the matching prompt/tool configuration and verify
-     * ownership of the ID. Unlike importState(), this does not verify a setup
-     * hash or restore checkpoints. Existing checkpoints and queued source
-     * prompts are cleared. No provider call is made and a cache hit is not
-     * guaranteed.
+     * With signing configured, returns a signed portable token instead of the
+     * raw provider ID. Without signing, the original trusted-only API remains.
+     * Issuing a token does not call the provider or change the internal cursor.
      *
-     * @param string|null $responseId Provider response cursor, not a registry ID.
+     * @return string|null Signed token or raw provider ID, depending on configuration.
+     * @example $responseId = $context->getResponseId();
+     * @see setSigningKey()
+     * @see resumeFromResponseId()
+     */
+    public function getResponseId(): ?string
+    {
+        if ($this->responseId === null) {
+            return null;
+        }
+
+        return $this->conversationSigner?->sign($this->responseId, 'response') ?? $this->responseId;
+    }
+
+    /**
+     * Resume a conversation from a signed token or trusted raw provider ID.
+     *
+     * When signing is configured, signature, lifetime and binding are verified
+     * before any state changes. Otherwise the caller must verify ownership.
+     * Null starts a new root. Rebuild the matching prompt/tool configuration.
+     * Unlike importState(), this does not verify a setup hash or restore
+     * checkpoints. Existing checkpoints and queued source prompts are cleared
+     * on success. No provider call is made.
+     *
+     * @param string|null $responseId Token or trusted provider response cursor.
      * @return $this
-     * @throws InvalidArgumentException For an empty response ID.
+     * @throws InvalidArgumentException For an empty raw response ID.
+     * @throws ResumeStateException For an invalid, expired, mismatched or unsigned token.
      * @throws LogicException While an operation is running.
      * @example $context->resumeFromResponseId($trustedResponseId);
      * @see getResponseId()
@@ -238,8 +288,15 @@ final class AiContext
     public function resumeFromResponseId(?string $responseId): self
     {
         $this->assertIdle();
-        if ($responseId !== null && trim($responseId) === '') {
-            throw new InvalidArgumentException('AI context response ID must not be empty.');
+        if ($responseId !== null) {
+            if ($this->conversationSigner !== null) {
+                $responseId = $this->conversationSigner->verify($responseId, 'response');
+            } elseif (ConversationSigner::isSigned($responseId)) {
+                throw new ResumeStateException('Configure AI conversation signing before resuming a signed token.');
+            }
+            if (trim($responseId) === '') {
+                throw new InvalidArgumentException('AI context response ID must not be empty.');
+            }
         }
 
         $this->responseId = $responseId;
@@ -427,7 +484,9 @@ final class AiContext
      * A setup hash protects against resuming with changed prepared prompts/tools.
      * Checkpoints are included because they are provider response cursors too.
      *
-     * @return string Versioned JSON containing export time, provider, setup hash and cursor state.
+     * With signing configured, the complete JSON state is authenticated.
+     *
+     * @return string Versioned JSON state or a signed state token.
      * @throws LogicException While an operation is running.
      * @throws JsonException If the state cannot be encoded.
      * @example $_SESSION['ai_state'] = $context->exportState();
@@ -438,7 +497,7 @@ final class AiContext
     {
         $this->assertIdle();
 
-        return Toolkit::jsonEncode([
+        $state = Toolkit::jsonEncode([
             'version' => self::STATE_VERSION,
             'exportedAt' => gmdate('Y-m-d\\TH:i:s\\Z'),
             'provider' => self::STATE_PROVIDER,
@@ -448,6 +507,8 @@ final class AiContext
                 'checkpoints' => $this->checkpoints,
             ],
         ]);
+
+        return $this->conversationSigner?->sign($state, 'state') ?? $state;
     }
 
     /**
@@ -460,7 +521,10 @@ final class AiContext
      * This method performs no provider request, so an expired remote response is
      * detected only by the next AI call and its provider exception propagates.
      *
-     * @param string $state JSON returned by exportState().
+     * Signed contexts require an authenticated state token. Signature failures
+     * always throw, even with a restart-on-mismatch policy.
+     *
+     * @param string $state JSON or signed state token returned by exportState().
      * @param ResumeOptions|array{on_mismatch?: string} $options Resume mismatch policy.
      * @return $this
      * @throws ResumeStateException For malformed state or an incompatible state when configured to throw.
@@ -476,6 +540,11 @@ final class AiContext
     {
         $this->assertIdle();
         $resumeOptions = ResumeOptions::fromArray($options);
+        if ($this->conversationSigner !== null) {
+            $state = $this->conversationSigner->verify($state, 'state');
+        } elseif (ConversationSigner::isSigned($state)) {
+            throw new ResumeStateException('Configure AI conversation signing before importing a signed state.');
+        }
         $decoded = $this->decodeExportedState($state);
 
         // Format/provider/setup differences cannot safely reuse the provider cursor.
