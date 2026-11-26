@@ -271,6 +271,51 @@ final class AiContextTest extends TestCase
         self::assertSame($prepared, $context->getResponseId());
     }
 
+    public function testConfigurePreparedMutatesFreshContextAndPreservesRuntimeAndSigning(): void
+    {
+        $context = $this->context(prompts: [new WebAccessTool()]);
+        $context->setSigningKey('fixture-token', ['site' => 1]);
+        self::assertSame($context, $context->configurePrepared(
+            new \Phore\AiHarness\PromptType\SystemPrompt('Project configuration'),
+            ['model' => 'gpt-5-nano', 'reasoning' => ['effort' => 'medium']],
+            [WebAccessTool::class],
+        ));
+        $context->text('Start.');
+        $request = $this->lastRequest();
+        self::assertSame('gpt-5-nano', $request['model']);
+        self::assertSame('medium', $request['reasoning']['effort']);
+        self::assertStringContainsString('Project configuration', json_encode($request));
+        self::assertStringNotContainsString('web_search', json_encode($request['tools'] ?? []));
+        self::assertStringStartsWith('aih1.response.', $context->getResponseId());
+        $this->expectException(\LogicException::class);
+        $context->configurePrepared('Late configuration');
+    }
+
+    public function testSignedResponseRoundTripKeepsRawProviderCursorInternal(): void
+    {
+        $secret = 'fixture/api-token!';
+        $binding = ['user' => 17, 'site' => 'demo'];
+        $context = $this->context()->setSigningKey($secret, $binding);
+        self::assertNull($context->getResponseId());
+        $context->text('Start.');
+        $token = $context->getResponseId();
+        self::assertNotNull($token);
+        self::assertStringStartsWith('aih1.response.', $token);
+        $context->setCheckpoint('start');
+        $context->text('Continue.');
+        $raw = $this->lastRequest()['previous_response_id'];
+        self::assertNotSame($token, $raw);
+
+        $resumed = $this->context()->setSigningKey($secret, $binding);
+        $resumed->resumeFromResponseId($token)->text('Resume.');
+        self::assertSame($raw, $this->lastRequest()['previous_response_id']);
+
+        $context->rollback('start');
+        $restored = $this->context()->setSigningKey($secret, $binding);
+        $restored->importState($context->exportState())->rollback('start')->text('Restore.');
+        self::assertSame($raw, $this->lastRequest()['previous_response_id']);
+    }
+
     public function testExportAndImportStateRestoresCursorAndCheckpointsWithoutSerializingSetup(): void
     {
         $setup = ['Stable session prompt.', new WebAccessTool()];

@@ -64,7 +64,12 @@ $policy = new FileSystemPolicy(
 Empty allowlists deny their operation; `['*']` explicitly permits all paths.
 Move requires both paths to match `movable`, independently of `creatable` and
 `deletable`. The destination must not exist; its parent must already exist on
-the same filesystem. Ignored paths and their descendants take precedence. `maxListLimit`,
+the same filesystem. Ignored paths and their descendants take precedence. `writeIgnore` excludes
+paths and descendants from every mutation while preserving read access. A `**`
+path segment matches zero or more segments; patterns containing `/` are rooted,
+while single-segment patterns match basenames. Set `literalWritePaths: true`
+when mutation allowlists contain exact filenames rather than glob patterns.
+`maxListLimit`,
 `maxSearchResults` and `maxReadBytes` bound tool results.
 
 ## Tools and edits
@@ -90,6 +95,11 @@ $fileSystem->getContext()->do(
 ```
 
 The source is removed and the destination contains the original text.
+
+`onChange()` observes successful create, edit, delete, move and restore
+operations after the file and revision have been recorded. Unchanged or
+rolled-back operations do not emit events. An observer exception does not
+roll back the persisted file; handle notification failures separately.
 
 ## Export a change set
 
@@ -167,6 +177,6 @@ the conversation cursor.
 ## Safety boundaries
 
 Model tool calls never receive arbitrary host paths. Path traversal is rejected,
-symlinks leaving the root are not traversed, root mutation paths cannot follow
-symlinks, reads are bounded, mutations accept
+root symlinks are not traversed (including aliases inside the root), reads are
+bounded, mutations accept
 UTF-8 text only, and writes use snapshot checks plus atomic replacement.

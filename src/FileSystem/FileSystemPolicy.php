@@ -13,6 +13,8 @@ final readonly class FileSystemPolicy
      * @param list<string> $creatable Virtual-path allowlist for create operations.
      * @param list<string> $deletable Virtual-path allowlist for delete operations.
      * @param list<string> $movable Virtual-path allowlist for both move endpoints.
+     * @param list<string> $writeIgnore Paths and descendants excluded from all mutations.
+     * @param bool $literalWritePaths Treat mutation allowlists as exact paths rather than globs.
      */
     public function __construct(
         public array $ignore = [],
@@ -24,19 +26,14 @@ final readonly class FileSystemPolicy
         public int $maxSearchResults = 100,
         public int $maxReadBytes = 1048576,
         public array $movable = [],
+        public array $writeIgnore = [],
+        public bool $literalWritePaths = false,
     ) {
     }
 
     public function isIgnored(string $path): bool
     {
-        do {
-            if ($this->matches($path, $this->ignore)) {
-                return true;
-            }
-            $path = dirname($path);
-        } while ($path !== '.' && $path !== '/');
-
-        return false;
+        return $this->matchesAncestor($path, $this->ignore);
     }
 
     public function isSearchable(string $path): bool
@@ -46,7 +43,7 @@ final readonly class FileSystemPolicy
 
     public function isEditable(string $path): bool
     {
-        return !$this->isIgnored($path) && $this->matches($path, $this->editable);
+        return $this->allowsMutation($path, $this->editable);
     }
 
     /**
@@ -57,7 +54,7 @@ final readonly class FileSystemPolicy
      */
     public function isCreatable(string $path): bool
     {
-        return !$this->isIgnored($path) && $this->matches($path, $this->creatable);
+        return $this->allowsMutation($path, $this->creatable);
     }
 
     /**
@@ -68,7 +65,7 @@ final readonly class FileSystemPolicy
      */
     public function isDeletable(string $path): bool
     {
-        return !$this->isIgnored($path) && $this->matches($path, $this->deletable);
+        return $this->allowsMutation($path, $this->deletable);
     }
 
     /**
@@ -79,16 +76,39 @@ final readonly class FileSystemPolicy
      */
     public function isMovable(string $sourcePath, string $targetPath): bool
     {
-        return !$this->isIgnored($sourcePath)
-            && !$this->isIgnored($targetPath)
-            && $this->matches($sourcePath, $this->movable)
-            && $this->matches($targetPath, $this->movable);
+        return $this->allowsMutation($sourcePath, $this->movable)
+            && $this->allowsMutation($targetPath, $this->movable);
+    }
+
+    private function allowsMutation(string $path, array $patterns): bool
+    {
+        return !$this->isIgnored($path)
+            && !$this->matchesAncestor($path, $this->writeIgnore)
+            && ($this->literalWritePaths
+                ? in_array($path, $patterns, true)
+                : $this->matches($path, $patterns));
+    }
+
+    private function matchesAncestor(string $path, array $patterns): bool
+    {
+        do {
+            if ($this->matches($path, $patterns)) {
+                return true;
+            }
+            $path = dirname($path);
+        } while ($path !== '.' && $path !== '/');
+
+        return false;
     }
 
     private function matches(string $path, array $patterns): bool
     {
         foreach ($patterns as $pattern) {
-            if (fnmatch($pattern, $path, FNM_PATHNAME) || fnmatch($pattern, basename($path))) {
+            if (!str_contains($pattern, '/')) {
+                if (fnmatch($pattern, basename($path))) {
+                    return true;
+                }
+            } elseif ($this->matchesSegments(explode('/', $pattern), explode('/', $path))) {
                 return true;
             }
             if (str_ends_with($pattern, '/*') && substr($pattern, 0, -2) === $path) {
@@ -97,5 +117,28 @@ final readonly class FileSystemPolicy
         }
 
         return false;
+    }
+
+    /** A standalone ** segment matches zero or more complete path segments. */
+    private function matchesSegments(array $pattern, array $path): bool
+    {
+        if ($pattern === []) {
+            return $path === [];
+        }
+
+        $part = array_shift($pattern);
+        if ($part === '**') {
+            do {
+                if ($this->matchesSegments($pattern, $path)) {
+                    return true;
+                }
+            } while (array_shift($path) !== null);
+
+            return false;
+        }
+
+        return $path !== []
+            && fnmatch($part, array_shift($path))
+            && $this->matchesSegments($pattern, $path);
     }
 }

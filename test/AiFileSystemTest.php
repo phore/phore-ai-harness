@@ -41,6 +41,29 @@ final class AiFileSystemTest extends TestCase
         @rmdir($this->root);
     }
 
+    public function testReadHooksReportOnlySuccessfulExplicitReadsAndGrep(): void
+    {
+        $fs = new AiFileSystem($this->root, id: 'activity', policy: new FileSystemPolicy(ignore: ['vendor']));
+        $events = [];
+        $fs->onRead(static function (FileOperationContext $event) use (&$events): void {
+            $events[] = [$event->fileSystemId, $event->operation, $event->path, $event->beforeContent, $event->afterContent];
+        });
+        $fs->read('docs/a.md', 2, 1);
+        $fs->grep('needle', 'docs');
+        $fs->edit('docs/a.md', [['search' => 'Title', 'replacement' => 'Changed']]);
+        try {
+            $fs->read('vendor/ignored.txt');
+            self::fail('Expected denied read.');
+        } catch (\RuntimeException) {
+        }
+        self::assertSame(['activity', 'read', 'docs/a.md', null, null], $events[0]);
+        self::assertCount(3, $events);
+        $paths = array_column(array_slice($events, 1), 2);
+        sort($paths);
+        self::assertSame(['docs/a.md', 'docs/b.txt'], $paths);
+        self::assertCount(1, $fs->getChangeSet());
+    }
+
     public function testContextReusesOneFilesystemToolSetForSeveralFilesystems(): void
     {
         $context = new AiContext();
@@ -318,6 +341,87 @@ final class AiFileSystemTest extends TestCase
             self::assertSame('Reject change', $error->getMessage());
         }
         self::assertSame([], $fs->getChangeSet());
+    }
+
+    public function testRecursiveAndLiteralWritePolicies(): void
+    {
+        $policy = new FileSystemPolicy(
+            ignore: ['.git'],
+            editable: ['docs/**/*.md'],
+            creatable: ['**'],
+            deletable: ['**'],
+            movable: ['**'],
+            writeIgnore: ['node_modules'],
+        );
+        self::assertTrue($policy->isEditable('docs/a.md'));
+        self::assertTrue($policy->isEditable('docs/deep/a.md'));
+        self::assertFalse($policy->isEditable('other/docs/a.md'));
+        self::assertTrue($policy->isSearchable('docs/node_modules/a.md'));
+        self::assertFalse($policy->isEditable('docs/node_modules/a.md'));
+        self::assertFalse($policy->isCreatable('node_modules/new.md'));
+        self::assertFalse($policy->isDeletable('nested/node_modules/a.md'));
+        self::assertFalse($policy->isMovable('docs/a.md', 'node_modules/a.md'));
+        self::assertFalse($policy->isMovable('node_modules/a.md', 'docs/a.md'));
+        self::assertFalse($policy->isSearchable('nested/.git/config'));
+
+        $literal = new FileSystemPolicy(editable: ['a[1].md'], literalWritePaths: true);
+        self::assertTrue($literal->isEditable('a[1].md'));
+        self::assertFalse($literal->isEditable('nested/a[1].md'));
+        self::assertFalse($literal->isEditable('a1.md'));
+    }
+
+    public function testSymlinkAliasesCannotBypassWriteOrIgnorePolicy(): void
+    {
+        mkdir($this->root . '/node_modules');
+        file_put_contents($this->root . '/node_modules/locked.md', 'original');
+        $alias = $this->root . '/docs/alias.md';
+        if (!@symlink($this->root . '/node_modules/locked.md', $alias)) {
+            self::markTestSkipped('Symlinks are unavailable.');
+        }
+        try {
+            $fs = new AiFileSystem($this->root, policy: new FileSystemPolicy(
+                ignore: ['vendor'],
+                writeIgnore: ['node_modules'],
+            ));
+            foreach (['docs/alias.md', 'node_modules/locked.md'] as $path) {
+                try {
+                    $fs->edit($path, [['search' => 'original', 'replacement' => 'changed']]);
+                    self::fail('Protected file must not be editable.');
+                } catch (\RuntimeException $error) {
+                    self::assertStringContainsString($path, $error->getMessage());
+                }
+            }
+            self::assertSame('original', file_get_contents($this->root . '/node_modules/locked.md'));
+            self::assertSame('original', $fs->read('node_modules/locked.md')['content']);
+            $this->expectException(\RuntimeException::class);
+            $fs->list('vendor');
+        } finally {
+            unlink($alias);
+        }
+    }
+
+    public function testChangeObserverSeesPersistedOperationsAndRestore(): void
+    {
+        $fs = new AiFileSystem($this->root, policy: new FileSystemPolicy(
+            creatable: ['*'], deletable: ['*'], movable: ['*'],
+        ));
+        $events = [];
+        $fs->onChange(static function (FileOperationContext $event) use (&$events): void {
+            if ($event->afterContent !== null) {
+                self::assertSame($event->afterContent, file_get_contents($event->targetRealPath ?? $event->realPath));
+            } else {
+                self::assertFileDoesNotExist($event->realPath);
+            }
+            $events[] = $event->operation;
+        });
+        $created = $fs->create('docs/new.md', 'new');
+        $edit = $fs->edit('docs/new.md', [['search' => 'new', 'replacement' => 'edited']]);
+        $fs->edit('docs/new.md', [['search' => 'edited', 'replacement' => 'edited']]);
+        $fs->restore('docs/new.md', $edit['revisionId']);
+        $fs->restore('docs/new.md', $created['revisionId']);
+        $fs->move('docs/new.md', 'docs/moved.md');
+        $fs->delete('docs/moved.md');
+        self::assertSame(['create', 'edit', 'restore', 'move', 'delete'], $events);
     }
 
     public function testSqliteRevisionStorePersistsAcrossInstances(): void

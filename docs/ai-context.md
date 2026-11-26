@@ -560,6 +560,44 @@ und ist unabhängig vom Prompt Caching.
 [Chat and Resume Conversation](../examples/16-chat-resume-conversation.php)
 zeigt einen simulierten JSON-Roundtrip ohne HTTP- oder UI-Boilerplate.
 
+### Signierte Conversation-IDs für HTTP-Clients
+
+Für einen zustandslosen HTTP-Controller konfiguriert jeder Request einen
+frischen Context mit demselben geheimen Server-Key und denselben Bindungsdaten.
+Der Key wird intern mit SHA-256 gehasht; beliebig formatierte, nicht leere
+Tokens sind zulässig. Verwende trotzdem ein ausreichend zufälliges Secret
+aus der Serverkonfiguration, niemals einen öffentlich bekannten Wert.
+
+```php
+$context = new \Phore\AiHarness\AiContext(prompts: $samePromptsAndTools);
+$context->setSigningKey($serverSecret, [
+    'user' => $authenticatedUserId,
+    'site' => $authorizedSiteId,
+    'purpose' => 'website-chat',
+]);
+
+$context->resumeFromResponseId($previousResponseId); // null beim ersten Request
+$answer = $context->text($message);
+$responseId = $context->getResponseId(); // signierter Token für den Client
+```
+
+Der Harness prüft die Signatur und Bindung automatisch beim Resume. Bei
+manipulierten, unsignierten oder abgelaufenen Tokens wirft er
+`ResumeStateException`, bevor der Context verändert oder der Provider
+aufgerufen wird. Die Bindungsdaten müssen in derselben Reihenfolge mit
+denselben Typen aus vertrauenswürdigen Anwendungsdaten aufgebaut werden;
+nicht serialisierbare Werte verursachen bereits bei `setSigningKey()` eine
+`InvalidArgumentException`.
+
+Die standardmäßige Gültigkeit beträgt eine Stunde ab Token-Ausgabe und kann
+mit `ttlSeconds:` angepasst werden; `null` deaktiviert das Zeitlimit. Tokens
+sind signiert, nicht verschlüsselt. Sie enthalten die Provider-ID, aber weder
+den geheimen Key noch die Bindungsdaten. Autorisierung des aktuellen Requests
+und die passenden Prompt-/Tool-Rechte bleiben Verantwortung der Anwendung.
+Eine serverseitige Session-Liste ist für die ID-Prüfung nicht erforderlich.
+Ein signierter Context akzeptiert auch bei `importState()` ausschließlich
+signierten State; `exportState()` gibt dafür einen eigenen Token-Typ zurück.
+
 ## Vorbereitete Prompts und Tools
 
 Der Constructor nimmt unter `prompts` dieselben Strings, `PromptType`- und

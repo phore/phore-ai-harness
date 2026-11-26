@@ -36,6 +36,8 @@ final class AiFileSystem
         'afterDelete' => [],
         'beforeMove' => [],
         'afterMove' => [],
+        'change' => [],
+        'read' => [],
     ];
 
     public readonly string $id;
@@ -282,6 +284,42 @@ final class AiFileSystem
     }
 
     /**
+     * Observe each persisted mutation after hooks, revision and change tracking.
+     *
+     * Includes create, edit, delete, move and restore, but not no-ops or
+     * rolled-back validation hooks. Observer exceptions do not undo the write.
+     * Observers should handle delivery errors independently of file validation.
+     *
+     * @param callable(FileOperationContext): void $hook Observer receiving the changed paths and contents.
+     * @return $this
+     * @throws Throwable If an observer fails after persistence.
+     * @example $fs->onChange(fn (FileOperationContext $event) => notify($event->path));
+     * @see getChangeSet()
+     */
+    public function onChange(callable $hook): self
+    {
+        return $this->addHook('change', $hook);
+    }
+
+    /**
+     * Observe successful explicit reads and files scanned by grep.
+     *
+     * The event contains the filesystem ID and virtual path; beforeContent
+     * and afterContent are null. Internal mutation reads do not emit events.
+     * Failed or denied reads do not emit events.
+     *
+     * @param callable(FileOperationContext): void $hook Read observer.
+     * @return $this
+     * @example $fs->onRead(fn (FileOperationContext $event) => reportRead($event->path));
+     * @see read()
+     * @see grep()
+     */
+    public function onRead(callable $hook): self
+    {
+        return $this->addHook('read', $hook);
+    }
+
+    /**
      * Return model-visible metadata without exposing the host root path.
      *
      * @return array{id: string, alias: ?string, description: ?string, rootConfigured: bool, files: list<string>}
@@ -368,6 +406,7 @@ final class AiFileSystem
             } catch (RuntimeException) {
                 continue;
             }
+            $this->runHooks('read', new FileOperationContext($this->id, 'read', $virtualPath, $realPath, null, null));
             $lines = preg_split('/\R/u', $content);
             if ($lines === false) {
                 continue;
@@ -427,6 +466,7 @@ final class AiFileSystem
         $lineCount = max(1, min(1000, $lineCount));
         $slice = array_slice($lines, $startLine - 1, $lineCount);
         $endLine = $slice === [] ? $startLine - 1 : $startLine + count($slice) - 1;
+        $this->runHooks('read', new FileOperationContext($this->id, 'read', $virtualPath, $realPath, null, null));
 
         return [
             'path' => $virtualPath,
@@ -497,6 +537,7 @@ final class AiFileSystem
 
         $this->changeSet->record($virtualPath, null, $content);
         $revisionId = $this->revisionStore->save($this->id, $virtualPath, $content);
+        $this->runHooks('change', $event);
 
         return [
             'path' => $virtualPath,
@@ -544,6 +585,7 @@ final class AiFileSystem
 
         $this->changeSet->record($virtualPath, $content, null);
         $revisionId = $this->revisionStore->save($this->id, $virtualPath, null);
+        $this->runHooks('change', $event);
 
         return [
             'path' => $virtualPath,
@@ -597,6 +639,7 @@ final class AiFileSystem
         $this->changeSet->record($source, $content, $content, $target);
         $sourceRevisionId = $this->revisionStore->save($this->id, $source, null);
         $revisionId = $this->revisionStore->save($this->id, $target, $content);
+        $this->runHooks('change', $event);
 
         return [
             'path' => $source,
@@ -672,6 +715,12 @@ final class AiFileSystem
             $virtualPath,
             $target['content'],
         );
+
+        if ($current !== $target['content']) {
+            $this->runHooks('change', new FileOperationContext(
+                $this->id, 'restore', $virtualPath, $realPath, $current, $target['content'],
+            ));
+        }
 
         return [
             'path' => $virtualPath,
@@ -761,7 +810,11 @@ final class AiFileSystem
                 continue;
             }
 
-            $candidate = realpath($realDirectory . DIRECTORY_SEPARATOR . $name);
+            $entryPath = $realDirectory . DIRECTORY_SEPARATOR . $name;
+            if (is_link($entryPath)) {
+                continue;
+            }
+            $candidate = realpath($entryPath);
             if ($candidate === false || !$this->isInsideRoot($candidate)) {
                 continue;
             }
@@ -822,9 +875,18 @@ final class AiFileSystem
         }
 
         $root = $this->requireRoot();
-        $candidate = realpath(
-            $root . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $virtualPath),
-        );
+        if ($this->policy->isIgnored($virtualPath)) {
+            throw new RuntimeException('AI filesystem path is ignored: ' . $virtualPath);
+        }
+        // Symlink aliases must not bypass virtual-path policies or create traversal loops.
+        $candidate = $root;
+        foreach (explode('/', $virtualPath) as $segment) {
+            $candidate .= DIRECTORY_SEPARATOR . $segment;
+            if (is_link($candidate)) {
+                throw new RuntimeException('AI filesystem path cannot follow symlinks: ' . $virtualPath);
+            }
+        }
+        $candidate = realpath($candidate);
 
         if ($candidate === false || !$this->isInsideRoot($candidate)) {
             throw new RuntimeException('AI filesystem path does not exist or leaves its root: ' . $virtualPath);
@@ -914,6 +976,7 @@ final class AiFileSystem
 
         $this->changeSet->record($virtualPath, $original, $updated);
         $revisionId = $this->revisionStore->save($this->id, $virtualPath, $updated);
+        $this->runHooks('change', $event);
 
         return [
             'path' => $virtualPath,
