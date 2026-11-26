@@ -1110,7 +1110,7 @@ final class AiFileSystem
             if (@file_put_contents($temporary, $content) === false) {
                 throw new RuntimeException('Cannot write AI filesystem temporary file: ' . $path);
             }
-            $mode = @fileperms($path);
+            $mode = file_exists($path) ? fileperms($path) : false;
             if ($mode !== false) {
                 @chmod($temporary, $mode & 0777);
             }
