@@ -36,6 +36,7 @@ final class AiFileSystem
         'afterDelete' => [],
         'beforeMove' => [],
         'afterMove' => [],
+        'change' => [],
     ];
 
     public readonly string $id;
@@ -282,6 +283,24 @@ final class AiFileSystem
     }
 
     /**
+     * Observe each persisted mutation after hooks, revision and change tracking.
+     *
+     * Includes create, edit, delete, move and restore, but not no-ops or
+     * rolled-back validation hooks. Observer exceptions do not undo the write.
+     * Observers should handle delivery errors independently of file validation.
+     *
+     * @param callable(FileOperationContext): void $hook Observer receiving the changed paths and contents.
+     * @return $this
+     * @throws Throwable If an observer fails after persistence.
+     * @example $fs->onChange(fn (FileOperationContext $event) => notify($event->path));
+     * @see getChangeSet()
+     */
+    public function onChange(callable $hook): self
+    {
+        return $this->addHook('change', $hook);
+    }
+
+    /**
      * Return model-visible metadata without exposing the host root path.
      *
      * @return array{id: string, alias: ?string, description: ?string, rootConfigured: bool, files: list<string>}
@@ -497,6 +516,7 @@ final class AiFileSystem
 
         $this->changeSet->record($virtualPath, null, $content);
         $revisionId = $this->revisionStore->save($this->id, $virtualPath, $content);
+        $this->runHooks('change', $event);
 
         return [
             'path' => $virtualPath,
@@ -544,6 +564,7 @@ final class AiFileSystem
 
         $this->changeSet->record($virtualPath, $content, null);
         $revisionId = $this->revisionStore->save($this->id, $virtualPath, null);
+        $this->runHooks('change', $event);
 
         return [
             'path' => $virtualPath,
@@ -597,6 +618,7 @@ final class AiFileSystem
         $this->changeSet->record($source, $content, $content, $target);
         $sourceRevisionId = $this->revisionStore->save($this->id, $source, null);
         $revisionId = $this->revisionStore->save($this->id, $target, $content);
+        $this->runHooks('change', $event);
 
         return [
             'path' => $source,
@@ -672,6 +694,12 @@ final class AiFileSystem
             $virtualPath,
             $target['content'],
         );
+
+        if ($current !== $target['content']) {
+            $this->runHooks('change', new FileOperationContext(
+                $this->id, 'restore', $virtualPath, $realPath, $current, $target['content'],
+            ));
+        }
 
         return [
             'path' => $virtualPath,
@@ -914,6 +942,7 @@ final class AiFileSystem
 
         $this->changeSet->record($virtualPath, $original, $updated);
         $revisionId = $this->revisionStore->save($this->id, $virtualPath, $updated);
+        $this->runHooks('change', $event);
 
         return [
             'path' => $virtualPath,

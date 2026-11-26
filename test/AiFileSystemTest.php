@@ -320,6 +320,57 @@ final class AiFileSystemTest extends TestCase
         self::assertSame([], $fs->getChangeSet());
     }
 
+    public function testRecursiveAndLiteralWritePolicies(): void
+    {
+        $policy = new FileSystemPolicy(
+            ignore: ['.git'],
+            editable: ['docs/**/*.md'],
+            creatable: ['**'],
+            deletable: ['**'],
+            movable: ['**'],
+            writeIgnore: ['node_modules'],
+        );
+        self::assertTrue($policy->isEditable('docs/a.md'));
+        self::assertTrue($policy->isEditable('docs/deep/a.md'));
+        self::assertFalse($policy->isEditable('other/docs/a.md'));
+        self::assertTrue($policy->isSearchable('docs/node_modules/a.md'));
+        self::assertFalse($policy->isEditable('docs/node_modules/a.md'));
+        self::assertFalse($policy->isCreatable('node_modules/new.md'));
+        self::assertFalse($policy->isDeletable('nested/node_modules/a.md'));
+        self::assertFalse($policy->isMovable('docs/a.md', 'node_modules/a.md'));
+        self::assertFalse($policy->isMovable('node_modules/a.md', 'docs/a.md'));
+        self::assertFalse($policy->isSearchable('nested/.git/config'));
+
+        $literal = new FileSystemPolicy(editable: ['a[1].md'], literalWritePaths: true);
+        self::assertTrue($literal->isEditable('a[1].md'));
+        self::assertFalse($literal->isEditable('nested/a[1].md'));
+        self::assertFalse($literal->isEditable('a1.md'));
+    }
+
+    public function testChangeObserverSeesPersistedOperationsAndRestore(): void
+    {
+        $fs = new AiFileSystem($this->root, policy: new FileSystemPolicy(
+            creatable: ['*'], deletable: ['*'], movable: ['*'],
+        ));
+        $events = [];
+        $fs->onChange(static function (FileOperationContext $event) use (&$events, $fs): void {
+            if ($event->afterContent !== null) {
+                self::assertSame($event->afterContent, file_get_contents($event->targetRealPath ?? $event->realPath));
+            } else {
+                self::assertFileDoesNotExist($event->realPath);
+            }
+            $events[] = $event->operation;
+        });
+        $created = $fs->create('docs/new.md', 'new');
+        $edit = $fs->edit('docs/new.md', [['search' => 'new', 'replacement' => 'edited']]);
+        $fs->edit('docs/new.md', [['search' => 'edited', 'replacement' => 'edited']]);
+        $fs->restore('docs/new.md', $edit['revisionId']);
+        $fs->restore('docs/new.md', $created['revisionId']);
+        $fs->move('docs/new.md', 'docs/moved.md');
+        $fs->delete('docs/moved.md');
+        self::assertSame(['create', 'edit', 'restore', 'move', 'delete'], $events);
+    }
+
     public function testSqliteRevisionStorePersistsAcrossInstances(): void
     {
         if (!in_array('sqlite', PDO::getAvailableDrivers(), true)) {
