@@ -271,6 +271,26 @@ final class AiContextTest extends TestCase
         self::assertSame($prepared, $context->getResponseId());
     }
 
+    public function testConfigurePreparedMutatesFreshContextAndPreservesRuntimeAndSigning(): void
+    {
+        $context = $this->context(prompts: [new WebAccessTool()]);
+        $context->setSigningKey('fixture-token', ['site' => 1]);
+        self::assertSame($context, $context->configurePrepared(
+            new \Phore\AiHarness\PromptType\SystemPrompt('Project configuration'),
+            ['model' => 'gpt-5-nano', 'reasoning' => ['effort' => 'medium']],
+            [WebAccessTool::class],
+        ));
+        $context->text('Start.');
+        $request = $this->lastRequest();
+        self::assertSame('gpt-5-nano', $request['model']);
+        self::assertSame('medium', $request['reasoning']['effort']);
+        self::assertStringContainsString('Project configuration', json_encode($request));
+        self::assertStringNotContainsString('web_search', json_encode($request['tools'] ?? []));
+        self::assertStringStartsWith('aih1.response.', $context->getResponseId());
+        $this->expectException(\LogicException::class);
+        $context->configurePrepared('Late configuration');
+    }
+
     public function testSignedResponseRoundTripKeepsRawProviderCursorInternal(): void
     {
         $secret = 'fixture/api-token!';

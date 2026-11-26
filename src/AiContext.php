@@ -418,6 +418,71 @@ final class AiContext
     }
 
     /**
+     * Configure this fresh context in place, preserving its identity and other defaults.
+     *
+     * Explicit options override constructor defaults; omitted options stay unchanged.
+     * Prepared prompts and tools are appended. Replacement tool classes remove
+     * matching directly prepared tools before the new items are appended.
+     * Registered tool sets, signing configuration and other runtime state are
+     * retained. Call before starting or resuming a conversation.
+     *
+     * @param string|PromptType|ToolType|array $prompts Prepared context items.
+     * @param array<string, mixed> $options Explicit runtime default overrides.
+     * @param list<class-string<ToolType>> $replaceToolTypes Prepared tool types to replace.
+     * @return $this
+     * @throws LogicException If a conversation has already been initialized.
+     * @throws InvalidArgumentException For invalid options or duplicate context items.
+     * @example $context->configurePrepared(new SystemPrompt('Project rules'), ['model' => 'gpt-5-mini']);
+     * @see AiOptions::fromArray()
+     * @see withPrepared()
+     */
+    public function configurePrepared(
+        string|PromptType|ToolType|array $prompts = [],
+        array $options = [],
+        array $replaceToolTypes = [],
+    ): self {
+        $this->assertIdle();
+        if ($this->responseId !== null || $this->client !== null || $this->checkpoints !== []) {
+            throw new LogicException('Cannot configure an initialized AI context.');
+        }
+
+        // Optionen und neue Inhalte prüfen, bevor die Instanz verändert wird.
+        $defaults = AiOptions::fromArray(array_replace($this->defaults->toArray(), $options));
+        $items = $this->normalizeContextItems(Toolkit::normalizePromptItems($prompts));
+        foreach ($replaceToolTypes as $type) {
+            if (!is_string($type) || !is_a($type, ToolType::class, true)) {
+                throw new InvalidArgumentException('Replacement type must be an AI tool class.');
+            }
+        }
+        $prepared = array_filter($this->prompts, static function (PromptType|ToolType $item) use ($replaceToolTypes): bool {
+            foreach ($replaceToolTypes as $type) {
+                if ($item instanceof $type) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
+        $prepared = $this->normalizeContextItems([...$prepared, ...$items]);
+        $content = $this->contentById;
+        foreach ($items as $item) {
+            if ($item instanceof AiContent) {
+                if (isset($content[$item->id])) {
+                    throw new InvalidArgumentException('Duplicate AI content ID in context: ' . $item->id);
+                }
+                $content[$item->id] = $item;
+            }
+        }
+
+        // Erst nach vollständiger Validierung die vorbereitete Konfiguration übernehmen.
+        $this->defaults = $defaults;
+        $this->prompts = $prepared;
+        $this->contentById = $content;
+
+        return $this;
+    }
+
+    /**
      * Clone a fresh context and append prepared prompts/tools.
      *
      * Prepared source material cannot be added after the provider conversation
