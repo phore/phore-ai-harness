@@ -62,6 +62,9 @@ final class AiFileSystemToolSet implements AiToolSet
                 'filesystem_move',
                 'Move or rename one file within the same root when both paths are movable. Never overwrite a target.',
             ),
+            new CallbackTool([$this, 'createDirectory'], 'filesystem_create_directory', 'Create one directory inside the root. Parent must exist; policy applies.'),
+            new CallbackTool([$this, 'deleteDirectory'], 'filesystem_delete_directory', 'Delete an empty directory only. Never recursively delete contents.'),
+            new CallbackTool([$this, 'moveDirectory'], 'filesystem_move_directory', 'Rename or move a directory within the root. Every descendant must be permitted UTF-8 text or a directory; no symlinks or overwrites.'),
             new CallbackTool(
                 [$this, 'history'],
                 'filesystem_history',
@@ -240,6 +243,21 @@ final class AiFileSystemToolSet implements AiToolSet
             $fileSystemId,
             static fn (AiFileSystem $fileSystem): array => $fileSystem->move($path, $targetPath),
         );
+    }
+
+    public function createDirectory(string $fileSystemId, string $path): array
+    {
+        return $this->call($fileSystemId, static fn (AiFileSystem $fs): array => $fs->createDirectory($path));
+    }
+
+    public function deleteDirectory(string $fileSystemId, string $path): array
+    {
+        return $this->call($fileSystemId, static fn (AiFileSystem $fs): array => $fs->deleteDirectory($path));
+    }
+
+    public function moveDirectory(string $fileSystemId, string $path, string $targetPath): array
+    {
+        return $this->call($fileSystemId, static fn (AiFileSystem $fs): array => $fs->moveDirectory($path, $targetPath));
     }
 
     /** @return array<string, mixed> */

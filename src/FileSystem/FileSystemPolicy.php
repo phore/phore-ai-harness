@@ -80,6 +80,21 @@ final readonly class FileSystemPolicy
             && $this->allowsMutation($targetPath, $this->movable);
     }
 
+    public function isDirectoryCreatable(string $path): bool
+    {
+        return !$this->literalWritePaths && $this->isCreatable($path);
+    }
+
+    public function isDirectoryDeletable(string $path): bool
+    {
+        return !$this->literalWritePaths && $this->isDeletable($path);
+    }
+
+    public function isDirectoryMovable(string $source, string $target): bool
+    {
+        return !$this->literalWritePaths && $this->isMovable($source, $target);
+    }
+
     private function allowsMutation(string $path, array $patterns): bool
     {
         return !$this->isIgnored($path)

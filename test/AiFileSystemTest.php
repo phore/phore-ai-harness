@@ -90,6 +90,44 @@ final class AiFileSystemTest extends TestCase
         new AiFileSystem($this->root, umask: 01000);
     }
 
+    public function testDirectoryOperationsTrackMovedFilesAndRespectMask(): void
+    {
+        $fs = new AiFileSystem($this->root, policy: new FileSystemPolicy(
+            creatable: ['*'], deletable: ['*'], movable: ['*'],
+        ), umask: 0000);
+        $fs->createDirectory('docs/new');
+        self::assertSame(0777, fileperms($this->root . '/docs/new') & 0777);
+        file_put_contents($this->root . '/docs/new/page.md', 'Page');
+        $fs->moveDirectory('docs/new', 'docs/renamed');
+        self::assertSame('Page', file_get_contents($this->root . '/docs/renamed/page.md'));
+        self::assertSame('docs/new/page.md', $fs->getChangeSet()[0]->oldPath);
+        $fs->delete('docs/renamed/page.md');
+        $fs->deleteDirectory('docs/renamed');
+        self::assertDirectoryDoesNotExist($this->root . '/docs/renamed');
+    }
+
+    public function testDirectoryMoveRejectsProtectedDescendantsBeforeMutation(): void
+    {
+        $fs = new AiFileSystem($this->root, policy: new FileSystemPolicy(
+            movable: ['*'], writeIgnore: ['docs/a.md'],
+        ));
+        try {
+            $fs->moveDirectory('docs', 'renamed');
+            self::fail('Expected protected descendant rejection');
+        } catch (\RuntimeException) {
+            self::assertFileExists($this->root . '/docs/a.md');
+            self::assertDirectoryDoesNotExist($this->root . '/renamed');
+            self::assertSame([], $fs->getChangeSet());
+        }
+    }
+
+    public function testDirectoryDeletionNeverRecurses(): void
+    {
+        $fs = new AiFileSystem($this->root, policy: new FileSystemPolicy(deletable: ['*']));
+        $this->expectException(\RuntimeException::class);
+        $fs->deleteDirectory('docs');
+    }
+
     public function testReadHooksReportOnlySuccessfulExplicitReadsAndGrep(): void
     {
         $fs = new AiFileSystem($this->root, id: 'activity', policy: new FileSystemPolicy(ignore: ['vendor']));

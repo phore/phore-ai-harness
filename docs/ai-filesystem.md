@@ -101,6 +101,24 @@ operations after the file and revision have been recorded. Unchanged or
 rolled-back operations do not emit events. An observer exception does not
 roll back the persisted file; handle notification failures separately.
 
+## Directories
+
+`filesystem_create_directory`, `filesystem_delete_directory` and
+`filesystem_move_directory` expose `createDirectory()`, `deleteDirectory()` and
+`moveDirectory()`. Parents must already exist. Creation uses `0777` masked by the
+process umask, or the explicitly configured constructor `umask`. The process
+umask is never changed. Deletion accepts empty directories only.
+
+Directory operations use the corresponding `creatable`, `deletable` and
+`movable` allowlists. Literal filename policies never allow directory operations.
+A move validates the directory and every descendant at both paths before any
+mutation. Symlinks, protected paths, existing targets, moves into the source,
+non-text files and paths outside the root are rejected. Existing permissions
+are preserved. File move hooks, revision history, change tracking and change
+notifications apply to every moved file. A failing after-move hook rolls the
+whole directory back. Empty-directory operations do not produce file revisions
+or file change events; Git does not track empty directories.
+
 ## Export a change set
 
 Attach the filesystem to an existing context with prepared prompts and data.

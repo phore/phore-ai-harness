@@ -992,6 +992,87 @@ final class AiFileSystem
         ];
     }
 
+    /** Create one directory; its parent must exist. */
+    public function createDirectory(string $path): array
+    {
+        [$path, $real] = $this->resolveMutationTarget($path, false);
+        if (!$this->policy->isDirectoryCreatable($path) || file_exists($real)) {
+            throw new RuntimeException('AI filesystem directory creation denied or target exists: ' . $path);
+        }
+        if (!mkdir($real, 0777)) throw new RuntimeException('Cannot create AI filesystem directory: ' . $path);
+        if ($this->umask !== null && !chmod($real, 0777 & ~$this->umask)) {
+            rmdir($real);
+            throw new RuntimeException('Cannot set AI filesystem directory permissions: ' . $path);
+        }
+        return ['path' => $path, 'status' => 'created'];
+    }
+
+    /** Delete only an empty directory, never recursively. */
+    public function deleteDirectory(string $path): array
+    {
+        [$path, $real] = $this->resolveMutationTarget($path, false);
+        if (!$this->policy->isDirectoryDeletable($path) || !is_dir($real)) {
+            throw new RuntimeException('AI filesystem directory deletion denied or missing: ' . $path);
+        }
+        $entries = scandir($real);
+        if ($entries === false || array_diff($entries, ['.', '..']) !== []) {
+            throw new RuntimeException('AI filesystem directory is not empty or readable: ' . $path);
+        }
+        if (!rmdir($real)) throw new RuntimeException('Cannot delete AI filesystem directory: ' . $path);
+        return ['path' => $path, 'status' => 'deleted'];
+    }
+
+    /** Atomically rename a directory after validating every descendant and both paths. */
+    public function moveDirectory(string $path, string $targetPath): array
+    {
+        [$source, $real] = $this->resolveMutationTarget($path, false);
+        [$target, $destination] = $this->resolveMutationTarget($targetPath, false);
+        if (!$this->policy->isDirectoryMovable($source, $target) || !is_dir($real)
+            || file_exists($destination) || str_starts_with($target . '/', $source . '/')) {
+            throw new RuntimeException('AI filesystem directory move denied: ' . $source . ' -> ' . $target);
+        }
+        $events = [];
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($real, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::SELF_FIRST,
+        );
+        foreach ($iterator as $item) {
+            $suffix = str_replace(DIRECTORY_SEPARATOR, '/', substr($item->getPathname(), strlen($real)));
+            $from = $source . $suffix;
+            $to = $target . $suffix;
+            if ($item->isLink() || !$this->policy->isMovable($from, $to)
+                || ($item->isDir() && !$this->policy->isDirectoryMovable($from, $to))) {
+                throw new RuntimeException('AI filesystem directory contains a protected path: ' . $from);
+            }
+            if ($item->isDir()) continue;
+            if (!$item->isFile()) throw new RuntimeException('AI filesystem directory contains a special file: ' . $from);
+            $content = $this->readTextFile($item->getPathname(), $from);
+            $events[] = new FileOperationContext(
+                $this->id, 'move', $from, $item->getPathname(), $content, $content,
+                $to, $destination . str_replace('/', DIRECTORY_SEPARATOR, $suffix),
+            );
+        }
+        foreach ($events as $event) {
+            $this->runHooks('beforeMove', $event);
+            $this->revisionStore->save($this->id, $event->path, $event->beforeContent);
+            $this->revisionStore->save($this->id, $event->targetPath, null);
+        }
+        if (!rename($real, $destination)) throw new RuntimeException('Cannot move AI filesystem directory: ' . $source);
+        try {
+            foreach ($events as $event) $this->runHooks('afterMove', $event);
+        } catch (Throwable $error) {
+            if (!rename($destination, $real)) throw new RuntimeException('Cannot roll back directory move: ' . $source, previous: $error);
+            throw $error;
+        }
+        foreach ($events as $event) {
+            $this->changeSet->record($event->path, $event->beforeContent, $event->afterContent, $event->targetPath);
+            $this->revisionStore->save($this->id, $event->path, null);
+            $this->revisionStore->save($this->id, $event->targetPath, $event->afterContent);
+        }
+        foreach ($events as $event) $this->runHooks('change', $event);
+        return ['path' => $source, 'targetPath' => $target, 'status' => 'moved'];
+    }
+
     private function resolveMutationTarget(string $path, bool $mustExist): array
     {
         $virtualPath = $this->normalizeVirtualPath($path);
