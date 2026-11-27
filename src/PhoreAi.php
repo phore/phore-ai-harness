@@ -611,8 +611,21 @@ final class PhoreAi
                     if (($event['type'] ?? null) === 'response.output_text.delta' && is_string($event['delta'] ?? null)) {
                         $context->text($event['delta']);
                     }
-                    if (in_array($event['type'] ?? null, ['response.failed', 'response.incomplete', 'error'], true)) {
-                        throw new \RuntimeException('Streaming response did not complete successfully.');
+                    $type = $event['type'] ?? null;
+                    if (in_array($type, ['response.failed', 'response.incomplete', 'error'], true)) {
+                        // Nur kurze Statuskennungen übernehmen, keine rohen API-Meldungen oder Request-Daten.
+                        $details = [$type];
+                        foreach ([
+                            'code' => $event['response']['error']['code'] ?? $event['error']['code'] ?? $event['code'] ?? null,
+                            'reason' => $event['response']['incomplete_details']['reason'] ?? null,
+                        ] as $key => $value) {
+                            if (is_string($value) && preg_match('/\A[a-zA-Z0-9_.-]{1,80}\z/', $value) === 1) {
+                                $details[] = $key . '=' . $value;
+                            }
+                        }
+                        $message = 'Streaming response did not complete successfully: ' . implode(', ', $details);
+                        $context->emit('stream_failure', message: $message, level: 'warning');
+                        throw new \RuntimeException($message);
                     }
                 })
                 : $this->openAiClient->createResponse($request);
@@ -670,9 +683,16 @@ final class PhoreAi
             // Serialization failures are internal errors, not a reason to repeat a side effect.
             $output = $this->serializeCallbackResult($result);
             $status = 'ok';
-            if ($skillEvent === null) {
-                $context->emit('tool_result', [...$details, 'bytes' => strlen(is_string($output) ? $output : Toolkit::jsonEncode($output))]);
-            }
+            // Vor dem Senden nur Format und Größe loggen, auch bei Skill-Ausgaben.
+            $isText = is_string($output);
+            $format = $isText ? 'string' : 'content array (JSON)';
+            $bytes = strlen($isText ? $output : Toolkit::jsonEncode($output));
+            $context->emit(
+                'tool_result',
+                [...$details, 'bytes' => $bytes, 'format' => $format],
+                sprintf('Tool %s: %s, %d Bytes', $tool->name(), $format, $bytes),
+                $isText && $bytes > 10485760 ? 'warning' : 'info',
+            );
             return $output;
         } catch (\Throwable $error) {
             $context->error($error, $details);
@@ -703,6 +723,8 @@ final class PhoreAi
             } else {
                 $context->emit('tool_end', [...$details, 'status' => $status, 'duration' => $duration]);
             }
+            // Auch fehlgeschlagene Callback-Aufrufe zeigen den zuletzt gemessenen Kontext.
+            $context->logToolContext($tool->name());
         }
     }
 

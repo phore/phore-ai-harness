@@ -62,6 +62,7 @@ final class AiFileSystem
      * @throws InvalidArgumentException For invalid IDs, aliases or descriptions.
      * @param int|null $umask Optional creation mask applied to 0777 for new files; null preserves temporary-file defaults.
      *                       Existing files retain their permissions. The process umask is never changed.
+     * @param ?\Phore\AiHarness\Logging\LoggerInterface $logger Optional für geroutete Tool-Zugriffe: Lesen auf info, Schreiben auf notice, Fehler auf warning.
      * @example $fs = new AiFileSystem('/srv/app', id: 'app');
      * @see getContext()
      * @see addRoot()
@@ -76,6 +77,7 @@ final class AiFileSystem
         ?FileSystemPolicy $policy = null,
         ?RevisionStoreInterface $revisionStore = null,
         private readonly ?int $umask = null,
+        public readonly ?\Phore\AiHarness\Logging\LoggerInterface $logger = null,
     ) {
         if ($umask !== null && ($umask < 0 || $umask > 0777)) {
             throw new InvalidArgumentException('AI filesystem umask must be between 0000 and 0777.');

@@ -16,6 +16,7 @@ final class RunContext
     public float $durationApi = 0;
     public float $durationTools = 0;
     public bool $retryPending = false;
+    private ?int $latestInputTokens = null;
     private array $tokens = ['input_tokens' => null, 'output_tokens' => null, 'total_tokens' => null, 'cached_tokens' => null];
     private readonly int $started;
     private readonly string $id;
@@ -63,8 +64,18 @@ final class RunContext
         $this->emit('response_end');
     }
 
+    /** Meldet den zuletzt gemessenen Kontext, bevor neue Tool-Ergebnisse gesendet werden. */
+    public function logToolContext(string $tool): void
+    {
+        $this->emit('tool_context', ['tool' => $tool, 'input_tokens' => $this->latestInputTokens], level: 'info');
+    }
+
     public function addResponse(AiResponse $response): void
     {
+        $input = $response->body['usage']['input_tokens'] ?? null;
+        if (is_int($input) && $input >= 0) {
+            $this->latestInputTokens = $input;
+        }
         foreach ($this->tokens as $key => $total) {
             $value = $key === 'cached_tokens'
                 ? ($response->body['usage']['input_tokens_details']['cached_tokens'] ?? null)
@@ -89,7 +100,8 @@ final class RunContext
         }
         $this->errors++;
         // Exception messages may contain arbitrary credentials or full request bodies.
-        $this->emit('warning', [...$context, 'error_class' => $error::class, 'retry' => $this->retries], $message, 'warning');
+        $detail = sprintf('%s (%s, code %s, retries %d)', $message, $error::class, $error->getCode(), $this->retries);
+        $this->emit('warning', [...$context, 'error_class' => $error::class, 'retry' => $this->retries], $detail, 'warning');
     }
 
     public function finish(string $status): void

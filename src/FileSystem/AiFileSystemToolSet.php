@@ -30,7 +30,7 @@ final class AiFileSystemToolSet implements AiToolSet
             new CallbackTool(
                 [$this, 'listFiles'],
                 'filesystem_list',
-                'List files or directories in one AI filesystem with bounded pagination.',
+                'List files or directories in one AI filesystem with bounded pagination. To list the filesystem root, omit path or pass an empty string. Do not use "." as the path.',
             ),
             new CallbackTool(
                 [$this, 'grep'],
@@ -142,6 +142,7 @@ final class AiFileSystemToolSet implements AiToolSet
                 $offset,
                 $limit,
             ),
+            __FUNCTION__, $path,
         );
     }
 
@@ -165,6 +166,7 @@ final class AiFileSystemToolSet implements AiToolSet
                 $offset,
                 $limit,
             ),
+            __FUNCTION__, $path,
         );
     }
 
@@ -182,6 +184,7 @@ final class AiFileSystemToolSet implements AiToolSet
                 $startLine,
                 $lineCount,
             ),
+            __FUNCTION__, $path,
         );
     }
 
@@ -194,6 +197,7 @@ final class AiFileSystemToolSet implements AiToolSet
         return $this->call(
             $fileSystemId,
             static fn (AiFileSystem $fileSystem): array => $fileSystem->edit($path, $edits),
+            __FUNCTION__, $path,
         );
     }
 
@@ -212,6 +216,7 @@ final class AiFileSystemToolSet implements AiToolSet
         return $this->call(
             $fileSystemId,
             static fn (AiFileSystem $fileSystem): array => $fileSystem->create($path, $content),
+            __FUNCTION__, $path,
         );
     }
 
@@ -227,6 +232,7 @@ final class AiFileSystemToolSet implements AiToolSet
         return $this->call(
             $fileSystemId,
             static fn (AiFileSystem $fileSystem): array => $fileSystem->delete($path),
+            __FUNCTION__, $path,
         );
     }
 
@@ -242,22 +248,23 @@ final class AiFileSystemToolSet implements AiToolSet
         return $this->call(
             $fileSystemId,
             static fn (AiFileSystem $fileSystem): array => $fileSystem->move($path, $targetPath),
+            __FUNCTION__, $path, $targetPath,
         );
     }
 
     public function createDirectory(string $fileSystemId, string $path): array
     {
-        return $this->call($fileSystemId, static fn (AiFileSystem $fs): array => $fs->createDirectory($path));
+        return $this->call($fileSystemId, static fn (AiFileSystem $fs): array => $fs->createDirectory($path), __FUNCTION__, $path);
     }
 
     public function deleteDirectory(string $fileSystemId, string $path): array
     {
-        return $this->call($fileSystemId, static fn (AiFileSystem $fs): array => $fs->deleteDirectory($path));
+        return $this->call($fileSystemId, static fn (AiFileSystem $fs): array => $fs->deleteDirectory($path), __FUNCTION__, $path);
     }
 
     public function moveDirectory(string $fileSystemId, string $path, string $targetPath): array
     {
-        return $this->call($fileSystemId, static fn (AiFileSystem $fs): array => $fs->moveDirectory($path, $targetPath));
+        return $this->call($fileSystemId, static fn (AiFileSystem $fs): array => $fs->moveDirectory($path, $targetPath), __FUNCTION__, $path, $targetPath);
     }
 
     /** @return array<string, mixed> */
@@ -266,6 +273,7 @@ final class AiFileSystemToolSet implements AiToolSet
         return $this->call(
             $fileSystemId,
             static fn (AiFileSystem $fileSystem): array => $fileSystem->history($path, $limit),
+             __FUNCTION__, $path,
         );
     }
 
@@ -275,20 +283,33 @@ final class AiFileSystemToolSet implements AiToolSet
         return $this->call(
             $fileSystemId,
             static fn (AiFileSystem $fileSystem): array => $fileSystem->restore($path, $revisionId),
+             __FUNCTION__, $path,
         );
     }
 
-    private function call(string $fileSystemId, callable $callback): array
+    private function call(string $fileSystemId, callable $callback, string $operation, string $path, ?string $targetPath = null): array
     {
         $fileSystem = $this->fileSystems[$fileSystemId] ?? null;
         if ($fileSystem === null) {
             throw new RecoverableToolException('Unknown AI filesystem ID: ' . $fileSystemId);
         }
 
-        try {
-            return $callback($fileSystem);
-        } catch (InvalidArgumentException|LogicException|RuntimeException $error) {
-            throw new RecoverableToolException($error->getMessage(), previous: $error);
+        // Der Router erfasst Operation und Pfad, aber keine Dateiinhalte oder Suchbegriffe.
+        $label = sprintf('Filesystem %s: %s %s', $fileSystemId, $operation, $path === '' ? '.' : $path);
+        if ($targetPath !== null) {
+            $label .= ' -> ' . $targetPath;
         }
+        try {
+            $result = $callback($fileSystem);
+        } catch (\Throwable $error) {
+            $fileSystem->logger?->log(new \Phore\AiHarness\Logging\LogEvent('', 'filesystem', 'warning', $label . ' failed (' . $error::class . ')'));
+            if ($error instanceof InvalidArgumentException || $error instanceof LogicException || $error instanceof RuntimeException) {
+                throw new RecoverableToolException($error->getMessage(), previous: $error);
+            }
+            throw $error;
+        }
+        $level = in_array($operation, ['listFiles', 'grep', 'readFile', 'history'], true) ? 'info' : 'notice';
+        $fileSystem->logger?->log(new \Phore\AiHarness\Logging\LogEvent('', 'filesystem', $level, $label));
+        return $result;
     }
 }
