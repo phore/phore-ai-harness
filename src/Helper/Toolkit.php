@@ -99,7 +99,7 @@ final class Toolkit
     /**
      * Creates a configured `PhoreAi` facade from common function options.
      *
-     * @param array{client?: OpenAiClient|string|null, model?: string, reasoning?: array<string, mixed>|null, timeout?: int, connect_timeout?: int, debug_log?: bool|LoggerInterface, max_output_tokens?: ?int} $options
+     * @param array{client?: OpenAiClient|string|null, model?: string, reasoning?: array<string, mixed>|null, timeout?: int, connect_timeout?: int, debug_log?: bool|LoggerInterface, max_output_tokens?: ?int, max_callback_rounds?: ?int} $options
      */
     public static function createAi(array $options = []): PhoreAi
     {
@@ -128,9 +128,14 @@ final class Toolkit
             $ai = $ai->withModel($options['model']);
         }
 
+        $maxCallbackRounds = $options['max_callback_rounds'] ?? null;
+        if ($maxCallbackRounds !== null && !is_int($maxCallbackRounds)) {
+            throw new InvalidArgumentException('max_callback_rounds must be an integer or null.');
+        }
+
         return $ai->withResponseOptions(
             $options['max_output_tokens'] ?? null,
-        );
+        )->withMaxCallbackRounds($maxCallbackRounds);
     }
 
     private static function createOpenAiClientWithTimeouts(?string $dsn, int $timeout, int $connectTimeout): OpenAiClient

@@ -183,7 +183,7 @@ final class DebugLoggingTest extends TestCase
     {
         $logger = new RecordingDebugLogger();
         try {
-            (new PhoreAi($this->client('limit')))->withLogger($logger)->with(
+            (new PhoreAi($this->client('limit')))->withMaxCallbackRounds(5)->withLogger($logger)->with(
                 new CallbackTool(static function (int $value): int { throw new RecoverableToolException('Correct the value.'); }, name: 'sample'),
             )->run();
             self::fail('Expected round-limit exception.');
@@ -191,8 +191,24 @@ final class DebugLoggingTest extends TestCase
             self::assertStringContainsString('round limit', $error->getMessage());
         }
         self::assertSame('failed', $logger->stats()->status);
-        self::assertSame(PhoreAi::MAX_CALLBACK_ROUNDS, $logger->stats()->tool_calls);
-        self::assertSame(PhoreAi::MAX_CALLBACK_ROUNDS + 1, $logger->stats()->requests);
+        self::assertSame(5, $logger->stats()->tool_calls);
+        self::assertSame(6, $logger->stats()->requests);
+    }
+
+    public function testUnlimitedAndExactConfiguredRoundLimitAllowFinalResponse(): void
+    {
+        foreach ([null, 8] as $limit) {
+            $logger = new RecordingDebugLogger();
+            $ai = (new PhoreAi($this->client('limit')))->withLogger($logger);
+            if ($limit !== null) {
+                $ai = $ai->withMaxCallbackRounds($limit);
+            }
+            $ai = $ai->with(new CallbackTool(static fn (int $value): int => $value, name: 'sample'));
+
+            self::assertSame("First line\nSecond line", $ai->run());
+            self::assertSame(8, $logger->stats()->tool_calls);
+            self::assertSame(9, $logger->stats()->requests);
+        }
     }
 
     public function testOrdinaryExceptionIsFatalWithLoggingAndDoesNotLeakItsMessage(): void

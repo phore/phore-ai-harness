@@ -25,6 +25,8 @@ default client/credentials; the default reasoning setting is low effort.
 
 Use the optional context or per-call option `max_output_tokens` (positive
 integer) to limit output. Null or omission uses the provider default.
+Use `max_callback_rounds` (positive integer) to bound callback rounds per
+operation, including corrections. Null or omission allows unlimited rounds.
 
 ### API credentials
 
@@ -537,8 +539,10 @@ Text and structured requests stream while logging is enabled; images remain
 non-streaming. Return values and STDOUT are unaffected.
 
 Only `RecoverableToolException` becomes retryable tool feedback. Other callback,
-binding, transport, authentication and serialization errors propagate. The hard
-limit is five callback rounds per invocation. Logs redact tool arguments and
+binding, transport, authentication and serialization errors propagate. Set
+`max_callback_rounds` to bound callback rounds per invocation; by default they
+are unlimited. Remaining calls raise `CallbackRoundLimitException` when the
+configured limit is reached. Logs redact tool arguments and
 known credentials; results are represented by byte counts.
 
 The final `RunStatistics` event contains status, request/tool/error/retry counts,

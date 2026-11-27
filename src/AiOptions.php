@@ -27,11 +27,13 @@ final readonly class AiOptions
         'connect_timeout',
         'debug_log',
         'max_output_tokens',
+        'max_callback_rounds',
     ];
 
     /**
      * @param array<string, mixed>|null $reasoning Responses API reasoning config.
-     * @throws InvalidArgumentException For non-positive timeout values.
+     * @param int|null $maxCallbackRounds Positive limit per operation, or null for unlimited callback rounds.
+     * @throws InvalidArgumentException For non-positive timeout or limit values.
      * @example $options = new AiOptions(model: 'gpt-5-mini', debugLog: true);
      * @see fromArray()
      */
@@ -43,9 +45,13 @@ final readonly class AiOptions
         public ?int $connectTimeout = null,
         public bool|LoggerInterface $debugLog = false,
         public ?int $maxOutputTokens = null,
+        public ?int $maxCallbackRounds = null,
     ) {
         if ($maxOutputTokens !== null && $maxOutputTokens <= 0) {
             throw new InvalidArgumentException('max_output_tokens must be a positive integer.');
+        }
+        if ($maxCallbackRounds !== null && $maxCallbackRounds <= 0) {
+            throw new InvalidArgumentException('max_callback_rounds must be a positive integer.');
         }
         if ($timeout !== null && $timeout <= 0) {
             throw new InvalidArgumentException('timeout must be a positive integer.');
@@ -115,6 +121,11 @@ final readonly class AiOptions
             throw new InvalidArgumentException('max_output_tokens must be an integer or null.');
         }
 
+        $maxCallbackRounds = $options['max_callback_rounds'] ?? null;
+        if ($maxCallbackRounds !== null && !is_int($maxCallbackRounds)) {
+            throw new InvalidArgumentException('max_callback_rounds must be an integer or null.');
+        }
+
         return new self(
             client: $client,
             model: $model,
@@ -123,13 +134,14 @@ final readonly class AiOptions
             connectTimeout: $connectTimeout,
             debugLog: $debugLog,
             maxOutputTokens: $maxOutputTokens,
+            maxCallbackRounds: $maxCallbackRounds,
         );
     }
 
     /**
      * Convert to the existing common helper option names.
      *
-     * @return array{client: OpenAiClient|string|null, model: ?string, reasoning: array<string, mixed>|null, timeout: ?int, connect_timeout: ?int, debug_log: bool|LoggerInterface, max_output_tokens: ?int}
+     * @return array{client: OpenAiClient|string|null, model: ?string, reasoning: array<string, mixed>|null, timeout: ?int, connect_timeout: ?int, debug_log: bool|LoggerInterface, max_output_tokens: ?int, max_callback_rounds: ?int}
      * @example $array = $options->toArray();
      * @see fromArray()
      */
@@ -143,6 +155,7 @@ final readonly class AiOptions
             'connect_timeout' => $this->connectTimeout,
             'debug_log' => $this->debugLog,
             'max_output_tokens' => $this->maxOutputTokens,
+            'max_callback_rounds' => $this->maxCallbackRounds,
         ];
     }
 }

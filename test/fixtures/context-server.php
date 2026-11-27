@@ -14,6 +14,19 @@ $hasImage = in_array('image_generation', array_column($request['tools'] ?? [], '
 $format = $request['text']['format'] ?? null;
 $output = [];
 $text = 'ready';
+$limitScenario = in_array($scenario, ['text-limit', 'file-limit'], true);
+$round = 0;
+if ($limitScenario) {
+    $previous = $request['previous_response_id'] ?? '';
+    $round = str_starts_with($previous, 'ctx_limit_') ? (int) substr($previous, 10) + 1 : 0;
+    // Fail fast if the configured callback limit stops working.
+    if ($round >= 8) {
+        http_response_code(400);
+        header('Content-Type: application/json');
+        echo '{"error":{"message":"fixture callback safety limit reached"}}';
+        return;
+    }
+}
 
 if ($scenario === 'request-failure' && str_contains(json_encode($input), 'fail-now')) {
     http_response_code(400);
@@ -110,7 +123,7 @@ if ($text !== '') {
     $output[] = ['type' => 'message', 'content' => [['type' => 'output_text', 'text' => $text]]];
 }
 $body = [
-    'id' => 'ctx_' . bin2hex(random_bytes(8)),
+    'id' => $limitScenario ? 'ctx_limit_' . $round : 'ctx_' . bin2hex(random_bytes(8)),
     'status' => 'completed',
     'model' => $request['model'],
     'output' => $output,
