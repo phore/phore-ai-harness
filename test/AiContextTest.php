@@ -753,16 +753,16 @@ final class AiContextTest extends TestCase
         self::assertSame('ready', $this->context()->text('Generate.', null));
     }
 
-    public function testFiveRoundLimitAlsoAppliesWithoutLogging(): void
+    public function testConfiguredRoundLimitAlsoAppliesWithoutLogging(): void
     {
         $context = $this->context('text-limit');
         $before = get_ai_usage_stats()['requests'];
         try {
-            $context->text('Edit.', 'one two');
+            $context->text('Edit.', 'one two', options: ['max_callback_rounds' => 5]);
             self::fail('Expected callback limit.');
         } catch (CallbackRoundLimitException) {
         }
-        self::assertSame(PhoreAi::MAX_CALLBACK_ROUNDS + 1, get_ai_usage_stats()['requests'] - $before);
+        self::assertSame(6, get_ai_usage_stats()['requests'] - $before);
         self::assertNull($context->getResponseId());
     }
 
@@ -782,7 +782,9 @@ final class AiContextTest extends TestCase
         file_put_contents($second, 'repeat one; repeat two');
         try {
             try {
-                phore_ai_edit_file('Edit both.', [$first, $second], options: ['ai_context' => $this->context($scenario)]);
+                phore_ai_edit_file('Edit both.', [$first, $second], options: [
+                    'ai_context' => new AiContext(options: new AiOptions(client: $this->client($scenario), maxCallbackRounds: 5)),
+                ]);
                 self::assertFalse($fails, 'Expected incomplete edit exception.');
             } catch (FileEditException $error) {
                 self::assertTrue($fails);

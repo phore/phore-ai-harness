@@ -20,12 +20,28 @@ final class ContextEdgeCasesTest extends TestCase
             'model' => 'gpt-5-mini',
             'reasoning' => ['effort' => 'medium'],
             'debug_log' => true,
+            'max_callback_rounds' => 12,
         ]);
 
         self::assertSame($options, AiOptions::fromArray($options));
         self::assertSame('gpt-5-mini', $options->toArray()['model']);
         self::assertSame(['effort' => 'medium'], $options->toArray()['reasoning']);
         self::assertTrue($options->toArray()['debug_log']);
+        self::assertSame(12, $options->maxCallbackRounds);
+        self::assertSame(12, $options->toArray()['max_callback_rounds']);
+        self::assertNull((new AiOptions())->maxCallbackRounds);
+    }
+
+    public function testAiOptionsRejectNonPositiveCallbackLimit(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        AiOptions::fromArray(['max_callback_rounds' => 0]);
+    }
+
+    public function testAiOptionsRejectNonIntegerCallbackLimit(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        AiOptions::fromArray(['max_callback_rounds' => '5']);
     }
 
     public function testAiOptionsRejectUnknownArrayKeys(): void

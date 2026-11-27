@@ -153,8 +153,8 @@ The prompt contains the current target, target schema, limits, sequential rules
 and data-derived examples (field replacement and combined list operations when
 those shapes exist). The final output contains one patch batch. Explicit tools
 in the input prompt list remain rejected before execution. Shared `AiContext`
-callbacks may run first, using the same five-round callback budget and retaining
-the output schema in each follow-up request. Without shared callbacks the
+callbacks may run first, sharing the optional `max_callback_rounds` budget and
+retaining the output schema in each follow-up request. Without shared callbacks the
 existing single-request path remains unchanged. Invalid final patches are not
 repaired automatically, and no silent replacement fallback runs. Unsupported
 requests fail closed. See the

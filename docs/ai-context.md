@@ -863,12 +863,14 @@ Inhalte beim regulären Dateiaustausch, ersetzt aber keine gemeinsame Sperre
 gegen nicht kooperierende externe Writer. Inode, Eigentümer, ACLs und andere
 Dateisystem-Metadaten sind keine zugesicherte Transaktionssemantik.
 
-Nach maximal **fünf Callback-Runden insgesamt** endet der Ablauf. Dazu zählen
-Schreibversuche, Korrekturen und gemeinsame Rückfragen; mehrere Callback-Calls
-in einer Modellantwort gehören zu derselben Runde. Ein zusätzlicher Request
-kann nach der fünften Runde noch die abschließende Antwort liefern, es wird
-aber kein sechster Callback-Durchlauf ausgeführt. Die Grenze gilt pro
-Funktions-/Methodenaufruf, nicht für die Lebensdauer des Kontexts.
+Standardmäßig sind Callback-Runden unbegrenzt. Mit `max_callback_rounds`
+(positiver Integer oder `null` für unbegrenzt) lässt sich eine Grenze als
+Context-Default oder Per-Call-Option setzen. Dazu zählen Schreibversuche,
+Korrekturen und gemeinsame Rückfragen; mehrere Callback-Calls in einer
+Modellantwort gehören zu derselben Runde. Ein zusätzlicher Request kann nach
+der letzten erlaubten Runde noch die abschließende Antwort liefern. Weitere
+Callbacks lösen vor ihrer Ausführung `CallbackRoundLimitException` aus. Die
+Grenze gilt pro Funktions-/Methodenaufruf, nicht für die Lebensdauer des Kontexts.
 
 Bei offenen Datei-Fehlern oder ausgeschöpftem Callback-Limit liefert
 `FileEditException::$files` die bisherigen Ergebnisse. Erfolgreiche Dateien

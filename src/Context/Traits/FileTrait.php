@@ -48,7 +48,7 @@ trait FileTrait
         );
         $items[] = new CallbackTool([$editor, 'write'], 'write_files', 'Apply edits to supplied target files. Each entry contains filename (targetFileN alias) and edits (search/replacement pairs). Each file is validated independently; successful files remain applied.');
 
-        // Gemeinsames Rundenlimit verwenden; Teilerfolge auch im Fehlerfall offenlegen.
+        // Teilerfolge auch bei Erreichen eines optionalen Rundenlimits offenlegen.
         try {
             $result = $this->executeAi(
                 $items,

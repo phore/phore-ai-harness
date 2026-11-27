@@ -30,6 +30,7 @@ use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\PromptType\SystemPrompt;
 use Phore\AiHarness\Result\DoResultType;
 use Phore\AiHarness\Result\ImageResultType;
+use Phore\AiHarness\ToolType\CallbackRoundLimitException;
 use Phore\AiHarness\ToolType\CallbackTool;
 use Phore\AiHarness\ToolType\ImageGenerationTool;
 use Phore\AiHarness\ToolType\RecoverableToolException;
@@ -40,8 +41,7 @@ use Phore\Schema\Parser\SchemaParser;
 
 final class PhoreAi
 {
-    /** Hard limit on executed callback rounds, including correction attempts. */
-    /** @deprecated Callback rounds are no longer limited; retained for source compatibility. */
+    /** @deprecated Use an explicit max_callback_rounds option instead; retained for source compatibility. */
     public const MAX_CALLBACK_ROUNDS = 5;
 
     private OpenAiClient $openAiClient;
@@ -52,6 +52,7 @@ final class PhoreAi
     /** @var array<string, mixed>|null */
     private ?array $reasoning = ['effort' => 'low'];
     private array $responseOptions = [];
+    private ?int $maxCallbackRounds = null;
 
     public function __construct(OpenAiClient|string|null $client = null, private string $model = 'gpt-5-mini', private ?LoggerInterface $logger = null)
     {
@@ -119,6 +120,28 @@ final class PhoreAi
         return clone($this, ['responseOptions' => array_filter([
             'max_output_tokens' => $maxOutputTokens,
         ], static fn (mixed $value): bool => $value !== null)]);
+    }
+
+    /**
+     * Set a per-run callback round limit on a new facade; null is unlimited.
+     * Each model response containing callback calls counts as one round,
+     * including correction attempts. A final response after the last round
+     * is allowed; further callbacks fail before execution.
+     *
+     * @param int|null $maxCallbackRounds Positive round limit or null.
+     * @return self A configured clone; the original remains unchanged.
+     * @throws InvalidArgumentException For a non-positive limit.
+     * @example $ai = $ai->withMaxCallbackRounds(20);
+     * @see AiOptions
+     * @see CallbackRoundLimitException
+     */
+    public function withMaxCallbackRounds(?int $maxCallbackRounds): self
+    {
+        if ($maxCallbackRounds !== null && $maxCallbackRounds <= 0) {
+            throw new InvalidArgumentException('max_callback_rounds must be a positive integer.');
+        }
+
+        return clone($this, ['maxCallbackRounds' => $maxCallbackRounds]);
     }
 
     public function withModel(string $model): self
@@ -444,10 +467,15 @@ final class PhoreAi
             return $response;
         }
 
-        // Tool-Aufrufe ohne feste Rundengrenze bis zur abschliessenden Antwort fortsetzen.
-        while (true) {
+        // Standardmäßig unbegrenzt; ein konfiguriertes Limit gilt auch für Korrekturen.
+        for ($iteration = 0; ; $iteration++) {
             if (!$this->hasCallbackCalls($response, $callbackTools)) {
                 return $response;
+            }
+            if ($this->maxCallbackRounds !== null && $iteration >= $this->maxCallbackRounds) {
+                $error = new CallbackRoundLimitException('Callback round limit (' . $this->maxCallbackRounds . ') reached with unresolved tool calls.');
+                $context?->error($error, ['limit' => $this->maxCallbackRounds], 'Callback round limit reached; unresolved tool calls remain.');
+                throw $error;
             }
             $responseId = $response->getId();
             if ($responseId === null) {
@@ -467,7 +495,6 @@ final class PhoreAi
             }
             $response = $this->sendRequest($nextRequest, $context);
         }
-
     }
 
     private function hasCallbackCalls(AiResponse $response, array $callbackTools): bool

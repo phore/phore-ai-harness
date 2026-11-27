@@ -15,7 +15,8 @@ if ($scenario === 'transport') {
 $output = [];
 $text = "First line\nSecond line";
 $toolScenario = in_array($scenario, ['retry', 'limit', 'business', 'task', 'internal', 'binding', 'named', 'serialize', 'two-errors', 'invalid-json'], true);
-if ($toolScenario && ($round === 0 || $scenario === 'limit')) {
+// Finite fixture: even a broken round limit cannot hang the test suite.
+if ($toolScenario && ($round === 0 || ($scenario === 'limit' && $round < 8))) {
     $args = match ($scenario) {
         'retry', 'limit', 'two-errors' => '{"value":0}',
         'invalid-json' => '{bad-json',

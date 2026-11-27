@@ -20,7 +20,7 @@ final class RecoverableToolException extends RuntimeException
      *
      * @param array<string, mixed>|null $result Successful/failed batch outcomes.
      * @example throw new RecoverableToolException('Retry failed files only.', result: ['files' => $outcomes]);
-     * @see \Phore\AiHarness\PhoreAi::MAX_CALLBACK_ROUNDS
+     * @see \Phore\AiHarness\PhoreAi::withMaxCallbackRounds()
      */
     public function __construct(string $message = '', int $code = 0, ?Throwable $previous = null, public readonly ?array $result = null)
     {

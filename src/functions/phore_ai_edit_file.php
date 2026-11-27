@@ -15,7 +15,7 @@ use Phore\AiHarness\ToolType\ToolType;
  * unreadable files fail explicitly instead of being mistaken for empty files.
  * One callback contains all edits per file. A failed file is left unchanged;
  * other successful files remain written and are not replayed on correction.
- * The shared five-round limit bounds all callbacks, including user questions.
+ * The optional max_callback_rounds limit includes user questions and corrections.
  *
  * @template T of object
  * @param string|PromptType|ToolType|array $prompts Instructions and sources/tools.
