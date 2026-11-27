@@ -10,6 +10,7 @@ use Phore\AiHarness\Client\AiRequest;
 use Phore\AiHarness\Helper\Toolkit;
 use Phore\AiHarness\PromptType\AiInstruction;
 use Phore\AiHarness\PromptType\DefaultSystemPrompt;
+use Phore\AiHarness\PromptType\MultiPrompt;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\PromptType\SystemPrompt;
 use Phore\AiHarness\ToolType\CallbackTool;
@@ -20,6 +21,7 @@ use Phore\Schema\Generator\JsonSchema\JsonSchemaGeneratorOptions;
 use Phore\Schema\Parser\SchemaParser;
 use Phore\Schema\Schema\FunctionParameterSchema;
 use Phore\Schema\Schema\FunctionReturnSchema;
+use Phore\Schema\Schema\Type\ClassReferenceSchemaType;
 use Phore\Schema\Schema\Type\SchemaType;
 
 /**
@@ -196,8 +198,12 @@ final readonly class OpenAiPromptTypeConverter
             return 'Returns: void.';
         }
 
-        $jsonSchema = $this->schemaTypeToJsonSchema($return->type);
-        $description = 'Returns JSON matching this schema: ' . Toolkit::jsonEncode($jsonSchema);
+        if ($return->type instanceof ClassReferenceSchemaType && $return->type->className === MultiPrompt::class) {
+            $description = 'Returns ordered multimodal content (text, images or files), not JSON.';
+        } else {
+            $jsonSchema = $this->schemaTypeToJsonSchema($return->type);
+            $description = 'Returns JSON matching this schema: ' . Toolkit::jsonEncode($jsonSchema);
+        }
 
         if ($return->description !== '') {
             $description .= ' ' . $return->description;

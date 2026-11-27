@@ -428,6 +428,39 @@ $status = $context->text('What is the customer status?');
 needed yet. `RecoverableToolException` is the only callback failure returned to
 the model as retryable tool feedback; other exceptions abort the run.
 
+### Multimodal callback results
+
+Return a `MultiPrompt` from a callback to deliver multiple images, text or
+structured source data in one tool response. Each image carries its own
+`instructions` and optional `alias`; no separate text prompt is needed.
+
+```php
+use Phore\AiHarness\PromptType\ImagePrompt;
+use Phore\AiHarness\PromptType\MultiPrompt;
+use Phore\AiHarness\ToolType\CallbackTool;
+
+$tool = new CallbackTool(
+    static fn (): MultiPrompt => new MultiPrompt([
+        ImagePrompt::fromFile('desktop.png', instructions: 'Desktop viewport 1440 × 900. Inspect spacing.'),
+        ImagePrompt::fromFile('mobile.png', instructions: 'Mobile viewport 393 × 852. Inspect wrapping.'),
+    ]),
+    name: 'load_screenshots',
+);
+```
+
+Register the tool on an `AiContext` as above. Image instructions are
+application-provided guidance; text embedded in screenshots remains untrusted
+by default. The wrapper is a callback return value, not an ordinary input
+prompt. Use a non-empty list of prompt objects that convert to text, images or
+files (e.g. `TextPrompt`, `ImagePrompt`, `AiImage`, `StructPrompt` or `FilePrompt`).
+Audio output is not supported by the function tool API. Ordinary string, array
+and DTO returns retain their previous text/JSON behavior. A vision-capable model
+is required for images.
+
+See [example 05](examples/05-callback-tool.php) for a complete runnable
+comparison with two screenshot files:
+`php examples/05-callback-tool.php desktop.png mobile.png`.
+
 ### Simple typed decisions
 
 ```php

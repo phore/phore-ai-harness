@@ -25,6 +25,7 @@ use Phore\AiHarness\OutputFormat\StructOutput;
 use Phore\AiHarness\OutputFormat\StructPatchOutput;
 use Phore\AiHarness\OutputFormat\TextOutput;
 use Phore\AiHarness\PromptType\ImagePrompt;
+use Phore\AiHarness\PromptType\MultiPrompt;
 use Phore\AiHarness\PromptType\PromptType;
 use Phore\AiHarness\PromptType\SystemPrompt;
 use Phore\AiHarness\Result\DoResultType;
@@ -705,6 +706,17 @@ final class PhoreAi
     /** @return string|list<array<string, mixed>> */
     private function serializeCallbackResult(mixed $result): string|array
     {
+        if ($result instanceof MultiPrompt) {
+            // Nur von Function-Tool-Outputs unterstützte Content-Typen übertragen.
+            $sections = (new OpenAiPromptToContentConverter())->convert($result->prompts);
+            foreach ($sections as $section) {
+                if (!in_array($section['type'], ['input_text', 'input_image', 'input_file'], true)) {
+                    throw new InvalidArgumentException('Unsupported MultiPrompt tool output type: ' . $section['type']);
+                }
+            }
+
+            return $sections;
+        }
         if ($result instanceof AiImage || $result instanceof ImagePrompt) {
             return (new OpenAiPromptToContentConverter())->convert($result);
         }

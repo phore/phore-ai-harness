@@ -5,6 +5,9 @@ declare(strict_types=1);
 use Phore\AiHarness\Client\OpenAiClient;
 use Phore\AiHarness\Keystore\Keystore;
 use Phore\AiHarness\PhoreAi;
+use Phore\AiHarness\PromptType\ImagePrompt;
+use Phore\AiHarness\PromptType\MultiPrompt;
+use Phore\AiHarness\PromptType\StructPrompt;
 use Phore\AiHarness\PromptType\TextPrompt;
 use Phore\AiHarness\ToolType\CallbackTool;
 use Phore\AiHarness\ToolType\CodeInterpreterTool;
@@ -114,6 +117,51 @@ final class PhoreAiTest extends TestCase
         ), '{}');
 
         self::assertSame('file content', $result);
+    }
+
+    public function testCallbackReturnsOrderedMultimodalContent(): void
+    {
+        $phoreAi = new PhoreAi('openai:test-key');
+        $method = new ReflectionMethod($phoreAi, 'invokeCallbackTool');
+        $tool = new CallbackTool(
+            static fn (): MultiPrompt => new MultiPrompt([
+                new ImagePrompt(
+                    'https://example.com/desktop.png',
+                    alias: 'desktop',
+                    instructions: 'Desktop 1440 × 900. Inspect spacing.',
+                ),
+                new ImagePrompt(
+                    'https://example.com/mobile.png',
+                    instructions: 'Mobile 393 × 852. Inspect wrapping.',
+                ),
+                new StructPrompt(['gap' => 24], instructions: 'Computed styles in CSS pixels.'),
+            ]),
+            name: 'capture',
+        );
+
+        $result = $method->invoke($phoreAi, $tool, '{}');
+
+        self::assertSame(['input_text', 'input_image', 'input_text', 'input_image', 'input_text'], array_column($result, 'type'));
+        self::assertStringContainsString('Reference alias: desktop', $result[0]['text']);
+        self::assertStringContainsString('Desktop 1440 × 900. Inspect spacing.', $result[0]['text']);
+        self::assertStringContainsString('external/untrusted data', $result[0]['text']);
+        self::assertSame('https://example.com/desktop.png', $result[1]['image_url']);
+        self::assertStringContainsString('Mobile 393 × 852. Inspect wrapping.', $result[2]['text']);
+        self::assertSame('https://example.com/mobile.png', $result[3]['image_url']);
+        self::assertStringContainsString('Computed styles in CSS pixels.', $result[4]['text']);
+        self::assertStringContainsString('"gap": 24', $result[4]['text']);
+        self::assertStringContainsString('ordered multimodal content', $tool->toArray()['description']);
+    }
+
+    public function testPlainCallbackArraysRemainJson(): void
+    {
+        $method = new ReflectionMethod(new PhoreAi('openai:test-key'), 'invokeCallbackTool');
+        $result = $method->invoke(new PhoreAi('openai:test-key'), new CallbackTool(
+            static fn (): array => ['desktop', 'mobile'],
+            name: 'list_views',
+        ), '{}');
+
+        self::assertSame('["desktop","mobile"]', $result);
     }
 
     public function testRejectsCallbackToolArgumentsThatAreJsonArray(): void
