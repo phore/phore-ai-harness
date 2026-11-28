@@ -4,6 +4,13 @@ PHP helpers for the OpenAI Responses API, typed results, shared conversation
 contexts and targeted text/file editing. Prefer the global `phore_ai_*`
 functions for normal use; their existing signatures remain supported.
 
+## Optional Browserless / Chromium tools
+
+An optional Browserless/Chromium integration is available in
+[`src/Tools/Browser/`](src/Tools/Browser/README.md) for bounded screenshots, DOM,
+CSS and console inspection. Applications install its optional browser driver and
+register the tool set explicitly; the harness core has no browser dependency.
+
 ## Quick start: functions first
 
 For a one-shot request, start with the global helper. Common runtime options are
