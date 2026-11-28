@@ -228,21 +228,34 @@ final class SkillCollectionTest extends TestCase
             $callback->invoke($ai, $tools[$name], json_encode($arguments, JSON_THROW_ON_ERROR), 'call_' . $index, $context);
         }
 
+        // Skill-Aktionen getrennt von den allgemeinen Tool-Metadaten prüfen.
+        $skillEvents = array_values(array_filter(
+            $logger->events,
+            static fn (LogEvent $event): bool => str_starts_with($event->type, 'skill'),
+        ));
+        foreach (['tool_result', 'tool_context'] as $type) {
+            self::assertCount(6, array_filter(
+                $logger->events,
+                static fn (LogEvent $event): bool => $event->type === $type,
+            ));
+        }
         self::assertSame(
             ['skill_loaded', 'skill_references_listed', 'skill_reference_read',
                 'skill_assets_listed', 'skill_asset_read', 'skill_executed'],
-            array_column($logger->events, 'type'),
+            array_column($skillEvents, 'type'),
         );
-        self::assertSame('references/help.md', $logger->events[2]->context['path']);
-        self::assertSame('assets/data.bin', $logger->events[4]->context['path']);
-        self::assertSame(0, $logger->events[5]->context['exitCode']);
+        self::assertSame('references/help.md', $skillEvents[2]->context['path']);
+        self::assertSame('assets/data.bin', $skillEvents[4]->context['path']);
+        self::assertSame(0, $skillEvents[5]->context['exitCode']);
+
+        // Kein Event darf Eingaben oder Ausgaben in Context oder Message offenlegen.
         foreach ($logger->events as $event) {
             self::assertArrayNotHasKey('args', $event->context);
             self::assertArrayNotHasKey('stdout', $event->context);
             self::assertArrayNotHasKey('content', $event->context);
         }
         self::assertStringNotContainsString('private-input', json_encode(
-            array_map(static fn (LogEvent $event): array => $event->context, $logger->events),
+            $logger->events,
             JSON_THROW_ON_ERROR,
         ));
     }
